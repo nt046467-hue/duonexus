@@ -454,8 +454,8 @@ export default function ChatPage() {
               </div>
             </TabsContent>
 
-            <TabsContent value="memories" className="flex-1 flex-col overflow-y-auto px-4 m-0 h-full scrollbar-hide data-[state=active]:flex">
-              <div className="pt-0 pb-24 space-y-6">
+            <TabsContent value="memories" className="flex-1 flex-col justify-start overflow-y-auto px-4 m-0 h-full scrollbar-hide data-[state=active]:flex">
+              <div className="w-full pt-0 pb-24 space-y-6">
                 <div className="flex items-center justify-between py-4">
                   <h3 className="font-headline text-xl font-bold tracking-tight">Our Milestones</h3>
                   <Dialog open={isMemoryDialogOpen} onOpenChange={setIsMemoryDialogOpen}>
@@ -537,7 +537,7 @@ export default function ChatPage() {
                     ))}
                   </div>
                 ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center py-24 opacity-30 text-center">
+                  <div className="flex flex-col items-center justify-center py-8 opacity-30 text-center">
                     <div className="p-8 bg-primary/5 rounded-full mb-6">
                       <Camera className="w-16 h-16 text-primary/40" />
                     </div>
