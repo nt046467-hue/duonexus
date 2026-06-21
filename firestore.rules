@@ -1,0 +1,41 @@
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Only authenticated users can access the app
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Messages: Anyone can read/update (for 'seen' status), but only sender can delete
+    match /messages/{messageId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.senderUid == request.auth.uid;
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated() && resource.data.senderUid == request.auth.uid;
+    }
+
+    // Profiles, Presence, Typing, Reactions, Memories: Accessible to the couple
+    match /profiles/{userId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /presence/{userId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /typing/{userId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /reactions/{reactionId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /memories/{memoryId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /stats/{statId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /sparks/{sparkId} {
+      allow read, write: if isAuthenticated();
+    }
+  }
+}

@@ -1,0 +1,112 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light Mode Variables - Soft & Romantic */
+    --background: 342 100% 98%;
+    --foreground: 343 15% 15%;
+    --card: 0 0% 100%;
+    --card-foreground: 343 15% 15%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 343 15% 15%;
+    --primary: 342 75% 55%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 342 100% 95%;
+    --secondary-foreground: 342 75% 55%;
+    --muted: 342 30% 95%;
+    --muted-foreground: 342 10% 45%;
+    --accent: 342 100% 93%;
+    --accent-foreground: 342 75% 55%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 342 25% 90%;
+    --input: 342 25% 90%;
+    --ring: 342 75% 55%;
+    --radius: 1.25rem;
+  }
+
+  .dark {
+    /* Dark Mode Variables - Deep & Elegant */
+    --background: 343 15% 8%;
+    --foreground: 342 10% 95%;
+    --card: 343 15% 11%;
+    --card-foreground: 342 10% 95%;
+    --popover: 343 15% 10%;
+    --popover-foreground: 342 10% 95%;
+    --primary: 342 70% 55%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 300 41% 69%;
+    --secondary-foreground: 343 15% 8%;
+    --muted: 343 15% 18%;
+    --muted-foreground: 342 5% 65%;
+    --accent: 342 50% 25%;
+    --accent-foreground: 342 70% 55%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 343 15% 20%;
+    --input: 343 15% 20%;
+    --ring: 342 70% 55%;
+  }
+}
+
+@layer base {
+  html, body {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    position: fixed;
+  }
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-body antialiased selection:bg-primary/30 transition-colors duration-300;
+    overscroll-behavior-y: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-headline tracking-tight;
+  }
+}
+
+.chat-bubble-spring {
+  animation: spring 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes spring {
+  0% { transform: scale(0.8); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-primary/20 rounded-full;
+}
+
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0);
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.h-dynamic-screen {
+  height: 100dvh;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
