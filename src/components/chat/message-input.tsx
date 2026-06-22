@@ -18,7 +18,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { uploadMedia, mimeToExt } from "@/firebase/storage";
+import { uploadToCloudinary } from "@/lib/cloudinary";
+import { mimeToExt } from "@/lib/mime";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 
@@ -231,14 +232,10 @@ export function MessageInput({
     }
 
     try {
-      const ext = mimeToExt(processedBlob.type);
-      const path = `media/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const url = await uploadMedia(processedBlob, path, (pct) =>
-        setUploadProgress(pct)
-      );
+      const url = await uploadToCloudinary(processedBlob, type, (pct) => setUploadProgress(pct));
       onSendMessage(url, type, waveform);
     } catch (err) {
-      console.warn("Firebase Storage upload failed, attempting fallback to local base64:", err);
+      console.warn("Cloudinary upload failed, attempting fallback to local base64:", err);
 
       // Firestore has a 1MB limit. 800KB is a safe ceiling for base64 size (since base64 is ~33% larger than binary).
       if (processedBlob.size > 800 * 1024) {
