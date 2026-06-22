@@ -297,7 +297,7 @@ export default function ChatPage() {
               tag: "duonexus-msg",
               renotify: true,
               data: { url: window.location.origin },
-            }
+            } as any
           );
         }
       }

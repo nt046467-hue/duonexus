@@ -20,6 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 import { uploadMedia, mimeToExt } from "@/firebase/storage";
 import { Progress } from "@/components/ui/progress";
+import { useToast } from "@/hooks/use-toast";
 
 interface ReplyingTo {
   id: string;
@@ -80,12 +81,77 @@ function createWaveformSampler(stream: MediaStream): {
   };
 }
 
+const blobToBase64 = (blob: Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+      } else {
+        reject(new Error("Failed to convert blob to base64"));
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+};
+
+const resizeAndCompressImage = (blob: Blob): Promise<Blob> => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX_WIDTH = 1000;
+        const MAX_HEIGHT = 1000;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob(
+          (compressedBlob) => {
+            if (compressedBlob) {
+              resolve(compressedBlob);
+            } else {
+              resolve(blob);
+            }
+          },
+          "image/jpeg",
+          0.7
+        );
+      };
+      img.onerror = () => resolve(blob);
+    };
+    reader.onerror = () => resolve(blob);
+    reader.readAsDataURL(blob);
+  });
+};
+
 export function MessageInput({
   onSendMessage,
   onTyping,
   replyingTo,
   onCancelReply,
 }: MessageInputProps) {
+  const { toast } = useToast();
   const [message, setMessage] = useState("");
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
@@ -158,16 +224,43 @@ export function MessageInput({
   ) => {
     setIsUploading(true);
     setUploadProgress(0);
+
+    let processedBlob = blob;
+    if (type === "image") {
+      processedBlob = await resizeAndCompressImage(blob);
+    }
+
     try {
-      const ext = mimeToExt(blob.type);
+      const ext = mimeToExt(processedBlob.type);
       const path = `media/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const url = await uploadMedia(blob, path, (pct) =>
+      const url = await uploadMedia(processedBlob, path, (pct) =>
         setUploadProgress(pct)
       );
       onSendMessage(url, type, waveform);
     } catch (err) {
-      console.error("Upload failed:", err);
-      // TODO: show retry toast
+      console.warn("Firebase Storage upload failed, attempting fallback to local base64:", err);
+
+      // Firestore has a 1MB limit. 800KB is a safe ceiling for base64 size (since base64 is ~33% larger than binary).
+      if (processedBlob.size > 800 * 1024) {
+        toast({
+          variant: "destructive",
+          title: "File too large",
+          description: `Firebase Storage is not configured, and this file is too large (${(processedBlob.size / 1024 / 1024).toFixed(2)}MB) to send via fallback. Max size is 800KB.`,
+        });
+        return;
+      }
+
+      try {
+        const base64Url = await blobToBase64(processedBlob);
+        onSendMessage(base64Url, type, waveform);
+      } catch (fallbackErr) {
+        console.error("Base64 fallback failed:", fallbackErr);
+        toast({
+          variant: "destructive",
+          title: "Sending failed",
+          description: "Could not send the media file.",
+        });
+      }
     } finally {
       setIsUploading(false);
       setUploadProgress(null);
