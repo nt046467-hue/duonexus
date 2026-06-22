@@ -3,19 +3,35 @@
 
 import { useState, useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { Check, CheckCheck, Trash2, MoreVertical, Play, Pause, Smile, Download, Video } from "lucide-react";
+import { Check, CheckCheck, Trash2, MoreVertical, Play, Pause, Smile, Download, Reply } from "lucide-react";
 import { format } from "date-fns";
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuTrigger 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { doc, deleteDoc, collection, addDoc, serverTimestamp, query, where, onSnapshot, getDocs } from "firebase/firestore";
+import {
+  doc,
+  deleteDoc,
+  collection,
+  addDoc,
+  serverTimestamp,
+  query,
+  where,
+  onSnapshot,
+  getDocs,
+} from "firebase/firestore";
 import { useFirestore, useUser } from "@/firebase";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useToast } from "@/hooks/use-toast";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 
 interface MessageBubbleProps {
   id: string;
@@ -24,30 +40,125 @@ interface MessageBubbleProps {
   timestamp: number;
   isMe: boolean;
   status: "sent" | "delivered" | "seen";
+  waveform?: number[];
+  replyToId?: string;
+  replyToContent?: string;
+  replyToSender?: string;
+  replyToType?: "text" | "image" | "audio" | "video";
+  onReply?: (id: string) => void;
+  onScrollToMessage?: (id: string) => void;
 }
 
 const REACTIONS = ["❤️", "😘", "🔥", "😂", "🥺", "🥰"];
 
-export function MessageBubble({ id, content, type, timestamp, isMe, status }: MessageBubbleProps) {
+/** Waveform visualizer for audio messages */
+function WaveformDisplay({
+  bars,
+  progress,
+  isMe,
+}: {
+  bars: number[];
+  progress: number;
+  isMe: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-[2px] flex-1 h-8">
+      {bars.map((amp, i) => {
+        const isPast = i / bars.length < progress;
+        return (
+          <div
+            key={i}
+            className={cn(
+              "rounded-full w-[3px] transition-all",
+              isPast
+                ? "bg-current opacity-90"
+                : isMe
+                ? "bg-white/30"
+                : "bg-primary/25"
+            )}
+            style={{ height: `${Math.max(4, amp * 28)}px` }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+export function MessageBubble({
+  id,
+  content,
+  type,
+  timestamp,
+  isMe,
+  status,
+  waveform,
+  replyToId,
+  replyToContent,
+  replyToSender,
+  replyToType,
+  onReply,
+  onScrollToMessage,
+}: MessageBubbleProps) {
   const firestore = useFirestore();
   const { user } = useUser();
   const { toast } = useToast();
   const [isPlaying, setIsPlaying] = useState(false);
-  const [reactions, setReactions] = useState<{emoji: string, count: number, users: string[]}[]>([]);
+  const [audioProgress, setAudioProgress] = useState(0);
+  const [reactions, setReactions] = useState<
+    { emoji: string; count: number; users: string[] }[]
+  >([]);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
+  const [isHighlighted, setIsHighlighted] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const bubbleRef = useRef<HTMLDivElement>(null);
 
+  // Expose this bubble for scroll-to
+  useEffect(() => {
+    if (bubbleRef.current) {
+      bubbleRef.current.dataset.messageId = id;
+    }
+  }, [id]);
+
+  // Highlight flash when jumped to
+  useEffect(() => {
+    if (isHighlighted) {
+      const t = setTimeout(() => setIsHighlighted(false), 1500);
+      return () => clearTimeout(t);
+    }
+  }, [isHighlighted]);
+
+  // Audio progress tracker
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const handleTime = () => {
+      if (audio.duration) setAudioProgress(audio.currentTime / audio.duration);
+    };
+    audio.addEventListener("timeupdate", handleTime);
+    return () => audio.removeEventListener("timeupdate", handleTime);
+  }, []);
+
+  // Reactions listener
   useEffect(() => {
     if (!firestore || !id) return;
-    const q = query(collection(firestore, "reactions"), where("messageId", "==", id));
+    const q = query(
+      collection(firestore, "reactions"),
+      where("messageId", "==", id)
+    );
     const unsub = onSnapshot(q, (snapshot) => {
       const rMap: Record<string, string[]> = {};
-      snapshot.docs.forEach(d => {
+      snapshot.docs.forEach((d) => {
         const data = d.data();
         if (!rMap[data.emoji]) rMap[data.emoji] = [];
         rMap[data.emoji].push(data.userId);
       });
-      setReactions(Object.entries(rMap).map(([emoji, users]) => ({ emoji, count: users.length, users })));
+      setReactions(
+        Object.entries(rMap).map(([emoji, users]) => ({
+          emoji,
+          count: users.length,
+          users,
+        }))
+      );
     });
     return () => unsub();
   }, [firestore, id]);
@@ -64,64 +175,200 @@ export function MessageBubble({ id, content, type, timestamp, isMe, status }: Me
 
   const toggleReaction = async (emoji: string) => {
     if (!firestore || !user) return;
-    const q = query(collection(firestore, "reactions"), where("messageId", "==", id), where("userId", "==", user.uid), where("emoji", "==", emoji));
+    const q = query(
+      collection(firestore, "reactions"),
+      where("messageId", "==", id),
+      where("userId", "==", user.uid),
+      where("emoji", "==", emoji)
+    );
     const existing = await getDocs(q);
     if (!existing.empty) {
-      existing.docs.forEach(d => deleteDoc(doc(firestore, "reactions", d.id)));
+      existing.docs.forEach((d) => deleteDoc(doc(firestore, "reactions", d.id)));
     } else {
-      await addDoc(collection(firestore, "reactions"), { messageId: id, userId: user.uid, emoji, timestamp: serverTimestamp() });
+      await addDoc(collection(firestore, "reactions"), {
+        messageId: id,
+        userId: user.uid,
+        emoji,
+        timestamp: serverTimestamp(),
+      });
     }
   };
 
   const toggleAudio = () => {
     if (!audioRef.current) return;
-    if (isPlaying) audioRef.current.pause(); else audioRef.current.play();
+    if (isPlaying) {
+      audioRef.current.pause();
+    } else {
+      audioRef.current.play();
+    }
     setIsPlaying(!isPlaying);
   };
 
+  const handleDownload = async () => {
+    if (!content) return;
+    try {
+      // For Storage URLs — fetch as blob then trigger download
+      const response = await fetch(content);
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = `duonexus-${type}-${id.slice(0, 8)}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 5000);
+    } catch {
+      // Fallback for cross-origin: open in new tab
+      window.open(content, "_blank");
+    }
+  };
+
+  const handleReply = () => {
+    onReply?.(id);
+  };
+
+  const handleScrollToOriginal = () => {
+    if (replyToId) onScrollToMessage?.(replyToId);
+  };
+
+  // Render waveform bars — fallback to 40 equal bars if none stored
+  const waveformBars = waveform && waveform.length > 0
+    ? waveform
+    : new Array(40).fill(0.4);
+
   return (
-    <div className={cn("flex flex-col gap-1 mb-6 chat-bubble-spring group", isMe ? "items-end" : "items-start")}>
-      <div className={cn("relative flex items-center gap-1 max-w-[85%] sm:max-w-[75%]", isMe && "flex-row-reverse")}>
-        <div className={cn("px-4 py-3 rounded-[1.5rem] text-sm leading-relaxed relative shadow-sm border transition-all", isMe ? "bg-primary text-primary-foreground rounded-tr-none border-primary/10" : "bg-card border-primary/5 text-foreground rounded-tl-none")}>
+    <div
+      ref={bubbleRef}
+      className={cn(
+        "flex flex-col gap-1 mb-6 chat-bubble-spring group transition-all duration-300",
+        isMe ? "items-end" : "items-start",
+        isHighlighted && "scale-[1.02]"
+      )}
+      id={`msg-${id}`}
+    >
+      <div
+        className={cn(
+          "relative flex items-center gap-1 max-w-[85%] sm:max-w-[75%]",
+          isMe && "flex-row-reverse"
+        )}
+      >
+        <div
+          className={cn(
+            "px-4 py-3 rounded-[1.5rem] text-sm leading-relaxed relative shadow-sm border transition-all",
+            isMe
+              ? "bg-primary text-primary-foreground rounded-tr-none border-primary/10"
+              : "bg-card border-primary/5 text-foreground rounded-tl-none",
+            isHighlighted &&
+              "ring-2 ring-primary ring-offset-2 ring-offset-background"
+          )}
+        >
+          {/* Reply quote block */}
+          {replyToId && replyToContent && (
+            <button
+              onClick={handleScrollToOriginal}
+              className={cn(
+                "w-full text-left mb-2 px-3 py-2 rounded-xl border-l-2 transition-all active:scale-95",
+                isMe
+                  ? "bg-white/10 border-white/40 hover:bg-white/20"
+                  : "bg-primary/8 border-primary/40 hover:bg-primary/12"
+              )}
+            >
+              <p className={cn("text-[9px] font-headline uppercase tracking-widest mb-0.5", isMe ? "text-white/70" : "text-primary/70")}>
+                {replyToSender}
+              </p>
+              <p className={cn("text-xs truncate opacity-80")}>
+                {replyToType === "text"
+                  ? replyToContent.slice(0, 60)
+                  : replyToType === "image"
+                  ? "📷 Photo"
+                  : replyToType === "video"
+                  ? "🎥 Video"
+                  : "🎵 Voice note"}
+              </p>
+            </button>
+          )}
+
+          {/* Message content */}
           {type === "text" && content}
+
           {type === "image" && (
-            <div className="overflow-hidden rounded-xl border border-white/10 bg-muted/20 cursor-pointer" onClick={() => setIsViewerOpen(true)}>
-              <img src={content} alt="Memory" className="max-w-full h-auto min-h-[100px] block object-cover" />
+            <div
+              className="overflow-hidden rounded-xl border border-white/10 bg-muted/20 cursor-pointer"
+              onClick={() => setIsViewerOpen(true)}
+            >
+              <img
+                src={content}
+                alt="Shared moment"
+                className="max-w-full h-auto min-h-[100px] block object-cover"
+              />
               <Dialog open={isViewerOpen} onOpenChange={setIsViewerOpen}>
                 <DialogContent className="max-w-[100vw] max-h-[100vh] h-[100dvh] w-screen p-0 border-none bg-black/95 backdrop-blur-xl flex flex-col items-center justify-center z-[100]">
                   <DialogHeader className="sr-only">
                     <DialogTitle>View Shared Moment</DialogTitle>
                     <DialogDescription>A special moment shared in your nexus.</DialogDescription>
                   </DialogHeader>
-                  <img src={content} className="max-w-[95%] max-h-[90%] object-contain rounded-lg" alt="Full view" />
+                  <img
+                    src={content}
+                    className="max-w-[95%] max-h-[90%] object-contain rounded-lg"
+                    alt="Full view"
+                  />
                 </DialogContent>
               </Dialog>
             </div>
           )}
+
           {type === "video" && (
             <div className="overflow-hidden rounded-xl border border-white/10 bg-muted/20">
-              <video 
-                src={content} 
-                controls 
-                className="max-w-full h-auto rounded-lg" 
-                poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m22 8-6 4 6 4V8Z'%3E%3C/path%3E%3Crect width='14' height='12' x='2' y='6' rx='2' ry='2'%3E%3C/rect%3E%3C/svg%3E"
+              <video
+                src={content}
+                controls
+                playsInline
+                className="max-w-full h-auto rounded-lg"
               />
             </div>
           )}
+
           {type === "audio" && (
             <div className="flex items-center gap-3 py-1 min-w-[200px]">
-              <button onClick={toggleAudio} className={cn("w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-md", isMe ? "bg-white/20" : "bg-primary/10")}>
-                {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+              <button
+                onClick={toggleAudio}
+                className={cn(
+                  "w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-md shrink-0",
+                  isMe ? "bg-white/20 hover:bg-white/30" : "bg-primary/10 hover:bg-primary/20"
+                )}
+              >
+                {isPlaying ? (
+                  <Pause className="w-4 h-4" />
+                ) : (
+                  <Play className="w-4 h-4" />
+                )}
               </button>
-              <div className="flex-1 h-1.5 bg-muted/20 rounded-full overflow-hidden">
-                <div className={cn("h-full bg-primary", isPlaying ? "w-full animate-pulse" : "w-0")} />
-              </div>
-              <audio ref={audioRef} src={content} onEnded={() => setIsPlaying(false)} className="hidden" />
+
+              {/* Real waveform */}
+              <WaveformDisplay
+                bars={waveformBars}
+                progress={audioProgress}
+                isMe={isMe}
+              />
+
+              <audio
+                ref={audioRef}
+                src={content}
+                onEnded={() => {
+                  setIsPlaying(false);
+                  setAudioProgress(0);
+                }}
+                className="hidden"
+              />
             </div>
           )}
-          
-          <div className={cn("flex items-center gap-1 mt-1 justify-end opacity-60")}>
-            <span className="text-[9px] font-headline">{timestamp ? format(timestamp, "h:mm a") : "..."}</span>
+
+          {/* Timestamp + status */}
+          <div className="flex items-center gap-1 mt-1 justify-end opacity-60">
+            <span className="text-[9px] font-headline">
+              {timestamp ? format(timestamp, "h:mm a") : "..."}
+            </span>
             {isMe && (
               <span className="flex items-center">
                 {status === "seen" ? (
@@ -135,53 +382,95 @@ export function MessageBubble({ id, content, type, timestamp, isMe, status }: Me
             )}
           </div>
 
+          {/* Reaction bubbles */}
           {reactions.length > 0 && (
-            <div className={cn("absolute -bottom-3 flex gap-1", isMe ? "right-2" : "left-2")}>
+            <div
+              className={cn(
+                "absolute -bottom-3 flex gap-1",
+                isMe ? "right-2" : "left-2"
+              )}
+            >
               {reactions.map((r) => (
-                <button key={r.emoji} onClick={() => toggleReaction(r.emoji)} className="bg-background/95 border border-primary/10 rounded-full px-2 py-0.5 text-[10px] shadow-sm flex items-center gap-1">
+                <button
+                  key={r.emoji}
+                  onClick={() => toggleReaction(r.emoji)}
+                  className="bg-background/95 border border-primary/10 rounded-full px-2 py-0.5 text-[10px] shadow-sm flex items-center gap-1 hover:scale-110 transition-transform"
+                >
                   <span>{r.emoji}</span>
-                  {r.count > 1 && <span className="font-bold">{r.count}</span>}
+                  {r.count > 1 && (
+                    <span className="font-bold">{r.count}</span>
+                  )}
                 </button>
               ))}
             </div>
           )}
         </div>
 
-        <div className={cn("flex items-center gap-0 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 px-1", isMe ? "flex-row-reverse" : "flex-row")}>
-          <div className="flex items-center gap-0">
-            <Popover>
-              <PopoverTrigger asChild>
-                <button className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-primary transition-colors">
-                  <Smile className="w-4 h-4" />
+        {/* Action buttons (hover) */}
+        <div
+          className={cn(
+            "flex items-center gap-0 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 px-1",
+            isMe ? "flex-row-reverse" : "flex-row"
+          )}
+        >
+          {/* Reaction picker */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <button className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-primary transition-colors">
+                <Smile className="w-4 h-4" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              className="w-auto p-1.5 rounded-full flex gap-0.5 bg-background/95 backdrop-blur-xl border-primary/10 shadow-2xl"
+              side="top"
+            >
+              {REACTIONS.map((emoji) => (
+                <button
+                  key={emoji}
+                  onClick={() => toggleReaction(emoji)}
+                  className="hover:scale-125 transition-transform p-1 text-base"
+                >
+                  {emoji}
                 </button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-1.5 rounded-full flex gap-0.5 bg-background/95 backdrop-blur-xl border-primary/10 shadow-2xl" side="top">
-                {REACTIONS.map(emoji => (
-                  <button key={emoji} onClick={() => toggleReaction(emoji)} className="hover:scale-125 transition-transform p-1 text-base">
-                    {emoji}
-                  </button>
-                ))}
-              </PopoverContent>
-            </Popover>
+              ))}
+            </PopoverContent>
+          </Popover>
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-primary transition-colors">
-                  <MoreVertical className="w-4 h-4" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align={isMe ? "end" : "start"} className="rounded-xl border-primary/10 bg-background/95 backdrop-blur-xl">
-                {isMe && (
-                  <DropdownMenuItem onClick={handleDelete} className="text-destructive gap-2 focus:bg-destructive/10">
-                    <Trash2 className="w-3.5 h-3.5" /> Delete
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem onClick={() => {}} className="gap-2 focus:bg-primary/10">
+          {/* More options */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-primary transition-colors">
+                <MoreVertical className="w-4 h-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align={isMe ? "end" : "start"}
+              className="rounded-xl border-primary/10 bg-background/95 backdrop-blur-xl"
+            >
+              <DropdownMenuItem
+                onClick={handleReply}
+                className="gap-2 focus:bg-primary/10"
+              >
+                <Reply className="w-3.5 h-3.5" /> Reply
+              </DropdownMenuItem>
+              {type !== "text" && (
+                <DropdownMenuItem
+                  onClick={handleDownload}
+                  className="gap-2 focus:bg-primary/10"
+                >
                   <Download className="w-3.5 h-3.5" /> Download
                 </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+              )}
+              {isMe && (
+                <DropdownMenuItem
+                  onClick={handleDelete}
+                  className="text-destructive gap-2 focus:bg-destructive/10"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Delete
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
     </div>
