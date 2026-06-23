@@ -291,10 +291,16 @@ export default function ChatPage() {
               body:
                 latestMessage.type === "text"
                   ? latestMessage.content
-                  : `Sent a${latestMessage.type === "image" ? "n" : ""} ${latestMessage.type}`,
-              icon: `${window.location.origin}/icon-192.png`,
-              image: latestMessage.type === "image" ? latestMessage.content : partnerAvatar || undefined,
-              badge: `${window.location.origin}/badge-72.png`,
+                  : latestMessage.type === "image"
+                  ? "📷 Sent a photo"
+                  : latestMessage.type === "video"
+                  ? "🎥 Sent a video"
+                  : "🎵 Sent a voice note",
+              // Partner avatar as left circle icon — like WhatsApp/Messenger
+              icon: partnerAvatar || `${window.location.origin}/icon-192.png`,
+              // Show the actual photo inline for image messages
+              image: latestMessage.type === "image" ? latestMessage.content : undefined,
+              badge: `${window.location.origin}/icon-192.png`,
               tag: "duonexus-msg",
               renotify: true,
               data: { url: window.location.origin },

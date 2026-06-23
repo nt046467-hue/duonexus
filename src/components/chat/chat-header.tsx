@@ -200,7 +200,7 @@ export function ChatHeader({
         const reg = await navigator.serviceWorker.ready;
         await reg.showNotification("DuoNexus ❤️", {
           body: "Thinking of you! 💕",
-          icon: `${window.location.origin}/icon-192.png`,
+          icon: partnerAvatar || `${window.location.origin}/icon-192.png`,
           badge: `${window.location.origin}/badge-72.png`,
         });
         toast({ title: "Test Sent", description: "System tray check! ✨" });
