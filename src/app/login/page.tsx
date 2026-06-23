@@ -156,10 +156,10 @@ export default function LoginPage() {
   const NUMPAD = [["1","2","3"],["4","5","6"],["7","8","9"],["","0","⌫"]];
 
   return (
-    <div className="flex flex-col items-center justify-center h-full w-full bg-background px-6">
+    <div className="flex flex-col items-center justify-center h-full w-full bg-black text-white px-6">
       <div className="w-full max-w-xs space-y-8 animate-in fade-in zoom-in duration-500">
         {/* Logo */}
-        <div className="flex flex-col items-center text-center space-y-2">
+        <div className="flex flex-col items-center text-center space-y-2" style={{ color: 'white' }}>
           <div className="relative p-5 bg-primary/10 rounded-full mb-2">
             <Heart className="w-14 h-14 text-primary fill-primary animate-pulse" />
             <div className="absolute inset-0 rounded-full bg-primary/5 animate-ping" />
@@ -268,9 +268,9 @@ export default function LoginPage() {
           </div>
 
           {loading && (
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-              <p className="text-[10px] text-primary uppercase tracking-widest animate-pulse">
+            <div className="flex items-center gap-2 animate-fade-in">
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <p className="text-[10px] text-white uppercase tracking-widest animate-pulse">
                 Opening the door...
               </p>
             </div>
