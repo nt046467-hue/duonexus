@@ -374,6 +374,12 @@ export function MessageInput({
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = "";
+    
+    // Close the camera/upload dialog cleanly
+    stopCamera();
+    setIsCameraOpen(false);
+    setCapturedMedia(null);
+
     await sendViaStorage(
       file,
       file.type.startsWith("video/") ? "video" : "image"

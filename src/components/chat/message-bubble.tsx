@@ -293,15 +293,17 @@ export function MessageBubble({
           {type === "text" && content}
 
           {type === "image" && (
-            <div
-              className="overflow-hidden rounded-xl border border-white/10 bg-muted/20 cursor-pointer"
-              onClick={() => setIsViewerOpen(true)}
-            >
-              <img
-                src={content}
-                alt="Shared moment"
-                className="max-w-full h-auto min-h-[100px] block object-cover"
-              />
+            <>
+              <div
+                className="overflow-hidden rounded-xl border border-white/10 bg-muted/20 cursor-pointer"
+                onClick={() => setIsViewerOpen(true)}
+              >
+                <img
+                  src={content}
+                  alt="Shared moment"
+                  className="max-w-full h-auto min-h-[100px] block object-cover"
+                />
+              </div>
               <Dialog open={isViewerOpen} onOpenChange={setIsViewerOpen}>
                 <DialogContent className="max-w-[100vw] max-h-[100vh] h-[100dvh] w-screen p-0 border-none bg-black/95 backdrop-blur-xl flex flex-col items-center justify-center z-[100]">
                   <DialogHeader className="sr-only">
@@ -315,7 +317,7 @@ export function MessageBubble({
                   />
                 </DialogContent>
               </Dialog>
-            </div>
+            </>
           )}
 
           {type === "video" && (
