@@ -156,7 +156,10 @@ export default function LoginPage() {
   const NUMPAD = [["1","2","3"],["4","5","6"],["7","8","9"],["","0","⌫"]];
 
   return (
-    <div className="flex flex-col items-center justify-center h-full w-full bg-black text-white px-6">
+    <div
+      className="flex flex-col items-center justify-center h-full w-full text-white px-6"
+      style={{ background: '#000', minHeight: '100dvh' }}
+    >
       <div className="w-full max-w-xs space-y-8 animate-in fade-in zoom-in duration-500">
         {/* Logo */}
         <div className="flex flex-col items-center text-center space-y-2" style={{ color: 'white' }}>

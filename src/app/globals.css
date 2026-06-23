@@ -3,6 +3,11 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Prevent white flash on load – paint black before any JS or CSS-in-JS runs */
+html, body {
+  background-color: #000 !important;
+}
+
 @layer base {
   :root {
     /* Light Mode Variables - Soft & Romantic */

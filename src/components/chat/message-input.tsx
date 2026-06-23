@@ -350,10 +350,22 @@ export function MessageInput({
 
   const handleSendCaptured = async () => {
     if (!capturedMedia) return;
-    setIsCameraOpen(false);
     const { blob } = capturedMedia;
+    const type = cameraMode === "photo" ? "image" : "video";
+    // Stop camera stream immediately so the dialog closes cleanly — like a real camera app
+    stopCamera();
+    setIsCameraOpen(false);
     setCapturedMedia(null);
-    await sendViaStorage(blob, cameraMode === "photo" ? "image" : "video");
+    await sendViaStorage(blob, type);
+  };
+
+  // Cancel camera dialog – stop any in‑progress video recording and clean up
+  const cancelCamera = () => {
+    if (isRecordingVideo) {
+      stopVideoRecording();
+    }
+    setCapturedMedia(null);
+    setIsCameraOpen(false);
   };
 
   // --- FILE UPLOAD ---
@@ -624,10 +636,7 @@ export function MessageInput({
               variant="ghost"
               size="icon"
               className="text-white hover:bg-white/20 rounded-full"
-              onClick={() => {
-                setCapturedMedia(null);
-                setIsCameraOpen(false);
-              }}
+              onClick={cancelCamera}
             >
               <X className="w-5 h-5" />
             </Button>

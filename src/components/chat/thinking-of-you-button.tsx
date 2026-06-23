@@ -110,7 +110,7 @@ export function ThinkingOfYouButton({
         onClick={handleTap}
         disabled={isCoolingDown}
         className={cn(
-          "relative w-14 h-14 rounded-full flex items-center justify-center shadow-xl transition-all duration-200",
+          "relative w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition-all duration-200",
           "bg-gradient-to-br from-primary to-pink-400",
           "hover:shadow-primary/40 hover:shadow-2xl",
           isPressed && "scale-90",
@@ -123,13 +123,13 @@ export function ThinkingOfYouButton({
             : "Send a thinking-of-you nudge ❤️"
         }
       >
-        {/* Pulse ring */}
+        {/* Subtle pulse ring — only when not cooling down */}
         {!isCoolingDown && (
-          <span className="absolute inset-0 rounded-full bg-primary/30 animate-ping opacity-60" />
+          <span className="absolute inset-0 rounded-full bg-primary/20 animate-ping opacity-40 scale-90" />
         )}
         <Heart
           className={cn(
-            "w-6 h-6 text-white transition-all",
+            "w-5 h-5 text-white transition-all",
             isPressed ? "fill-white scale-125" : "fill-white/80"
           )}
         />
