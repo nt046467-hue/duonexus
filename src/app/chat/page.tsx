@@ -205,8 +205,8 @@ export default function ChatPage() {
   const messages = useMemo(() => {
     if (!rawMessages) return [];
     return [...rawMessages].sort((a: any, b: any) => {
-      const tA = a.timestamp?.toMillis?.() ?? (a.timestamp?.seconds ?? 0) * 1000;
-      const tB = b.timestamp?.toMillis?.() ?? (b.timestamp?.seconds ?? 0) * 1000;
+      const tA = (a.timestamp?.toMillis?.() ?? (a.timestamp?.seconds ?? 0) * 1000) || Date.now();
+      const tB = (b.timestamp?.toMillis?.() ?? (b.timestamp?.seconds ?? 0) * 1000) || Date.now();
       return tA - tB;
     }) as Message[];
   }, [rawMessages]);
@@ -242,8 +242,8 @@ export default function ChatPage() {
       const fetched = snap.docs
         .map((d) => ({ id: d.id, ...(d.data() as any) } as Message))
         .sort((a, b) => {
-          const tA = a.timestamp?.toMillis?.() ?? (a.timestamp?.seconds ?? 0) * 1000;
-          const tB = b.timestamp?.toMillis?.() ?? (b.timestamp?.seconds ?? 0) * 1000;
+          const tA = (a.timestamp?.toMillis?.() ?? (a.timestamp?.seconds ?? 0) * 1000) || Date.now();
+          const tB = (b.timestamp?.toMillis?.() ?? (b.timestamp?.seconds ?? 0) * 1000) || Date.now();
           return tA - tB;
         });
       setOlderMessages((prev) => [...fetched, ...prev]);
