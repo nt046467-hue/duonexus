@@ -411,8 +411,14 @@ export default function ChatPage() {
   };
 
   // NUDGE (Thinking of You) listener
+  // We persist the last-seen nudge ID in localStorage so a page refresh
+  // doesn't re-trigger the heart burst for an already-seen nudge.
   useEffect(() => {
     if (!firestore || !myId || !partnerId) return;
+    // Restore from localStorage on mount
+    const storedKey = `duonexus_last_nudge_${myId}`;
+    lastNudgeIdRef.current = localStorage.getItem(storedKey);
+
     const q = query(
       collection(firestore, "nudges"),
       where("from", "==", partnerId),
@@ -424,6 +430,7 @@ export default function ChatPage() {
       const latest = snap.docs[0];
       if (latest.id !== lastNudgeIdRef.current) {
         lastNudgeIdRef.current = latest.id;
+        localStorage.setItem(storedKey, latest.id);
         setShowHeartBurst(true);
       }
     });
