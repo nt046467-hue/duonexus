@@ -1,11 +1,12 @@
 
 self.addEventListener('push', function(event) {
   const data = event.data ? event.data.json() : {};
-  const title = data.title || "DuoNexus ❤️";
+  const title = data.title || "DuoNexus \u2764\uFE0F";
+  const origin = self.location.origin;
   const options = {
     body: data.body || "You have a new message!",
-    icon: data.icon || '/icon-192.png',
-    badge: '/badge-72.png',
+    icon: data.icon || (origin + '/icon-192.png'),
+    badge: origin + '/badge-72.png',
     image: data.image || null,
     tag: data.tag || 'duonexus-msg',
     renotify: true,

@@ -292,9 +292,9 @@ export default function ChatPage() {
                 latestMessage.type === "text"
                   ? latestMessage.content
                   : `Sent a${latestMessage.type === "image" ? "n" : ""} ${latestMessage.type}`,
-              icon: "/icon-192.png",
+              icon: `${window.location.origin}/icon-192.png`,
               image: latestMessage.type === "image" ? latestMessage.content : partnerAvatar || undefined,
-              badge: "/badge-72.png",
+              badge: `${window.location.origin}/badge-72.png`,
               tag: "duonexus-msg",
               renotify: true,
               data: { url: window.location.origin },
