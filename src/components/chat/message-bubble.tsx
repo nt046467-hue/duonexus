@@ -42,8 +42,10 @@ interface MessageBubbleProps {
   replyToType?: "text" | "image" | "audio" | "video" | "gif";
   onReply?: (id: string) => void;
   onScrollToMessage?: (id: string) => void;
-  /** Show partner avatar to the left (first message in a consecutive group) */
+  /** First message in a group — adds extra top margin */
   isFirstInGroup?: boolean;
+  /** Last message in a group — shows avatar + tail */
+  isLastInGroup?: boolean;
   partnerAvatar?: string;
   partnerInitial?: string;
   onAvatarClick?: () => void;
@@ -100,6 +102,7 @@ export function MessageBubble({
   onReply,
   onScrollToMessage,
   isFirstInGroup = false,
+  isLastInGroup = false,
   partnerAvatar,
   partnerInitial = "P",
   onAvatarClick,
@@ -108,6 +111,11 @@ export function MessageBubble({
   const firestore = useFirestore();
   const { user } = useUser();
   const { toast } = useToast();
+
+  // Emoji-only detection: pure emoji characters ≤ 5 render large without bubble
+  const emojiRegex = /^[\p{Emoji}\p{Emoji_Presentation}\p{Extended_Pictographic}\s]+$/u;
+  const isEmojiOnly = type === "text" && emojiRegex.test(content) && content.trim().length <= 8 && !/[\w!?.,]/.test(content);
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioProgress, setAudioProgress] = useState(0);
   const [reactions, setReactions] = useState<
@@ -272,53 +280,58 @@ export function MessageBubble({
     <div
       ref={bubbleRef}
       className={cn(
-        "flex gap-2 mb-6 chat-bubble-spring group transition-all duration-300",
+        "flex gap-2 chat-bubble-spring group",
+        isFirstInGroup ? "mt-3" : "mt-[2px]",
+        isLastInGroup ? "mb-1" : "mb-[2px]",
         isMe ? "justify-end" : "justify-start",
         isHighlighted && "scale-[1.02]"
       )}
       id={`msg-${id}`}
     >
-      {/* Partner avatar — left side, first in group only */}
+      {/* Partner avatar — left side, last in group only (WhatsApp style) */}
       {!isMe && (
-        <div className="shrink-0 w-6 self-end mb-1">
-          {isFirstInGroup ? (
+        <div className="shrink-0 w-8 self-end">
+          {isLastInGroup ? (
             <button
               onClick={onAvatarClick}
               className="focus:outline-none active:scale-90 transition-transform"
               aria-label="View profile"
             >
-              <Avatar className="w-6 h-6 border border-primary/20">
+              <Avatar className="w-8 h-8 border-2 border-primary/20 shadow-sm">
                 <AvatarImage src={partnerAvatar} className="object-cover" />
-                <AvatarFallback className="bg-primary/10 text-primary text-[9px] font-bold font-headline">
+                <AvatarFallback className="bg-primary/10 text-primary text-[10px] font-bold font-headline">
                   {partnerInitial}
                 </AvatarFallback>
               </Avatar>
             </button>
           ) : (
-            <div className="w-6 h-6" /> /* spacer to align non-first bubbles */
+            <div className="w-8 h-8" /> /* spacer */
           )}
         </div>
       )}
 
       <div
         className={cn(
-          "flex flex-col gap-1",
+          "flex flex-col gap-0.5",
           isMe ? "items-end" : "items-start"
         )}
       >
 
       <div
         className={cn(
-          "relative flex items-center gap-1 max-w-[85%] sm:max-w-[75%]",
+          "relative flex items-center gap-1 max-w-[80%]",
           isMe && "flex-row-reverse"
         )}
       >
         <div
           className={cn(
-            "px-4 py-3 rounded-[1.5rem] text-sm leading-relaxed relative shadow-sm border transition-all",
+            "px-[14px] py-[9px] rounded-[18px] text-[15px] leading-relaxed relative shadow-sm border transition-all break-words",
+            isEmojiOnly && "!bg-transparent !border-transparent !shadow-none !px-0 !py-0 text-4xl leading-none",
             isMe
-              ? "bg-primary text-primary-foreground rounded-tr-none border-primary/10"
-              : "bg-card border-primary/5 text-foreground rounded-tl-none",
+              ? "bg-primary text-primary-foreground border-primary/0 shadow-primary/10 shadow-md"
+              : "bg-card dark:bg-muted/60 border-primary/10 text-foreground shadow-black/5 shadow-md",
+            isMe && isLastInGroup && "rounded-br-[4px]",
+            !isMe && isLastInGroup && "rounded-bl-[4px]",
             isHighlighted &&
               "ring-2 ring-primary ring-offset-2 ring-offset-background"
           )}
@@ -352,7 +365,9 @@ export function MessageBubble({
           )}
 
           {/* Message content */}
-          {type === "text" && content}
+          {type === "text" && (
+            <span className={isEmojiOnly ? "" : "whitespace-pre-wrap"}>{content}</span>
+          )}
 
           {type === "image" && (
             <>

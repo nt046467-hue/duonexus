@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useState, useRef, useMemo, useCallback } from "react";
+import { useEffect, useState, useRef, useMemo, useCallback, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import {
   collection,
@@ -80,7 +80,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { dailyAiConversationPrompt } from "@/ai/flows/daily-ai-conversation-prompt";
-import { format, startOfDay, endOfDay } from "date-fns";
+import { format, startOfDay, endOfDay, isToday, isYesterday } from "date-fns";
 
 interface Message {
   id: string;
@@ -115,6 +115,10 @@ export default function ChatPage() {
   const [isEditMemoryDialogOpen, setIsEditMemoryDialogOpen] = useState(false);
   const [isSavingMemory, setIsSavingMemory] = useState(false);
   const [isGeneratingSpark, setIsGeneratingSpark] = useState(false);
+
+  const [activeTab, setActiveTab] = useState("chat");
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [newMessageCount, setNewMessageCount] = useState(0);
 
   const [memoryTitle, setMemoryTitle] = useState("");
   const [memoryDate, setMemoryDate] = useState("");
@@ -415,11 +419,20 @@ export default function ChatPage() {
   const partnerAvatar =
     partnerProfile?.photoURL || `https://picsum.photos/seed/${partnerName}/500/500`;
 
-  // AUTO-SCROLL on new messages
+  // AUTO-SCROLL on new messages — only when already at bottom
   useEffect(() => {
-    if (scrollContainerRef.current) {
+    if (!scrollContainerRef.current) return;
+    if (isAtBottom) {
       scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+    } else {
+      // Count incoming partner messages while scrolled up
+      const last = messages[messages.length - 1];
+      const isLastMe = last ? (last.senderRole ? last.senderRole === myId : last.senderUid === user?.uid) : false;
+      if (last && !isLastMe) {
+        setNewMessageCount((c) => c + 1);
+      }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, dailyPrompt]);
 
   // STATUS + NOTIFICATION logic
@@ -429,7 +442,11 @@ export default function ChatPage() {
     const isFocused = document.hasFocus() && document.visibilityState === "visible";
 
     if (latestMessage.id !== lastMessageIdRef.current) {
-      if (latestMessage.senderUid !== user.uid) {
+      const isLatestMe = latestMessage.senderRole
+        ? latestMessage.senderRole === myId
+        : latestMessage.senderUid === user.uid;
+
+      if (!isLatestMe) {
         receiveAudioRef.current?.play().catch(() => {});
         if (
           swRegistrationRef.current &&
@@ -464,7 +481,8 @@ export default function ChatPage() {
 
     // Delivered + seen
     messages.forEach((msg) => {
-      if (msg.senderUid !== user.uid) {
+      const isMsgMe = msg.senderRole ? msg.senderRole === myId : msg.senderUid === user.uid;
+      if (!isMsgMe) {
         const msgRef = doc(firestore, "messages", msg.id);
         if (msg.status === "sent") {
           updateDoc(msgRef, { status: "delivered" }).catch(() => {});
@@ -474,7 +492,7 @@ export default function ChatPage() {
         }
       }
     });
-  }, [messages, user, firestore, partnerProfile, partnerName, partnerAvatar]);
+  }, [messages, user, firestore, partnerProfile, partnerName, partnerAvatar, myId]);
 
   // STREAK LOGIC (client-computed)
   useEffect(() => {
@@ -841,7 +859,7 @@ export default function ChatPage() {
 
 
         <main className="flex-1 flex flex-col overflow-hidden relative h-full">
-          <Tabs defaultValue="chat" className="flex-1 flex flex-col overflow-hidden h-full">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden h-full">
             <div className="px-4 py-2 bg-background/80 backdrop-blur-md border-b border-primary/5 z-10 shrink-0">
               <TabsList className="grid w-full grid-cols-2 rounded-full bg-muted/50 p-1 h-9">
                 <TabsTrigger
@@ -861,7 +879,8 @@ export default function ChatPage() {
 
             <TabsContent
               value="chat"
-              className="m-0 h-full data-[state=active]:flex-1 data-[state=active]:flex data-[state=active]:flex-col data-[state=active]:overflow-hidden"
+              forceMount
+              className="m-0 relative data-[state=inactive]:hidden h-full data-[state=active]:flex-1 data-[state=active]:flex data-[state=active]:flex-col data-[state=active]:overflow-hidden"
             >
               {/* Ongoing Call Rejoin/Recovery Banner */}
               {ongoingCall && callState === "idle" && (
@@ -916,7 +935,13 @@ export default function ChatPage() {
 
               <div
                 ref={scrollContainerRef}
-                className="flex-1 overflow-y-auto px-4 py-4 scrollbar-hide bg-background/50 scroll-smooth"
+                className="flex-1 overflow-y-auto px-3 py-3 scrollbar-hide bg-background/50"
+                onScroll={(e) => {
+                  const el = e.currentTarget;
+                  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+                  setIsAtBottom(atBottom);
+                  if (atBottom) setNewMessageCount(0);
+                }}
               >
                 <div className="flex flex-col min-h-full justify-end">
                   {/* Load more button */}
@@ -972,38 +997,96 @@ export default function ChatPage() {
 
                   {allMessages.map((msg, idx) => {
                     const prevMsg = allMessages[idx - 1];
+                    const nextMsg = allMessages[idx + 1];
                     const isFirstInGroup =
                       !prevMsg || prevMsg.senderUid !== msg.senderUid;
+                    const isLastInGroup =
+                      !nextMsg || nextMsg.senderUid !== msg.senderUid;
+
+                    // Date separator
+                    const msgTs = msg.timestamp?.seconds
+                      ? msg.timestamp.seconds * 1000
+                      : Date.now();
+                    const prevTs = prevMsg?.timestamp?.seconds
+                      ? prevMsg.timestamp.seconds * 1000
+                      : null;
+                    const msgDay = format(new Date(msgTs), "yyyy-MM-dd");
+                    const prevDay = prevTs ? format(new Date(prevTs), "yyyy-MM-dd") : null;
+                    const showDateSep = !prevDay || msgDay !== prevDay;
+                    const dateLabel = isToday(new Date(msgTs))
+                      ? "Today"
+                      : isYesterday(new Date(msgTs))
+                      ? "Yesterday"
+                      : format(new Date(msgTs), "EEEE, MMM d");
+
                     return (
-                    <MessageBubble
-                      key={msg.id}
-                      id={msg.id}
-                      content={msg.content}
-                      type={msg.type || "text"}
-                      timestamp={
-                        msg.timestamp?.seconds
-                          ? msg.timestamp.seconds * 1000
-                          : Date.now()
-                      }
-                      isMe={msg.senderUid === user?.uid}
-                      status={msg.status}
-                      waveform={msg.waveform}
-                      replyToId={msg.replyToId}
-                      replyToContent={msg.replyToContent}
-                      replyToSender={msg.replyToSender}
-                      replyToType={msg.replyToType}
-                      onReply={handleReplySelect}
-                      onScrollToMessage={handleScrollToMessage}
-                      isFirstInGroup={isFirstInGroup}
-                      partnerAvatar={partnerAvatar}
-                      partnerInitial={finalPartnerName?.[0]?.toUpperCase() || "P"}
-                      onAvatarClick={() => setIsPartnerProfileSheetOpen(true)}
-                    />
+                      <Fragment key={msg.id}>
+                        {showDateSep && (
+                          <div className="flex items-center justify-center my-3 select-none">
+                            <span className="text-[10px] font-headline uppercase tracking-widest text-muted-foreground/60 bg-background/70 backdrop-blur-sm border border-primary/10 rounded-full px-3 py-1">
+                              {dateLabel}
+                            </span>
+                          </div>
+                        )}
+                        <MessageBubble
+                          key={msg.id}
+                          id={msg.id}
+                          content={msg.content}
+                          type={msg.type || "text"}
+                          timestamp={
+                            msgTs
+                          }
+                          isMe={
+                            // Use senderRole for identity comparison — Firebase anonymous UIDs
+                            // change on every new login, so uid-based comparison breaks after re-login.
+                            // senderRole ('nabin'/'karu') is stable and set at send time.
+                            msg.senderRole
+                              ? msg.senderRole === myId
+                              : msg.senderUid === user?.uid
+                          }
+                          status={msg.status}
+                          waveform={msg.waveform}
+                          replyToId={msg.replyToId}
+                          replyToContent={msg.replyToContent}
+                          replyToSender={msg.replyToSender}
+                          replyToType={msg.replyToType}
+                          onReply={handleReplySelect}
+                          onScrollToMessage={handleScrollToMessage}
+                          isFirstInGroup={isFirstInGroup}
+                          isLastInGroup={isLastInGroup}
+                          partnerAvatar={partnerAvatar}
+                          partnerInitial={finalPartnerName?.[0]?.toUpperCase() || "P"}
+                          onAvatarClick={() => setIsPartnerProfileSheetOpen(true)}
+                        />
+                      </Fragment>
                     );
                   })}
 
                 </div>
               </div>
+
+              {/* Scroll-to-bottom FAB */}
+              {!isAtBottom && (
+                <div className="absolute bottom-24 right-4 z-20 pointer-events-none flex justify-end">
+                  <button
+                    onClick={() => {
+                      scrollContainerRef.current?.scrollTo({ top: scrollContainerRef.current.scrollHeight, behavior: "smooth" });
+                      setNewMessageCount(0);
+                    }}
+                    className="pointer-events-auto w-10 h-10 bg-primary text-primary-foreground rounded-full shadow-xl shadow-primary/20 flex items-center justify-center hover:scale-110 active:scale-95 transition-transform relative"
+                    aria-label="Scroll to bottom"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                      <path d="M8 3v10M3 8l5 5 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    {newMessageCount > 0 && (
+                      <span className="absolute -top-1.5 -right-1.5 bg-background text-primary text-[9px] font-headline font-black min-w-[18px] h-[18px] rounded-full flex items-center justify-center border-2 border-primary px-1">
+                        {newMessageCount > 9 ? "9+" : newMessageCount}
+                      </span>
+                    )}
+                  </button>
+                </div>
+              )}
 
               <div className="shrink-0 flex flex-col bg-background/90 backdrop-blur-xl border-t border-primary/5 pb-safe z-10">
                 {showPrompt && dailyPrompt && (
@@ -1046,7 +1129,8 @@ export default function ChatPage() {
 
             <TabsContent
               value="memories"
-              className="m-0 h-full px-4 scrollbar-hide data-[state=active]:flex-1 data-[state=active]:flex data-[state=active]:flex-col data-[state=active]:justify-start data-[state=active]:overflow-y-auto"
+              forceMount
+              className="m-0 data-[state=inactive]:hidden h-full px-4 scrollbar-hide data-[state=active]:flex-1 data-[state=active]:flex data-[state=active]:flex-col data-[state=active]:justify-start data-[state=active]:overflow-y-auto"
             >
               <div className="w-full pt-0 pb-24 space-y-6">
                 <div className="flex items-center justify-between py-4">

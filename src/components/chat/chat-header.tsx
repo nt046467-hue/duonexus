@@ -478,10 +478,7 @@ export function ChatHeader({
                 <div className="flex flex-col items-center gap-2">
                   <div
                     className="relative group cursor-pointer"
-                    onClick={() => {
-                      setIsSettingsOpen(false);
-                      setIsOwnProfileOpen(true);
-                    }}
+                    onClick={() => photoInputRef.current?.click()}
                   >
                     <Avatar className="h-20 w-20 border-4 border-primary/10 shadow-xl transition-transform active:scale-95">
                       <AvatarImage key={newPhotoURL} src={newPhotoURL} className="object-cover" />
@@ -499,6 +496,15 @@ export function ChatHeader({
                       ref={photoInputRef}
                       onChange={handlePhotoUpload}
                     />
+                  </div>
+                  <div className="flex flex-col items-center gap-0.5">
+                    <p className="text-[10px] text-muted-foreground font-headline">Tap photo to change</p>
+                    <button
+                      onClick={() => { setIsSettingsOpen(false); setIsOwnProfileOpen(true); }}
+                      className="text-[10px] text-primary/70 hover:text-primary font-headline underline underline-offset-2 transition-colors"
+                    >
+                      View Profile →
+                    </button>
                   </div>
                 </div>
                 <div className="space-y-4">
@@ -697,7 +703,8 @@ export function ChatHeader({
         onChangePhoto={() => {
           setIsOwnProfileOpen(false);
           setIsSettingsOpen(true);
-          setTimeout(() => photoInputRef.current?.click(), 300);
+          // Use requestAnimationFrame to ensure the dialog is mounted before clicking
+          requestAnimationFrame(() => requestAnimationFrame(() => photoInputRef.current?.click()));
         }}
       />
     </header>

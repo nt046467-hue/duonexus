@@ -182,6 +182,9 @@ export function MessageInput({
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const audioTimerRef = useRef<NodeJS.Timeout | null>(null);
   const waveformSamplerRef = useRef<{ stop: () => number[] } | null>(null);
+  // Dedicated stream refs so we can stop tracks even after the video element unmounts
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const audioRecordingStreamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -269,9 +272,17 @@ export function MessageInput({
   };
 
   const stopCamera = () => {
-    if (videoRef.current?.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach((t) => t.stop());
+    // Stop via ref — reliable even if videoRef unmounts
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((t) => t.stop());
+      cameraStreamRef.current = null;
+    }
+    // Also stop audio captured for video recording
+    if (audioRecordingStreamRef.current) {
+      audioRecordingStreamRef.current.getTracks().forEach((t) => t.stop());
+      audioRecordingStreamRef.current = null;
+    }
+    if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
     if (timerRef.current) clearInterval(timerRef.current);
@@ -279,28 +290,25 @@ export function MessageInput({
     setIsRecordingVideo(false);
   };
 
-  // Atomic camera flip — keeps old stream alive until new one resolves,
-  // then swaps srcObject in one frame to eliminate the black-flash gap.
+  // Atomic camera flip
   const toggleCamera = async () => {
     if (isSwitchingCamera) return;
     const nextFacing = facingMode === "user" ? "environment" : "user";
     setIsSwitchingCamera(true);
-    // Fade out
     if (videoRef.current) videoRef.current.style.opacity = "0";
     try {
       const newStream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: nextFacing },
-        audio: true,
+        // No audio — only video preview
       });
-      // Attach new stream
+      // Stop old camera stream
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach((t) => t.stop());
+      }
+      cameraStreamRef.current = newStream;
       if (videoRef.current) {
-        // Stop old tracks
-        const oldStream = videoRef.current.srcObject as MediaStream | null;
         videoRef.current.srcObject = newStream;
-        oldStream?.getTracks().forEach((t) => t.stop());
-        // Handle permission revoke / camera stolen mid-session
         newStream.getVideoTracks()[0].onended = () => stopCamera();
-        // Fade back in
         setTimeout(() => {
           if (videoRef.current) videoRef.current.style.opacity = "1";
         }, 50);
@@ -316,13 +324,13 @@ export function MessageInput({
 
   const startCamera = async () => {
     try {
+      // Request VIDEO ONLY — no audio during preview (fixes persistent mic indicator)
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode },
-        audio: true,
+        video: { facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
       });
+      cameraStreamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        // Handle camera revoked mid-session
         stream.getVideoTracks()[0].onended = () => stopCamera();
       }
     } catch (err) {
@@ -354,10 +362,26 @@ export function MessageInput({
     );
   };
 
-  const startVideoRecording = () => {
-    if (!videoRef.current?.srcObject) return;
-    const stream = videoRef.current.srcObject as MediaStream;
-    const recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+  const startVideoRecording = async () => {
+    if (!cameraStreamRef.current) return;
+    const videoTracks = cameraStreamRef.current.getVideoTracks();
+    if (videoTracks.length === 0) return;
+
+    // Get audio separately for video recording (keeps preview audio-free)
+    let recordTracks: MediaStreamTrack[] = [...videoTracks];
+    try {
+      const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioRecordingStreamRef.current = audioStream;
+      recordTracks = [...videoTracks, ...audioStream.getAudioTracks()];
+    } catch {
+      // Continue without audio if permission denied
+    }
+
+    const recordStream = new MediaStream(recordTracks);
+    const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
+      ? "video/webm;codecs=vp9,opus"
+      : "video/webm";
+    const recorder = new MediaRecorder(recordStream, { mimeType });
     mediaRecorderRef.current = recorder;
     videoChunksRef.current = [];
 
@@ -379,6 +403,11 @@ export function MessageInput({
   const stopVideoRecording = () => {
     if (mediaRecorderRef.current?.state === "recording") {
       mediaRecorderRef.current.stop();
+    }
+    // Stop audio stream captured for this video clip
+    if (audioRecordingStreamRef.current) {
+      audioRecordingStreamRef.current.getTracks().forEach((t) => t.stop());
+      audioRecordingStreamRef.current = null;
     }
     if (timerRef.current) clearInterval(timerRef.current);
     setIsRecordingVideo(false);
