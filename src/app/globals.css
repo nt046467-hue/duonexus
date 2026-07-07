@@ -144,10 +144,24 @@ html, body {
 
 /* When a custom background image is set via inline style, hide the pattern */
 .chat-bg-custom {
-  background-image: none !important;
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
   background-attachment: local;
 }
 
+/* ─── Floating Hearts Animation ──────────────────────────────────────────── */
+@keyframes floatHeart {
+  0%   { transform: translateX(-50%) translateY(0) scale(1); opacity: 1; }
+  50%  { transform: translateX(-50%) translateY(-60px) scale(1.1); opacity: 0.7; }
+  100% { transform: translateX(-50%) translateY(-130px) scale(0.7); opacity: 0; }
+}
+
+/* ─── Fade-in for video call view ────────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.animate-fade-in {
+  animation: fadeIn 0.35s ease both;
+}

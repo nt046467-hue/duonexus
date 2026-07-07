@@ -12,6 +12,7 @@ import {
   serverTimestamp,
   getDoc,
   query,
+  where,
 } from "firebase/firestore";
 
 export type CallType = "audio" | "video";
@@ -46,9 +47,21 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded }: UseW
   // ICE candidate buffer — holds candidates that arrive before setRemoteDescription
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
 
+  const [isCaller, setIsCaller] = useState(false);
+
   // Keep refs updated
   useEffect(() => { callStateRef.current = callState; }, [callState]);
   useEffect(() => { callIdRef.current = callId; }, [callId]);
+
+  const onIncomingCallRef = useRef(onIncomingCall);
+  useEffect(() => {
+    onIncomingCallRef.current = onIncomingCall;
+  }, [onIncomingCall]);
+
+  const onCallEndedRef = useRef(onCallEnded);
+  useEffect(() => {
+    onCallEndedRef.current = onCallEnded;
+  }, [onCallEnded]);
 
   /** Safely add an ICE candidate — buffers if remote description not yet set */
   const addCandidateSafe = useCallback(async (pc: RTCPeerConnection, data: RTCIceCandidateInit) => {
@@ -77,7 +90,7 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded }: UseW
   }, []);
 
   // Clean up WebRTC peer connection and tracks
-  const cleanUp = useCallback(() => {
+  const cleanUp = useCallback((finalState: CallState = "idle") => {
     console.log("[WebRTC] Cleaning up session…");
     if (unsubCallRef.current) { unsubCallRef.current(); unsubCallRef.current = null; }
     if (unsubCandidatesCallerRef.current) { unsubCandidatesCallerRef.current(); unsubCandidatesCallerRef.current = null; }
@@ -102,11 +115,12 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded }: UseW
     setRemoteStream(null);
     setCallId(null);
     callIdRef.current = null;
-    setCallState("idle");
+    setCallState(finalState);
     isCallerRef.current = false;
+    setIsCaller(false);
 
-    onCallEnded?.();
-  }, [onCallEnded]);
+    onCallEndedRef.current?.();
+  }, []);
 
   // Get ICE Servers configuration
   const getIceConfiguration = useCallback((): RTCConfiguration => {
@@ -232,6 +246,7 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded }: UseW
     setCallState("ringing");
     setCallType(type);
     isCallerRef.current = true;
+    setIsCaller(true);
     pendingCandidatesRef.current = [];
 
     try {
@@ -274,10 +289,10 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded }: UseW
         if (!data) return;
         if (data.status === "declined") {
           console.log("[WebRTC] Call declined");
-          cleanUp();
+          cleanUp("declined");
         } else if (data.status === "ended") {
           console.log("[WebRTC] Call ended by partner");
-          cleanUp();
+          cleanUp("ended");
         } else if (data.answer && pc.signalingState === "have-local-offer") {
           console.log("[WebRTC] Answer received");
           try {
@@ -358,7 +373,7 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded }: UseW
         if (!data) return;
         if (data.status === "ended" || data.status === "missed") {
           console.log("[WebRTC] Call ended by caller");
-          cleanUp();
+          cleanUp("ended");
         }
       });
 
@@ -398,38 +413,41 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded }: UseW
     updateCallStatus("ended");
   }, [updateCallStatus]);
 
-  // Monitor incoming calls (runs continuously if not in call)
+  // Monitor incoming calls (runs continuously once per session)
   useEffect(() => {
-    if (!db || !myId || callState !== "idle") return;
+    if (!db || !myId) return;
 
-    // Listen for calls ringing where callee is me
+    // Listen only for fresh ringing calls directed to me
     const callsColl = collection(db, "calls");
-    // We listen to calls created in the last 2 minutes to prevent stale calls triggering
+    const q = query(
+      callsColl,
+      where("calleeId", "==", myId),
+      where("status", "==", "ringing")
+    );
+
     const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
     
-    // Using onSnapshot on the entire collection filtered client side to avoid index requirement overhead
-    const unsub = onSnapshot(callsColl, (snapshot) => {
+    const unsub = onSnapshot(q, (snapshot) => {
+      // Check if we are currently idle before triggering notification
+      if (callStateRef.current !== "idle") return;
+
       snapshot.docChanges().forEach((change) => {
         if (change.type === "added") {
           const data = change.doc.data();
-          // If ringing, directed to me, and fresh
-          if (
-            data.calleeId === myId &&
-            data.status === "ringing" &&
-            data.createdAt &&
-            data.createdAt.toMillis() > twoMinutesAgo.getTime()
-          ) {
-            console.log("Incoming call detected:", change.doc.id);
-            if (onIncomingCall) {
-              onIncomingCall(change.doc.id, data.type);
-            }
+          const createdAt = data.createdAt?.toMillis?.() ?? 0;
+          if (createdAt > twoMinutesAgo.getTime()) {
+            console.log("[WebRTC] Incoming call detected for me:", change.doc.id);
+            onIncomingCallRef.current?.(change.doc.id, data.type);
           }
+        } else if (change.type === "removed") {
+          console.log("[WebRTC] Ringing call document removed (cancelled by caller):", change.doc.id);
+          onCallEndedRef.current?.();
         }
       });
     });
 
     return () => unsub();
-  }, [db, myId, callState, onIncomingCall]);
+  }, [db, myId]);
 
   return {
     startCall,
@@ -441,5 +459,6 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded }: UseW
     callState,
     localStream,
     remoteStream,
+    isCaller,
   };
 }

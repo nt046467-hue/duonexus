@@ -243,6 +243,31 @@ export function MessageBubble({
     ? waveform
     : new Array(40).fill(0.4);
 
+  const isCallLog = type === "text" && (content.startsWith("📞") || content.startsWith("📹") || content.startsWith("🎥"));
+
+  if (isCallLog) {
+    const isMissed = content.toLowerCase().includes("missed") || content.toLowerCase().includes("declined");
+    return (
+      <div
+        ref={bubbleRef}
+        className="flex justify-center w-full my-2 animate-in fade-in zoom-in duration-300"
+        id={`msg-${id}`}
+      >
+        <div className={cn(
+          "px-4 py-1.5 rounded-full text-[11px] font-headline flex items-center gap-2 border shadow-sm backdrop-blur-sm select-none",
+          isMissed
+            ? "bg-red-500/10 border-red-500/20 text-red-500"
+            : "bg-emerald-500/10 border-emerald-500/20 text-emerald-500"
+        )}>
+          <span className="font-bold tracking-tight">{content}</span>
+          <span className="opacity-60 text-[9px] font-sans">
+            {timestamp ? format(timestamp, "h:mm a") : "..."}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={bubbleRef}

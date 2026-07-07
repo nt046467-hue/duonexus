@@ -148,6 +148,8 @@ export default function ChatPage() {
   const sendAudioRef = useRef<HTMLAudioElement | null>(null);
   const receiveAudioRef = useRef<HTMLAudioElement | null>(null);
   const swRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
+  // Track when a call becomes active to compute duration
+  const callStartTimeRef = useRef<number | null>(null);
 
   const [myId, setMyId] = useState<string>("");
 
@@ -183,6 +185,18 @@ export default function ChatPage() {
   // Calling state
   const [incomingCallInfo, setIncomingCallInfo] = useState<{ id: string; type: "audio" | "video" } | null>(null);
 
+  // Track if I am the initiator of the current call (ref ensures immediate read on call end)
+  const amICallerRef = useRef<boolean>(false);
+
+  const handleIncomingCall = useCallback((callId: string, type: "audio" | "video") => {
+    amICallerRef.current = false;
+    setIncomingCallInfo({ id: callId, type });
+  }, []);
+
+  const handleCallEnded = useCallback(() => {
+    setIncomingCallInfo(null);
+  }, []);
+
   const {
     startCall,
     answerCall,
@@ -192,24 +206,60 @@ export default function ChatPage() {
     callState,
     localStream,
     remoteStream,
+    isCaller,
   } = useWebRTC({
     myId,
     partnerId,
-    onIncomingCall: (callId, type) => {
-      setIncomingCallInfo({ id: callId, type });
-    },
-    onCallEnded: () => {
-      setIncomingCallInfo(null);
-    },
+    onIncomingCall: handleIncomingCall,
+    onCallEnded: handleCallEnded,
   });
 
-  // Handle logging of missed calls in chat thread
+  const handleStartCall = useCallback((type: "audio" | "video") => {
+    amICallerRef.current = true;
+    startCall(type);
+  }, [startCall]);
+
+  // Log call events in chat thread (Messenger/Telegram style)
+  const callTypeRef = useRef<"audio" | "video">("audio");
+  useEffect(() => { callTypeRef.current = callType; }, [callType]);
+
   useEffect(() => {
-    if (callState === "missed" || callState === "declined") {
-      if (incomingCallInfo) {
-        handleSendMessage(`Missed ${incomingCallInfo.type} call`, "text");
-        setIncomingCallInfo(null);
+    if (callState === "active") {
+      // Record when the call became active
+      callStartTimeRef.current = Date.now();
+    } else if (
+      callState === "ended" ||
+      callState === "declined" ||
+      callState === "missed"
+    ) {
+      const icon = callTypeRef.current === "video" ? "📹" : "📞";
+      const callerName = myName;
+      const calleeName = finalPartnerName;
+
+      // Centralized call logging: Only the caller writes the message to the shared database
+      // to prevent duplicate logs appearing in the conversation
+      if (amICallerRef.current) {
+        if (callState === "ended" && callStartTimeRef.current) {
+          const secs = Math.round((Date.now() - callStartTimeRef.current) / 1000);
+          const h = Math.floor(secs / 3600);
+          const m = Math.floor((secs % 3600) / 60);
+          const s = secs % 60;
+          const durStr = h > 0 
+            ? `${h}h ${m}m ${s}s` 
+            : m > 0 
+            ? `${m}m ${s}s` 
+            : `${s}s`;
+          handleSendMessage(`${icon} ${callerName} called ${calleeName} · ${durStr}`, "text");
+        } else if (callState === "declined") {
+          handleSendMessage(`${icon} Declined call from ${callerName}`, "text");
+        } else {
+          handleSendMessage(`${icon} Missed call from ${callerName}`, "text");
+        }
       }
+
+      callStartTimeRef.current = null;
+      setIncomingCallInfo(null);
+      amICallerRef.current = false; // Reset initiator state for the next call
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [callState]);
@@ -256,11 +306,18 @@ export default function ChatPage() {
     }) as Message[];
   }, [rawMessages]);
 
-  // Combine older + current messages
-  const allMessages = useMemo(
-    () => [...olderMessages, ...messages],
-    [olderMessages, messages]
-  );
+  // Combine older + current messages — deduplicate by ID to prevent double rendering
+  // when the live query window and olderMessages pagination overlap
+  const allMessages = useMemo(() => {
+    const map = new Map<string, Message>();
+    olderMessages.forEach((m) => map.set(m.id, m));
+    messages.forEach((m) => map.set(m.id, m)); // live snapshot wins on conflict
+    return Array.from(map.values()).sort((a: any, b: any) => {
+      const tA = (a.timestamp?.toMillis?.() ?? (a.timestamp?.seconds ?? 0) * 1000) || 0;
+      const tB = (b.timestamp?.toMillis?.() ?? (b.timestamp?.seconds ?? 0) * 1000) || 0;
+      return tA - tB;
+    });
+  }, [olderMessages, messages]);
 
   // Build a lookup map for replies
   const messageMap = useMemo(() => {
@@ -579,6 +636,16 @@ export default function ChatPage() {
     }
   };
 
+  // Returns the spark prompt string so CallScreen can show it as an overlay during calls
+  const handleGenerateSparkForCall = async (): Promise<string | undefined> => {
+    try {
+      const result = await dailyAiConversationPrompt({});
+      return result.prompt;
+    } catch {
+      return "What is your favourite memory of us from this week? 💕";
+    }
+  };
+
   // Reply handler from bubble
   const handleReplySelect = (messageId: string) => {
     const msg = messageMap[messageId];
@@ -704,8 +771,8 @@ export default function ChatPage() {
           partnerId={partnerId}
           myMood={myMoodToday}
           partnerMood={partnerMoodToday}
-          onAudioCall={() => startCall("audio")}
-          onVideoCall={() => startCall("video")}
+          onAudioCall={() => handleStartCall("audio")}
+          onVideoCall={() => handleStartCall("video")}
         />
 
 
@@ -718,8 +785,8 @@ export default function ChatPage() {
           photoURL={partnerAvatar}
           isOnline={partnerPresence?.online || false}
           streak={globalStats?.streak || 0}
-          onAudioCall={() => startCall("audio")}
-          onVideoCall={() => startCall("video")}
+          onAudioCall={() => handleStartCall("audio")}
+          onVideoCall={() => handleStartCall("video")}
         />
 
 
@@ -782,10 +849,32 @@ export default function ChatPage() {
                   )}
 
                   {allMessages.length === 0 && !messagesLoading && (
-                    <div className="flex-1 flex flex-col items-center justify-center text-center p-8 opacity-40">
-                      <Heart className="w-12 h-12 mb-4 text-primary fill-primary" />
-                      <p className="font-headline text-lg tracking-tight">
-                        Your private space is ready.
+                    <div className="flex-1 flex flex-col items-center justify-center text-center p-8 select-none">
+                      {/* Floating hearts animation */}
+                      <div className="relative w-28 h-36 mb-2">
+                        {[
+                          { size: "w-8 h-8", delay: "0s", left: "50%", dur: "3s", opacity: "opacity-90" },
+                          { size: "w-5 h-5", delay: "0.8s", left: "25%", dur: "3.5s", opacity: "opacity-60" },
+                          { size: "w-6 h-6", delay: "1.5s", left: "75%", dur: "2.8s", opacity: "opacity-75" },
+                          { size: "w-4 h-4", delay: "2.2s", left: "40%", dur: "4s", opacity: "opacity-50" },
+                          { size: "w-5 h-5", delay: "0.4s", left: "65%", dur: "3.2s", opacity: "opacity-65" },
+                        ].map((h, i) => (
+                          <Heart
+                            key={i}
+                            className={`absolute bottom-0 ${h.size} text-primary fill-primary ${h.opacity}`}
+                            style={{
+                              left: h.left,
+                              transform: "translateX(-50%)",
+                              animation: `floatHeart ${h.dur} ${h.delay} infinite ease-in`,
+                            }}
+                          />
+                        ))}
+                      </div>
+                      <p className="font-headline text-base tracking-tight text-foreground/70 mt-2">
+                        Your private space is ready 💕
+                      </p>
+                      <p className="text-[11px] text-muted-foreground/50 mt-1 font-headline uppercase tracking-widest">
+                        Say something sweet ✨
                       </p>
                     </div>
                   )}
@@ -1106,6 +1195,7 @@ export default function ChatPage() {
           localStream={localStream}
           remoteStream={remoteStream}
           onHangUp={endCall}
+          onGenerateSpark={handleGenerateSparkForCall}
         />
       )}
     </div>

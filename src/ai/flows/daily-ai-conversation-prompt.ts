@@ -29,10 +29,51 @@ export type DailyAiConversationPromptOutput = z.infer<
   typeof DailyAiConversationPromptOutputSchema
 >;
 
+const FALLBACK_PROMPTS = [
+  "If we could pause time for 24 hours just for the two of us, how would we spend it? 💫",
+  "What is a small, quiet habit of mine that secretly makes you feel incredibly loved? 🌸",
+  "If we could teleport to any place in the world for a dinner date tonight, where would we go? ✈️",
+  "What is your absolute favorite memory of us from the past month? 📸",
+  "What is a song that always reminds you of me whenever you hear it? 🎵",
+  "What is one big dream you want us to work on and achieve together in the next two years? 🌟",
+  "If you had to describe our connection using only three distinct words, what would they be? ❤️",
+  "What is something new or adventurous you've been wanting us to try together? 🗺️",
+  "Think back to the first few weeks we met. What was the exact moment you realized you had feelings? 💕",
+  "What is a text message or note I sent you that you still remember clearly? 📱",
+  "What is one question about my childhood or past that you've never asked me before? 🧸",
+  "If our love story was made into a movie, what genre would it be and who would play us? 🎬",
+  "What is a dream or goal of mine that you want to help me achieve the most? 🤝",
+  "What is your favorite way to receive affection from me (words, touch, quality time, small gifts)? 💌",
+  "What is a hidden talent or silly skill of mine that you find surprisingly attractive? 🔮",
+  "If we could build our dream home anywhere, would it be by the ocean, in the mountains, or a cozy city loft? 🏡",
+  "What is a place we've visited together that you would love to return to for an anniversary? 🗺️",
+  "What is the best piece of advice about relationships that you think applies to us? 💡",
+  "If we could swap roles for a single day, what is the first thing you would do as me? 🔄",
+  "What is something you feel our relationship has taught you about yourself? 🌱",
+  "What is one small thing I did recently that made you laugh or smile? 😄",
+  "What are you most looking forward to experiencing together in the coming month? 🗓️",
+  "What is a habit or hobby of mine that you would love to try learning together with me? 🎨",
+  "What is the most thoughtful gesture you feel I've ever done for you? 🎁",
+  "What does your perfect, slow weekend morning look like with me? ☕"
+];
+
 export async function dailyAiConversationPrompt(
   input: DailyAiConversationPromptInput
 ): Promise<DailyAiConversationPromptOutput> {
-  return dailyAiConversationPromptFlow(input);
+  try {
+    const result = await dailyAiConversationPromptFlow(input);
+    if (result && result.prompt) {
+      return result;
+    }
+  } catch (err) {
+    console.warn("[AI Spark] Genkit flow failed or API key missing. Using premium romantic fallback system.");
+  }
+  
+  // Select a random premium fallback prompt
+  const randomIndex = Math.floor(Math.random() * FALLBACK_PROMPTS.length);
+  return {
+    prompt: FALLBACK_PROMPTS[randomIndex]
+  };
 }
 
 const dailyAiConversationPromptDef = ai.definePrompt({

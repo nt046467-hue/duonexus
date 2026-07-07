@@ -10,7 +10,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Phone, Video, Heart, Flame, Camera, User as UserIcon } from "lucide-react";
+import { Phone, Video, Heart, Flame, Camera, User as UserIcon, X } from "lucide-react";
 import { MediaViewer } from "@/components/chat/media-viewer";
 import { cn } from "@/lib/utils";
 
@@ -58,15 +58,33 @@ export function ProfileSheet({
               e.currentTarget.focus();
             }
           }}
+          onPointerDownOutside={(e) => {
+            if (isViewerOpen) {
+              e.preventDefault();
+            }
+          }}
+          onInteractOutside={(e) => {
+            if (isViewerOpen) {
+              e.preventDefault();
+            }
+          }}
         >
 
           <SheetHeader className="sr-only">
             <SheetTitle>{mode === "own" ? "Your Profile" : `${displayName}'s Profile`}</SheetTitle>
           </SheetHeader>
 
-          {/* Drag handle */}
-          <div className="flex justify-center pt-3 pb-1">
+          {/* Drag handle + explicit close button row */}
+          <div className="flex items-center justify-between px-4 pt-3 pb-1">
+            <div className="w-8" />{/* spacer */}
             <div className="w-10 h-1 bg-muted-foreground/20 rounded-full" />
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-full bg-muted/60 hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors active:scale-90"
+              aria-label="Close profile"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
 
           <div className="flex flex-col items-center px-6 pb-10 pt-4 gap-6">

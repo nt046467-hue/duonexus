@@ -25,7 +25,8 @@ function playTone(
   startTime: number,
   duration: number,
   gainPeak: number = 0.18,
-  type: OscillatorType = "sine"
+  type: OscillatorType = "sine",
+  destination: AudioNode = ctx.destination
 ) {
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
@@ -36,7 +37,7 @@ function playTone(
   gain.gain.setValueAtTime(gainPeak, startTime + duration - 0.05);
   gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
   osc.connect(gain);
-  gain.connect(ctx.destination);
+  gain.connect(destination);
   osc.start(startTime);
   osc.stop(startTime + duration + 0.01);
 }
@@ -45,20 +46,21 @@ function playTone(
 // INCOMING RING — Messenger-style melodic arpeggio (4 notes, loops every 3s)
 // ─────────────────────────────────────────────────────────────────────────────
 let ringCtx: AudioContext | null = null;
+let ringMasterGain: GainNode | null = null;
 let ringInterval: ReturnType<typeof setInterval> | null = null;
 
 function playRingOnce() {
-  if (!ringCtx) return;
+  if (!ringCtx || !ringMasterGain) return;
   const ctx = ringCtx;
   const t = ctx.currentTime;
   // Messenger-like ascending arpeggio: C5-E5-G5-C6
   const notes = [523.25, 659.25, 783.99, 1046.5];
   notes.forEach((freq, i) => {
-    playTone(ctx, freq, t + i * 0.13, 0.18, 0.2);
+    playTone(ctx, freq, t + i * 0.13, 0.18, 0.2, "sine", ringMasterGain!);
   });
   // Second hit 0.7s later (double ring feel like Messenger)
   notes.forEach((freq, i) => {
-    playTone(ctx, freq, t + 0.7 + i * 0.13, 0.18, 0.2);
+    playTone(ctx, freq, t + 0.7 + i * 0.13, 0.18, 0.2, "sine", ringMasterGain!);
   });
 }
 
@@ -70,6 +72,10 @@ export function startRingtone() {
   // Autoplay policy: resume on first gesture already happened for this call
   if (ringCtx.state === "suspended") ringCtx.resume();
 
+  ringMasterGain = ringCtx.createGain();
+  ringMasterGain.gain.setValueAtTime(1, ringCtx.currentTime);
+  ringMasterGain.connect(ringCtx.destination);
+
   playRingOnce();
   ringInterval = setInterval(playRingOnce, 3000);
 }
@@ -77,9 +83,24 @@ export function startRingtone() {
 export function stopRingtone() {
   if (ringInterval) clearInterval(ringInterval);
   ringInterval = null;
-  if (ringCtx) {
-    ringCtx.close().catch(() => {});
-    ringCtx = null;
+
+  const ctx = ringCtx;
+  const master = ringMasterGain;
+
+  ringCtx = null;
+  ringMasterGain = null;
+
+  if (ctx && master) {
+    try {
+      const t = ctx.currentTime;
+      master.gain.setValueAtTime(master.gain.value, t);
+      master.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+      setTimeout(() => {
+        ctx.close().catch(() => {});
+      }, 80);
+    } catch {
+      ctx.close().catch(() => {});
+    }
   }
 }
 
@@ -87,14 +108,15 @@ export function stopRingtone() {
 // OUTGOING DIAL — repeating low double-beep (like Messenger/FB outgoing)
 // ─────────────────────────────────────────────────────────────────────────────
 let dialCtx: AudioContext | null = null;
+let dialMasterGain: GainNode | null = null;
 let dialInterval: ReturnType<typeof setInterval> | null = null;
 
 function playDialOnce() {
-  if (!dialCtx) return;
+  if (!dialCtx || !dialMasterGain) return;
   const ctx = dialCtx;
   const t = ctx.currentTime;
-  playTone(ctx, 440, t, 0.3, 0.12);
-  playTone(ctx, 440, t + 0.4, 0.3, 0.12);
+  playTone(ctx, 440, t, 0.3, 0.12, "sine", dialMasterGain);
+  playTone(ctx, 440, t + 0.4, 0.3, 0.12, "sine", dialMasterGain);
 }
 
 export function startDialTone() {
@@ -102,6 +124,11 @@ export function startDialTone() {
   dialCtx = getCtx();
   if (!dialCtx) return;
   if (dialCtx.state === "suspended") dialCtx.resume();
+
+  dialMasterGain = dialCtx.createGain();
+  dialMasterGain.gain.setValueAtTime(1, dialCtx.currentTime);
+  dialMasterGain.connect(dialCtx.destination);
+
   playDialOnce();
   dialInterval = setInterval(playDialOnce, 2200);
 }
@@ -109,9 +136,24 @@ export function startDialTone() {
 export function stopDialTone() {
   if (dialInterval) clearInterval(dialInterval);
   dialInterval = null;
-  if (dialCtx) {
-    dialCtx.close().catch(() => {});
-    dialCtx = null;
+
+  const ctx = dialCtx;
+  const master = dialMasterGain;
+
+  dialCtx = null;
+  dialMasterGain = null;
+
+  if (ctx && master) {
+    try {
+      const t = ctx.currentTime;
+      master.gain.setValueAtTime(master.gain.value, t);
+      master.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+      setTimeout(() => {
+        ctx.close().catch(() => {});
+      }, 80);
+    } catch {
+      ctx.close().catch(() => {});
+    }
   }
 }
 

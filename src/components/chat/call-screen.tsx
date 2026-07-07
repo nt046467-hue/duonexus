@@ -26,6 +26,7 @@ interface CallScreenProps {
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
   onHangUp: () => void;
+  onGenerateSpark?: () => Promise<string | undefined>;
 }
 
 const FILTERS = [
@@ -44,6 +45,7 @@ export function CallScreen({
   localStream,
   remoteStream,
   onHangUp,
+  onGenerateSpark,
 }: CallScreenProps) {
   const [duration, setDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
@@ -52,6 +54,9 @@ export function CallScreen({
   const [activeFilter, setActiveFilter] = useState("none");
   const [showFilters, setShowFilters] = useState(false);
   const [remoteHasVideo, setRemoteHasVideo] = useState(false);
+  const [sparkPrompt, setSparkPrompt] = useState<string | null>(null);
+  const [isLoadingSpark, setIsLoadingSpark] = useState(false);
+  const sparkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -67,17 +72,25 @@ export function CallScreen({
     return () => clearInterval(interval);
   }, [callState]);
 
-  // Outgoing dial tone when ringing (ensures full clean up)
+  // Outgoing dial tone when ringing; stop immediately when answered (active)
   useEffect(() => {
     if (callState === "ringing") {
       startDialTone();
     } else {
+      // Stop dial tone the moment state is anything other than ringing
       stopDialTone();
     }
     return () => {
       stopDialTone();
       stopRingtone();
     };
+  }, [callState]);
+
+  // Reset duration counter whenever a new call starts
+  useEffect(() => {
+    if (callState === "ringing" || callState === "connecting") {
+      setDuration(0);
+    }
   }, [callState]);
 
   // Connected chime — fires once when call transitions to active
@@ -128,10 +141,10 @@ export function CallScreen({
 
   // Connect remote stream to video element (when video is active)
   useEffect(() => {
-    if (remoteVideoRef.current && remoteStream) {
+    if (remoteVideoRef.current && remoteStream && remoteHasVideo) {
       remoteVideoRef.current.srcObject = remoteStream;
     }
-  }, [remoteStream]);
+  }, [remoteStream, remoteHasVideo]);
 
   // Connect remote stream to audio element — always, for every call type
   // This is what actually produces sound in audio calls (and as fallback in video calls)
@@ -169,7 +182,8 @@ export function CallScreen({
 
   const currentFilterClass = FILTERS.find((f) => f.id === activeFilter)?.class || "";
 
-  // The call layout becomes a video call if either side turns on video or it was initiated as video
+  // Show video layout if: initiated as video, or local cam is on, or remote has video
+  // This also handles the upgrade from audio → video when either party enables camera
   const isShowingVideo = callType === "video" || !isCamOff || remoteHasVideo;
 
   return (
@@ -190,8 +204,12 @@ export function CallScreen({
           </Avatar>
           <div className="text-center space-y-2">
             <h2 className="text-2xl font-headline font-bold">{partnerName}</h2>
-            <p className="text-sm text-muted-foreground uppercase tracking-widest font-headline">
-              {callState === "active" ? formatDuration(duration) : "Connecting..."}
+            <p className="text-sm text-primary/80 uppercase tracking-widest font-headline animate-pulse">
+              {callState === "active"
+                ? formatDuration(duration)
+                : callState === "ringing"
+                ? "Ringing…"
+                : "Connecting…"}
             </p>
           </div>
         </div>
@@ -249,14 +267,28 @@ export function CallScreen({
               {formatDuration(duration)}
             </span>
           </div>
-          {/* Filters trigger */}
+          {/* AI Love Spark trigger */}
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => setShowFilters(!showFilters)}
+            onClick={async () => {
+              if (!onGenerateSpark || isLoadingSpark) return;
+              setIsLoadingSpark(true);
+              try {
+                const prompt = await onGenerateSpark();
+                if (prompt) {
+                  setSparkPrompt(prompt);
+                  if (sparkTimerRef.current) clearTimeout(sparkTimerRef.current);
+                  sparkTimerRef.current = setTimeout(() => setSparkPrompt(null), 7000);
+                }
+              } finally {
+                setIsLoadingSpark(false);
+              }
+            }}
             className={cn(
               "w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors",
-              showFilters && "bg-primary text-primary-foreground"
+              isLoadingSpark && "animate-pulse",
+              sparkPrompt && "bg-primary text-primary-foreground"
             )}
           >
             <Sparkles className="w-5 h-5" />
@@ -281,6 +313,23 @@ export function CallScreen({
               {f.label}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* ── AI LOVE SPARK OVERLAY ── */}
+      {sparkPrompt && (
+        <div className="absolute top-20 left-4 right-4 z-40 animate-in slide-in-from-top-2 fade-in duration-300">
+          <div className="bg-black/80 backdrop-blur-xl border border-primary/30 rounded-2xl p-4 shadow-2xl">
+            <div className="flex items-center gap-2 mb-2">
+              <Sparkles className="w-3.5 h-3.5 text-primary fill-primary animate-pulse" />
+              <span className="text-[10px] font-headline uppercase tracking-widest text-primary">Love Spark ✨</span>
+              <button
+                onClick={() => setSparkPrompt(null)}
+                className="ml-auto text-white/40 hover:text-white/80 text-xs"
+              >✕</button>
+            </div>
+            <p className="text-sm text-white/90 leading-snug font-medium">{sparkPrompt}</p>
+          </div>
         </div>
       )}
 
@@ -335,7 +384,9 @@ export function CallScreen({
           onClick={() => {
             stopDialTone();
             stopRingtone();
-            playEndedBeep();
+            setTimeout(() => {
+              playEndedBeep();
+            }, 80);
             onHangUp();
           }}
           className="w-14 h-14 rounded-full bg-red-600 hover:bg-red-700 text-white shadow-xl shadow-red-600/30 flex items-center justify-center transition-transform active:scale-95"
