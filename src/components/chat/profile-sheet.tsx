@@ -52,7 +52,12 @@ export function ProfileSheet({
         <SheetContent
           side="bottom"
           className="rounded-t-[2.5rem] border-t border-primary/10 bg-background/98 backdrop-blur-2xl p-0 max-h-[85dvh] overflow-y-auto focus:outline-none"
-          onOpenAutoFocus={(e) => e.preventDefault()}
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            if (e.currentTarget instanceof HTMLElement) {
+              e.currentTarget.focus();
+            }
+          }}
         >
 
           <SheetHeader className="sr-only">
@@ -122,6 +127,13 @@ export function ProfileSheet({
                   ? isOnline ? "Active Now" : "Last seen recently"
                   : "Your Profile"}
               </p>
+            </div>
+
+            {/* Joint Space Badge */}
+            <div className="flex items-center gap-1.5 px-3 py-1 bg-pink-500/5 text-pink-500 border border-pink-500/10 rounded-full select-none animate-in fade-in duration-300">
+              <span className="text-[9px] font-headline uppercase tracking-widest font-bold flex items-center gap-1">
+                DuoNexus · Nabin <Heart className="w-2.5 h-2.5 fill-pink-500 text-pink-500 animate-pulse" /> Karu
+              </span>
             </div>
 
             {/* Streak pill */}

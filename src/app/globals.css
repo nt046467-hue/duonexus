@@ -115,3 +115,39 @@ html, body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* ─── Premium Couple Chat Wallpaper ───────────────────────────────────────── */
+.chat-bg-theme {
+  /* Light Mode — soft rose gold mesh with heart tile */
+  background-color: hsl(342, 60%, 97%);
+  background-image:
+    radial-gradient(ellipse at 20% 10%, hsla(342, 100%, 87%, 0.55) 0%, transparent 55%),
+    radial-gradient(ellipse at 80% 90%, hsla(300, 80%, 88%, 0.45) 0%, transparent 55%),
+    radial-gradient(ellipse at 70% 20%, hsla(20, 100%, 90%, 0.35) 0%, transparent 45%),
+    radial-gradient(ellipse at 10% 80%, hsla(355, 90%, 88%, 0.40) 0%, transparent 50%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'%3E%3Cpath d='M32 18c-1.2-3-4.2-5.2-7.8-5.2-4.7 0-8.5 3.8-8.5 8.5 0 6.2 6.1 11.1 13.3 16.6L32 41.2l3-3.3c7.2-5.5 13.3-10.4 13.3-16.6 0-4.7-3.8-8.5-8.5-8.5-3.6 0-6.6 2.2-7.8 5.2z' fill='%23f43f5e' fill-opacity='0.07'/%3E%3C/svg%3E");
+  background-attachment: local;
+  transition: background-color 0.4s ease;
+}
+
+.dark .chat-bg-theme {
+  /* Dark Mode — deep jewel-tone mesh with subtle heart tile */
+  background-color: hsl(343, 20%, 7%);
+  background-image:
+    radial-gradient(ellipse at 20% 10%, hsla(342, 70%, 22%, 0.50) 0%, transparent 55%),
+    radial-gradient(ellipse at 80% 90%, hsla(300, 50%, 18%, 0.45) 0%, transparent 55%),
+    radial-gradient(ellipse at 70% 20%, hsla(330, 60%, 18%, 0.35) 0%, transparent 45%),
+    radial-gradient(ellipse at 10% 80%, hsla(350, 65%, 20%, 0.40) 0%, transparent 50%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'%3E%3Cpath d='M32 18c-1.2-3-4.2-5.2-7.8-5.2-4.7 0-8.5 3.8-8.5 8.5 0 6.2 6.1 11.1 13.3 16.6L32 41.2l3-3.3c7.2-5.5 13.3-10.4 13.3-16.6 0-4.7-3.8-8.5-8.5-8.5-3.6 0-6.6 2.2-7.8 5.2z' fill='%23ffffff' fill-opacity='0.04'/%3E%3C/svg%3E");
+  background-attachment: local;
+}
+
+/* When a custom background image is set via inline style, hide the pattern */
+.chat-bg-custom {
+  background-image: none !important;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: local;
+}
+

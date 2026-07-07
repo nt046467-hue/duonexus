@@ -1,7 +1,8 @@
 
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X, Download, ZoomIn, ZoomOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -17,7 +18,13 @@ export function MediaViewer({ src, alt = "Image", open, onClose }: MediaViewerPr
   const [isDragging, setIsDragging] = useState(false);
   const [startY, setStartY] = useState(0);
   const [dragDeltaY, setDragDeltaY] = useState(0);
+  const [mounted, setMounted] = useState(false);
   const overlayRef = useRef<HTMLDivElement>(null);
+
+  // Set mounted state for hydration safety in SSR / Next.js
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const reset = () => {
     setScale(1);
@@ -73,24 +80,26 @@ export function MediaViewer({ src, alt = "Image", open, onClose }: MediaViewerPr
     setScale((prev) => (prev > 1 ? 1 : 2.5));
   };
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
-  const opacity = Math.max(0, 1 - dragDeltaY / 300);
+  const opacity = Math.max(0, 1 - dragDeltaY / 350);
 
-  return (
+  // Using React Portal to attach the lightbox directly to body.
+  // This guarantees it ignores any parent flex, overflow, or relative positioning constraints.
+  return createPortal(
     <div
       ref={overlayRef}
-      className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-black"
+      className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-black/95 backdrop-blur-md transition-opacity duration-200 select-none animate-in fade-in"
       style={{ opacity }}
       onClick={(e) => {
         if (e.target === overlayRef.current) handleClose();
       }}
     >
       {/* Top bar */}
-      <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between p-4 bg-gradient-to-b from-black/70 to-transparent">
+      <div className="absolute top-0 left-0 right-0 z-[10000] flex items-center justify-between p-4 bg-gradient-to-b from-black/80 to-transparent safe-top">
         <button
           onClick={handleClose}
-          className="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+          className="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-transform"
         >
           <X className="w-5 h-5 text-white" />
         </button>
@@ -98,45 +107,45 @@ export function MediaViewer({ src, alt = "Image", open, onClose }: MediaViewerPr
           <button
             onClick={() => setScale((s) => Math.max(1, s - 0.5))}
             disabled={scale <= 1}
-            className="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 transition-colors disabled:opacity-30"
+            className="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-transform disabled:opacity-30"
           >
             <ZoomOut className="w-4 h-4 text-white" />
           </button>
           <button
             onClick={() => setScale((s) => Math.min(4, s + 0.5))}
-            className="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+            className="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-transform"
           >
             <ZoomIn className="w-4 h-4 text-white" />
           </button>
           <button
             onClick={handleDownload}
-            className="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+            className="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-transform"
           >
             <Download className="w-4 h-4 text-white" />
           </button>
         </div>
       </div>
 
-      {/* Image */}
+      {/* Image Container */}
       <div
-        className="flex items-center justify-center w-full h-full overflow-hidden"
+        className="flex items-center justify-center w-full h-full p-4 overflow-hidden"
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onDoubleClick={handleDoubleClick}
         style={{
           transform: `translateY(${dragDeltaY}px)`,
-          transition: isDragging ? "none" : "transform 0.3s ease",
+          transition: isDragging ? "none" : "transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
           cursor: scale > 1 ? "zoom-out" : "zoom-in",
         }}
       >
         <img
           src={src}
           alt={alt}
-          className="max-w-full max-h-full object-contain select-none"
+          className="max-w-full max-h-[85vh] object-contain select-none shadow-2xl rounded-lg"
           style={{
             transform: `scale(${scale})`,
-            transition: "transform 0.2s ease",
+            transition: "transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)",
           }}
           draggable={false}
         />
@@ -148,6 +157,8 @@ export function MediaViewer({ src, alt = "Image", open, onClose }: MediaViewerPr
           Swipe down to close · Double-tap to zoom
         </p>
       )}
-    </div>
+    </div>,
+    document.body
   );
 }
+

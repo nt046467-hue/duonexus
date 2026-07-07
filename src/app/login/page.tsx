@@ -180,6 +180,9 @@ export default function LoginPage() {
           <h1 className="text-3xl font-headline text-foreground tracking-tighter">
             DuoNexus
           </h1>
+          <p className="text-primary font-headline uppercase tracking-[0.15em] text-[11px] font-bold">
+            Nabin ❤️ Karu
+          </p>
           <p className="text-muted-foreground text-sm">Our private little corner.</p>
         </div>
 
@@ -236,18 +239,6 @@ export default function LoginPage() {
                     : "bg-muted/30 border-primary/10"
                 )}
               >
-                <input
-                  ref={pinRefs[i]}
-                  type="tel"
-                  inputMode="none"
-                  pattern="[0-9]*"
-                  maxLength={1}
-                  value={digit}
-                  readOnly
-                  tabIndex={-1}
-                  className="absolute inset-0 w-full h-full bg-transparent text-center text-xl font-bold outline-none opacity-0 z-10 cursor-pointer select-none"
-                />
-
                 {digit && (
                   <div className="w-3 h-3 bg-white rounded-full pointer-events-none" />
                 )}
@@ -290,10 +281,6 @@ export default function LoginPage() {
             </div>
           )}
         </div>
-
-        <p className="text-center text-[10px] text-muted-foreground uppercase tracking-widest opacity-50">
-          Nabin ❤️ Karu
-        </p>
       </div>
 
       <style jsx>{`

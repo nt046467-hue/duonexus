@@ -128,6 +128,8 @@ export default function ChatPage() {
   // Profile sheet state
   const [isPartnerProfileSheetOpen, setIsPartnerProfileSheetOpen] = useState(false);
 
+  // Chat background (synced via Firestore)
+  const [chatBg, setChatBg] = useState<string | null>(null);
 
   // Mood state
   const [myMoodToday, setMyMoodToday] = useState<string | null>(null);
@@ -479,6 +481,18 @@ export default function ChatPage() {
   }, [firestore]);
   const { data: globalStats } = useDoc(statsRef);
 
+  // CHAT BACKGROUND — real-time sync across both devices
+  useEffect(() => {
+    if (!firestore) return;
+    const settingsRef = doc(firestore, "settings", "shared");
+    const unsub = onSnapshot(settingsRef, (snap) => {
+      const data = snap.data();
+      if (data?.chatBg) setChatBg(data.chatBg);
+      else setChatBg(null);
+    });
+    return () => unsub();
+  }, [firestore]);
+
   // AI Sparks
   useEffect(() => {
     if (!firestore) return;
@@ -675,7 +689,10 @@ export default function ChatPage() {
     <div className="flex flex-col h-dynamic-screen w-full bg-background overflow-hidden relative items-center">
 
 
-      <div className="flex-1 flex flex-col h-full w-full max-w-2xl bg-background relative overflow-hidden shadow-2xl border-x border-primary/5">
+      <div
+        className={`flex-1 flex flex-col h-full w-full max-w-2xl bg-background relative overflow-hidden shadow-2xl border-x border-primary/5 ${chatBg ? 'chat-bg-custom' : 'chat-bg-theme'}`}
+        style={chatBg ? { backgroundImage: `url(${chatBg})` } : undefined}
+      >
         <ChatHeader
           partnerName={finalPartnerName}
           partnerAvatar={partnerAvatar}

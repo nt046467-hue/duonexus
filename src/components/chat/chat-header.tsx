@@ -20,6 +20,8 @@ import {
   ChevronRight,
   Phone,
   Video,
+  ImageIcon,
+  Trash2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,7 +39,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useState, useEffect, useRef } from "react";
 import { updateProfile, signOut } from "firebase/auth";
-import { doc, setDoc, serverTimestamp, collection, query, orderBy } from "firebase/firestore";
+import { doc, setDoc, serverTimestamp, collection, query, orderBy, deleteField } from "firebase/firestore";
 import { useFirestore, useUser, useDoc, useMemoFirebase, useAuth, useCollection } from "@/firebase";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
@@ -111,11 +113,13 @@ export function ChatHeader({
   const [isPartnerProfileOpen, setIsPartnerProfileOpen] = useState(false);
   const [isOwnProfileOpen, setIsOwnProfileOpen] = useState(false);
   const [isCountdownOpen, setIsCountdownOpen] = useState(false);
+  const [isUploadingBg, setIsUploadingBg] = useState(false);
 
   const [isSaving, setIsSaving] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const bgInputRef = useRef<HTMLInputElement>(null);
   const [myId, setMyId] = useState<string>("");
 
   useEffect(() => {
@@ -289,6 +293,48 @@ export function ChatHeader({
     }
   };
 
+  const handleBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !db) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ variant: "destructive", title: "Too large", description: "Pick an image under 5 MB." });
+      return;
+    }
+    setIsUploadingBg(true);
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      try {
+        // Resize to max 1200px wide for storage efficiency
+        const img = new Image();
+        img.src = reader.result as string;
+        img.onload = async () => {
+          const canvas = document.createElement("canvas");
+          const MAX = 1200;
+          let w = img.width, h = img.height;
+          if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+          canvas.width = w; canvas.height = h;
+          canvas.getContext("2d")?.drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+          await setDoc(doc(db, "settings", "shared"), { chatBg: dataUrl }, { merge: true });
+          toast({ title: "Wallpaper set! 🌸", description: "Both devices updated instantly." });
+          setIsUploadingBg(false);
+        };
+      } catch {
+        toast({ variant: "destructive", title: "Upload failed", description: "Please try again." });
+        setIsUploadingBg(false);
+      }
+    };
+    reader.readAsDataURL(file);
+    // Reset file input so same file can be re-selected
+    e.target.value = "";
+  };
+
+  const handleBgReset = async () => {
+    if (!db) return;
+    await setDoc(doc(db, "settings", "shared"), { chatBg: deleteField() }, { merge: true });
+    toast({ title: "Wallpaper removed", description: "Default theme restored." });
+  };
+
   return (
     <header className="w-full bg-background/80 backdrop-blur-xl border-b border-primary/5 shrink-0 z-50 sticky top-0 px-4">
       <div className="h-16 flex items-center justify-between w-full safe-top">
@@ -319,7 +365,7 @@ export function ChatHeader({
           <div className="flex flex-col min-w-0">
             <h2 className="text-[13px] font-headline font-bold leading-none truncate flex items-center gap-1">
               {partnerName || "Partner"}
-              <HeartIcon className="w-2.5 h-2.5 text-primary fill-primary" />
+              <HeartIcon className="w-2.5 h-2.5 text-primary fill-primary shrink-0 animate-pulse" />
             </h2>
             <p
               className={cn(
@@ -367,10 +413,10 @@ export function ChatHeader({
             )}
           </Button>
 
-          {/* Streak badge */}
+          {/* Streak badge (hidden on mobile, visible in settings/profile) */}
           <Badge
             variant="secondary"
-            className="bg-orange-500/10 text-orange-500 border-none gap-1 flex items-center font-headline px-2 py-0.5 rounded-full shrink-0 shadow-sm h-7"
+            className="bg-orange-500/10 text-orange-500 border-none gap-1 hidden sm:flex items-center font-headline px-2 py-0.5 rounded-full shrink-0 shadow-sm h-7"
           >
             <Flame className="w-3 h-3 fill-orange-500" />
             <span className="text-[11px] font-bold">{streak}</span>
@@ -410,7 +456,12 @@ export function ChatHeader({
             </DialogTrigger>
             <DialogContent
               className="w-[92vw] max-w-[425px] rounded-[2.5rem] border-primary/5 bg-background/95 backdrop-blur-2xl p-8 z-[110]"
-              onOpenAutoFocus={(e) => e.preventDefault()}
+              onOpenAutoFocus={(e) => {
+                e.preventDefault();
+                if (e.currentTarget instanceof HTMLElement) {
+                  e.currentTarget.focus();
+                }
+              }}
             >
               <DialogHeader className="mb-4">
                 <DialogTitle className="font-headline text-xl tracking-tighter text-left">
@@ -448,6 +499,18 @@ export function ChatHeader({
                   </div>
                 </div>
                 <div className="space-y-4">
+                  {/* Duo Streak Card in Settings */}
+                  <div className="flex items-center justify-between p-4 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded-2xl border border-orange-500/20">
+                    <div className="flex items-center gap-3">
+                      <Flame className="w-5 h-5 fill-orange-500 text-orange-500 animate-pulse" />
+                      <div className="text-left">
+                        <p className="text-xs font-bold font-headline uppercase tracking-wide">Duo Streak</p>
+                        <p className="text-[9px] text-muted-foreground">Keep the connection active daily!</p>
+                      </div>
+                    </div>
+                    <span className="font-headline text-xl font-black pr-1">{streak}</span>
+                  </div>
+
                   <div className="space-y-2">
                     <Label className="text-[10px] uppercase tracking-widest font-headline text-primary/60 ml-1 font-bold">
                       Display Name
@@ -497,6 +560,41 @@ export function ChatHeader({
                         className="data-[state=checked]:bg-primary"
                       />
                     </div>
+
+                    {/* Chat Wallpaper */}
+                    <div className="flex items-center justify-between p-4 bg-muted/30 rounded-[1.8rem] border border-primary/5">
+                      <div className="flex items-center gap-3">
+                        <ImageIcon className="w-5 h-5 text-primary" />
+                        <div className="text-left">
+                          <p className="text-sm font-semibold">Chat Wallpaper</p>
+                          <p className="text-[9px] text-muted-foreground">Syncs to both devices</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => bgInputRef.current?.click()}
+                          disabled={isUploadingBg}
+                          className="h-8 px-3 rounded-xl text-[10px] font-headline uppercase tracking-widest bg-primary/10 text-primary hover:bg-primary/20 active:scale-95 transition-transform flex items-center gap-1.5 disabled:opacity-50"
+                        >
+                          {isUploadingBg ? <Loader2 className="w-3 h-3 animate-spin" /> : <Camera className="w-3 h-3" />}
+                          {isUploadingBg ? "Saving…" : "Upload"}
+                        </button>
+                        <button
+                          onClick={handleBgReset}
+                          className="h-8 w-8 rounded-xl bg-muted/60 hover:bg-destructive/10 hover:text-destructive active:scale-95 transition-transform flex items-center justify-center"
+                          title="Remove custom wallpaper"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      ref={bgInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleBgUpload}
+                    />
                   </div>
                 </div>
               </div>
@@ -581,6 +679,7 @@ export function ChatHeader({
         mode="own"
         displayName={newName || myProfile?.displayName || ""}
         photoURL={newPhotoURL || myProfile?.photoURL || ""}
+        streak={streak}
         onChangePhoto={() => {
           setIsOwnProfileOpen(false);
           setIsSettingsOpen(true);

@@ -55,6 +55,8 @@ export function CallScreen({
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  // Hidden audio element — plays remote audio for both audio and video calls
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
 
   // Call timer (only when active)
   useEffect(() => {
@@ -117,19 +119,27 @@ export function CallScreen({
     };
   }, [remoteStream]);
 
-  // Connect local stream to video element
+  // Connect local stream to local video element
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream;
     }
   }, [localStream, isCamOff]);
 
-  // Connect remote stream to video element
+  // Connect remote stream to video element (when video is active)
   useEffect(() => {
-    if (remoteVideoRef.current && remoteStream && remoteHasVideo) {
+    if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
     }
-  }, [remoteStream, remoteHasVideo]);
+  }, [remoteStream]);
+
+  // Connect remote stream to audio element — always, for every call type
+  // This is what actually produces sound in audio calls (and as fallback in video calls)
+  useEffect(() => {
+    if (remoteAudioRef.current && remoteStream) {
+      remoteAudioRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream]);
 
   // Mute local tracks
   const toggleMute = () => {
@@ -164,6 +174,10 @@ export function CallScreen({
 
   return (
     <div className="fixed inset-0 z-[250] bg-zinc-950 flex flex-col justify-between text-white safe-top safe-bottom select-none">
+
+      {/* Hidden audio element — always active for remote audio in ALL call types */}
+      {/* This is the element that actually outputs the partner's voice */}
+      <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
       
       {/* ── AUDIO CALL VIEW ── */}
       {!isShowingVideo && (
