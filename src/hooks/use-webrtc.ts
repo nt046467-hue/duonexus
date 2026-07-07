@@ -23,9 +23,10 @@ interface UseWebRTCOptions {
   partnerId: string;
   onIncomingCall?: (callId: string, type: CallType) => void;
   onCallEnded?: () => void;
+  onCameraError?: (errorName: string) => void;
 }
 
-export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded }: UseWebRTCOptions) {
+export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCameraError }: UseWebRTCOptions) {
   const db = useFirestore();
   const [callId, setCallId] = useState<string | null>(null);
   const [callType, setCallType] = useState<CallType>("audio");
@@ -62,6 +63,29 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded }: UseW
   useEffect(() => {
     onCallEndedRef.current = onCallEnded;
   }, [onCallEnded]);
+
+  const onCameraErrorRef = useRef(onCameraError);
+  useEffect(() => {
+    onCameraErrorRef.current = onCameraError;
+  }, [onCameraError]);
+
+  // Clean up and mark call as ended in Firestore if user reloads the tab or closes the window
+  useEffect(() => {
+    const handleUnload = () => {
+      const cid = callIdRef.current;
+      if (cid && db && callStateRef.current !== "idle") {
+        const callDocRef = doc(db, "calls", cid);
+        updateDoc(callDocRef, {
+          status: "ended",
+          endedAt: serverTimestamp(),
+        }).catch(() => {});
+      }
+    };
+    window.addEventListener("beforeunload", handleUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleUnload);
+    };
+  }, [db]);
 
   /** Safely add an ICE candidate — buffers if remote description not yet set */
   const addCandidateSafe = useCallback(async (pc: RTCPeerConnection, data: RTCIceCandidateInit) => {
@@ -234,8 +258,11 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded }: UseW
         stream.getVideoTracks().forEach((t) => { t.enabled = false; });
       }
       return stream;
-    } catch {
-      console.warn("[WebRTC] Camera not available, falling back to audio-only");
+    } catch (err: any) {
+      console.warn("[WebRTC] Camera not available, falling back to audio-only:", err);
+      if (onCameraErrorRef.current) {
+        onCameraErrorRef.current(err.name || "Error");
+      }
       return navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     }
   }, []);

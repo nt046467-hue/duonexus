@@ -46,6 +46,13 @@ export function ProfileSheet({
   const [isViewerOpen, setIsViewerOpen] = useState(false);
   const initials = displayName?.[0]?.toUpperCase() || (mode === "own" ? "M" : "P");
 
+  // Opens the full-screen photo viewer and CLOSES the profile sheet first.
+  // This is the same pattern as WhatsApp/Telegram — the sheet slides away, viewer takes over.
+  const handleOpenViewer = () => {
+    onClose();           // close sheet first
+    setIsViewerOpen(true); // then open viewer (via portal direct to body)
+  };
+
   return (
     <>
       <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
@@ -56,16 +63,6 @@ export function ProfileSheet({
             e.preventDefault();
             if (e.currentTarget instanceof HTMLElement) {
               e.currentTarget.focus();
-            }
-          }}
-          onPointerDownOutside={(e) => {
-            if (isViewerOpen) {
-              e.preventDefault();
-            }
-          }}
-          onInteractOutside={(e) => {
-            if (isViewerOpen) {
-              e.preventDefault();
             }
           }}
         >
@@ -91,7 +88,7 @@ export function ProfileSheet({
             {/* Avatar — tappable to open full-screen viewer */}
             <div className="relative group">
               <button
-                onClick={() => setIsViewerOpen(true)}
+                onClick={handleOpenViewer}
                 className="relative w-28 h-28 rounded-full focus:outline-none focus:ring-4 focus:ring-primary/30 transition-transform active:scale-95"
                 aria-label={`View ${displayName}'s photo`}
               >
@@ -196,13 +193,15 @@ export function ProfileSheet({
         </SheetContent>
       </Sheet>
 
-      {/* Full-screen photo viewer */}
+      {/* Full-screen photo viewer — rendered via portal to document.body (outside sheet stacking context) */}
       <MediaViewer
         src={photoURL}
         alt={`${displayName}'s photo`}
         open={isViewerOpen}
         onClose={() => setIsViewerOpen(false)}
+        usePortal={true}
       />
     </>
   );
 }
+

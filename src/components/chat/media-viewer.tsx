@@ -11,9 +11,10 @@ interface MediaViewerProps {
   alt?: string;
   open: boolean;
   onClose: () => void;
+  usePortal?: boolean;
 }
 
-export function MediaViewer({ src, alt = "Image", open, onClose }: MediaViewerProps) {
+export function MediaViewer({ src, alt = "Image", open, onClose, usePortal = true }: MediaViewerProps) {
   const [scale, setScale] = useState(1);
   const [isDragging, setIsDragging] = useState(false);
   const [startY, setStartY] = useState(0);
@@ -84,9 +85,7 @@ export function MediaViewer({ src, alt = "Image", open, onClose }: MediaViewerPr
 
   const opacity = Math.max(0, 1 - dragDeltaY / 350);
 
-  // Using React Portal to attach the lightbox directly to body.
-  // This guarantees it ignores any parent flex, overflow, or relative positioning constraints.
-  return createPortal(
+  const viewerContent = (
     <div
       ref={overlayRef}
       className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-black/95 backdrop-blur-md transition-opacity duration-200 select-none animate-in fade-in"
@@ -157,8 +156,12 @@ export function MediaViewer({ src, alt = "Image", open, onClose }: MediaViewerPr
           Swipe down to close · Double-tap to zoom
         </p>
       )}
-    </div>,
-    document.body
+    </div>
   );
+
+  if (usePortal) {
+    return createPortal(viewerContent, document.body);
+  }
+  return viewerContent;
 }
 

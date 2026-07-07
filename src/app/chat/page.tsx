@@ -185,6 +185,44 @@ export default function ChatPage() {
   // Calling state
   const [incomingCallInfo, setIncomingCallInfo] = useState<{ id: string; type: "audio" | "video" } | null>(null);
 
+  // Ongoing call for rejoins
+  const [ongoingCall, setOngoingCall] = useState<{ id: string; type: "audio" | "video"; callerId: string; calleeId: string } | null>(null);
+
+  useEffect(() => {
+    if (!firestore || !myId) return;
+    const callsColl = collection(firestore, "calls");
+    const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
+    const q = query(
+      callsColl,
+      orderBy("createdAt", "desc"),
+      limit(3)
+    );
+
+    const unsub = onSnapshot(q, (snapshot) => {
+      let foundCall = null;
+      for (const d of snapshot.docs) {
+        const data = d.data();
+        const createdAt = data.createdAt?.toMillis?.() ?? 0;
+        if (
+          createdAt > fifteenMinsAgo.getTime() &&
+          (data.status === "active" || data.status === "connecting" || data.status === "ringing") &&
+          (data.callerId === myId || data.calleeId === myId)
+        ) {
+          foundCall = {
+            id: d.id,
+            type: data.type as "audio" | "video",
+            callerId: data.callerId,
+            calleeId: data.calleeId,
+          };
+          break;
+        }
+      }
+      setOngoingCall(foundCall);
+    });
+
+    return () => unsub();
+  }, [firestore, myId]);
+
   // Track if I am the initiator of the current call (ref ensures immediate read on call end)
   const amICallerRef = useRef<boolean>(false);
 
@@ -196,6 +234,16 @@ export default function ChatPage() {
   const handleCallEnded = useCallback(() => {
     setIncomingCallInfo(null);
   }, []);
+
+  const handleCameraError = useCallback((errName: string) => {
+    toast({
+      variant: "destructive",
+      title: "Camera is Locked / Blocked",
+      description: errName === "NotReadableError" || errName === "SourceUnavailableError"
+        ? "Your camera is in use by another tab. Close the other tab or test on two separate devices to use both webcams! 📷"
+        : "Could not access your camera. Please check system settings or permissions. 📷",
+    });
+  }, [toast]);
 
   const {
     startCall,
@@ -212,6 +260,7 @@ export default function ChatPage() {
     partnerId,
     onIncomingCall: handleIncomingCall,
     onCallEnded: handleCallEnded,
+    onCameraError: handleCameraError,
   });
 
   const handleStartCall = useCallback((type: "audio" | "video") => {
@@ -814,6 +863,48 @@ export default function ChatPage() {
               value="chat"
               className="m-0 h-full data-[state=active]:flex-1 data-[state=active]:flex data-[state=active]:flex-col data-[state=active]:overflow-hidden"
             >
+              {/* Ongoing Call Rejoin/Recovery Banner */}
+              {ongoingCall && callState === "idle" && (
+                <div className="bg-emerald-500/10 border-b border-emerald-500/20 px-4 py-2.5 flex items-center justify-between animate-in slide-in-from-top duration-300 z-20 shrink-0 select-none">
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                    </span>
+                    <p className="text-[10px] font-headline uppercase tracking-widest text-emerald-500 font-bold">
+                      Active call in progress...
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-3.5 text-[9px] uppercase tracking-widest font-headline bg-emerald-500 text-white hover:bg-emerald-600 hover:text-white rounded-full font-bold active:scale-95 transition-transform"
+                      onClick={() => {
+                        answerCall(ongoingCall.id);
+                      }}
+                    >
+                      Rejoin
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-3.5 text-[9px] uppercase tracking-widest font-headline bg-red-500/10 text-red-500 hover:bg-red-500/20 hover:text-red-500 border border-red-500/10 rounded-full font-bold active:scale-95 transition-transform"
+                      onClick={async () => {
+                        if (firestore) {
+                          await updateDoc(doc(firestore, "calls", ongoingCall.id), {
+                            status: "ended",
+                            endedAt: serverTimestamp(),
+                          });
+                        }
+                      }}
+                    >
+                      End Call
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               {/* Mood check-in banner */}
               <MoodCheckin
                 myId={myId}

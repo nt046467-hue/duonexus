@@ -33,6 +33,7 @@ import {
   DialogTrigger,
   DialogFooter,
   DialogDescription,
+  DialogClose,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -455,7 +456,7 @@ export function ChatHeader({
               </Button>
             </DialogTrigger>
             <DialogContent
-              className="w-[92vw] max-w-[425px] rounded-[2.5rem] border-primary/5 bg-background/95 backdrop-blur-2xl p-8 z-[110]"
+              className="w-[92vw] max-w-[425px] rounded-[2.5rem] border-primary/5 bg-background/95 backdrop-blur-2xl p-0 z-[110] flex flex-col max-h-[90dvh]"
               onOpenAutoFocus={(e) => {
                 e.preventDefault();
                 if (e.currentTarget instanceof HTMLElement) {
@@ -463,6 +464,8 @@ export function ChatHeader({
                 }
               }}
             >
+              {/* Scrollable body */}
+              <div className="overflow-y-auto flex-1 px-6 pt-7 pb-2">
               <DialogHeader className="mb-4">
                 <DialogTitle className="font-headline text-xl tracking-tighter text-left">
                   Profile Settings
@@ -471,8 +474,8 @@ export function ChatHeader({
                   Customize your DuoNexus presence.
                 </DialogDescription>
               </DialogHeader>
-              <div className="py-2 space-y-6">
-                <div className="flex flex-col items-center gap-3">
+              <div className="py-1 space-y-4">
+                <div className="flex flex-col items-center gap-2">
                   <div
                     className="relative group cursor-pointer"
                     onClick={() => {
@@ -480,14 +483,14 @@ export function ChatHeader({
                       setIsOwnProfileOpen(true);
                     }}
                   >
-                    <Avatar className="h-24 w-24 border-4 border-primary/10 shadow-xl transition-transform active:scale-95">
+                    <Avatar className="h-20 w-20 border-4 border-primary/10 shadow-xl transition-transform active:scale-95">
                       <AvatarImage key={newPhotoURL} src={newPhotoURL} className="object-cover" />
                       <AvatarFallback className="bg-primary/5 text-primary">
-                        <UserIcon className="w-10 h-10" />
+                        <UserIcon className="w-8 h-8" />
                       </AvatarFallback>
                     </Avatar>
                     <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Camera className="w-7 h-7 text-white" />
+                      <Camera className="w-6 h-6 text-white" />
                     </div>
                     <input
                       type="file"
@@ -598,7 +601,10 @@ export function ChatHeader({
                   </div>
                 </div>
               </div>
-              <DialogFooter className="flex flex-col gap-3 mt-6">
+              </div>{/* end scrollable body */}
+
+              {/* Sticky footer — always visible above keyboard/viewport edge */}
+              <div className="px-6 pb-6 pt-3 border-t border-primary/5 flex flex-col gap-2 bg-background/95 rounded-b-[2.5rem]">
                 <Button
                   onClick={handleUpdateProfile}
                   disabled={isSaving}
@@ -606,6 +612,14 @@ export function ChatHeader({
                 >
                   {isSaving ? "Saving..." : "Save Changes"}
                 </Button>
+                <DialogClose asChild>
+                  <Button
+                    variant="outline"
+                    className="w-full h-12 rounded-2xl border-primary/10 hover:bg-primary/5 text-xs font-headline uppercase tracking-widest"
+                  >
+                    Cancel
+                  </Button>
+                </DialogClose>
                 <Button
                   variant="ghost"
                   onClick={handleLogout}
@@ -613,7 +627,7 @@ export function ChatHeader({
                 >
                   <LogOut className="w-4 h-4" /> Log out
                 </Button>
-              </DialogFooter>
+              </div>
             </DialogContent>
           </Dialog>
         </div>
