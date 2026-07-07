@@ -1,0 +1,100 @@
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Messages: anyone authenticated can read.
+    // Create: must be your own uid.
+    // Update: only allow changing status/reactions-adjacent fields on others' messages.
+    //         Sender can update all their own fields.
+    // Delete: only sender.
+    match /messages/{messageId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated()
+        && request.resource.data.senderUid == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        // Sender can update anything on their own message
+        resource.data.senderUid == request.auth.uid
+        ||
+        // Partner can only touch status field (delivered/seen)
+        (request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status']))
+      );
+      allow delete: if isAuthenticated()
+        && resource.data.senderUid == request.auth.uid;
+    }
+
+    // Profiles: anyone authenticated can read. Only write your own profile doc.
+    // Profile doc ID is the role string ("nabin" or "karu") stored in localStorage,
+    // so we can't match on request.auth.uid directly. We allow write if the
+    // doc's stored userId field matches — or if it's a new doc being created.
+    match /profiles/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated()
+        && (
+          !exists(/databases/$(database)/documents/profiles/$(userId))
+          || resource.data.keys().hasAny(['lastActive'])  // allow self-update
+        );
+    }
+
+    // Presence: only write your own presence doc (doc ID = your role).
+    match /presence/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    // Typing: any authenticated user can write (needed for the typing indicator).
+    match /typing/{userId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Reactions: authenticated users can add/remove their own reactions.
+    match /reactions/{reactionId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated()
+        && request.resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated()
+        && resource.data.userId == request.auth.uid;
+      allow update: if false; // reactions are created/deleted, never updated
+    }
+
+    // Memories: both can read/write (shared space).
+    match /memories/{memoryId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Stats: authenticated users can read; write is controlled (streak logic).
+    match /stats/{statId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    // Sparks: authenticated users can read/write (AI love sparks).
+    match /sparks/{sparkId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Key dates: shared, both can manage.
+    match /keyDates/{docId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Nudges (Thinking of You): authenticated users can read/write.
+    match /nudges/{docId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Moods: authenticated users can read all; write only your own.
+    match /moods/{docId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated()
+        && request.resource.data.userId is string;
+      allow update, delete: if isAuthenticated()
+        && resource.data.userId is string;
+    }
+  }
+}

@@ -1,0 +1,121 @@
+
+{
+  "entities": {
+    "Message": {
+      "title": "Message",
+      "description": "A chat message between the couple.",
+      "type": "object",
+      "properties": {
+        "senderUid": {
+          "type": "string"
+        },
+        "senderName": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["text", "image", "audio", "video"]
+        },
+        "timestamp": {
+          "type": "object"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["sent", "delivered", "seen"]
+        }
+      },
+      "required": ["senderUid", "content", "timestamp", "status", "type"]
+    },
+    "Reaction": {
+      "title": "Reaction",
+      "description": "An emoji reaction to a message.",
+      "type": "object",
+      "properties": {
+        "messageId": { "type": "string" },
+        "userId": { "type": "string" },
+        "emoji": { "type": "string" },
+        "timestamp": { "type": "object" }
+      },
+      "required": ["messageId", "userId", "emoji", "timestamp"]
+    },
+    "Memory": {
+      "title": "Memory",
+      "description": "Special milestones and shared favorites.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "date": { "type": "string" },
+        "type": { "type": "string", "enum": ["milestone", "anniversary", "favorite"] },
+        "photoURL": { "type": "string" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["title", "date", "type", "createdBy"]
+    },
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Public profile details for a user.",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "lastActive": { "type": "object" }
+      }
+    },
+    "Presence": {
+      "title": "Presence",
+      "description": "Online status and last seen timestamp.",
+      "type": "object",
+      "properties": {
+        "online": { "type": "boolean" },
+        "lastSeen": { "type": "object" }
+      }
+    },
+    "TypingStatus": {
+      "title": "Typing Status",
+      "description": "Current typing indicator.",
+      "type": "object",
+      "properties": {
+        "isTyping": { "type": "boolean" },
+        "lastUpdated": { "type": "object" }
+      }
+    },
+    "GlobalStats": {
+      "title": "Global Stats",
+      "description": "Shared statistics for the couple.",
+      "type": "object",
+      "properties": {
+        "streak": { "type": "number" },
+        "lastActivityDate": { "type": "string" }
+      }
+    }
+  },
+  "auth": {
+    "providers": ["anonymous"]
+  },
+  "firestore": {
+    "/messages/{messageId}": {
+      "schema": "#/entities/Message"
+    },
+    "/reactions/{reactionId}": {
+      "schema": "#/entities/Reaction"
+    },
+    "/memories/{memoryId}": {
+      "schema": "#/entities/Memory"
+    },
+    "/profiles/{userId}": {
+      "schema": "#/entities/UserProfile"
+    },
+    "/presence/{userId}": {
+      "schema": "#/entities/Presence"
+    },
+    "/typing/{userId}": {
+      "schema": "#/entities/TypingStatus"
+    },
+    "/stats/global": {
+      "schema": "#/entities/GlobalStats"
+    }
+  }
+}
