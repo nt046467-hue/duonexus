@@ -29,13 +29,13 @@ interface ReplyingTo {
   id: string;
   senderName: string;
   content: string;
-  type: "text" | "image" | "audio" | "video" | "gif";
+  type: "text" | "image" | "audio" | "video" | "gif" | "sticker";
 }
 
 interface MessageInputProps {
   onSendMessage: (
     content: string,
-    type: "text" | "image" | "audio" | "video" | "gif",
+    type: "text" | "image" | "audio" | "video" | "gif" | "sticker",
     waveform?: number[]
   ) => void;
   onTyping: (isTyping: boolean) => void;
@@ -192,6 +192,36 @@ export function MessageInput({
     }
   }, []);
 
+  // Mobile keyboard handler: use visualViewport to keep input visible
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const handleResize = () => {
+      // Set a CSS custom property that tracks the actual visible height
+      document.documentElement.style.setProperty(
+        '--vvh',
+        `${vv.height}px`
+      );
+      // Scroll the textarea into view when keyboard opens
+      if (vv.height < window.innerHeight * 0.8) {
+        // Keyboard is likely open
+        requestAnimationFrame(() => {
+          textareaRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+        });
+      }
+    };
+
+    // Set initial value
+    document.documentElement.style.setProperty('--vvh', `${vv.height}px`);
+
+    vv.addEventListener('resize', handleResize);
+    return () => {
+      vv.removeEventListener('resize', handleResize);
+      document.documentElement.style.removeProperty('--vvh');
+    };
+  }, []);
+
   // Focus textarea when reply is set
   useEffect(() => {
     if (replyingTo) {
@@ -223,11 +253,82 @@ export function MessageInput({
     }
   };
 
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    let imageFile: File | null = null;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf("image") !== -1) {
+        const file = items[i].getAsFile();
+        if (file) {
+          imageFile = file;
+          break;
+        }
+      }
+    }
+
+    if (!imageFile && e.clipboardData.files && e.clipboardData.files.length > 0) {
+      const file = e.clipboardData.files[0];
+      if (file && file.type.indexOf("image") !== -1) {
+        imageFile = file;
+      }
+    }
+
+    if (imageFile) {
+      e.preventDefault();
+
+      const checkIsSticker = async (file: File): Promise<boolean> => {
+        if (file.size > 500 * 1024) return false;
+        if (file.type !== "image/png" && file.type !== "image/webp" && file.type !== "image/gif") return false;
+
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target?.result as string;
+            img.onload = () => {
+              const canvas = document.createElement("canvas");
+              canvas.width = Math.min(img.width, 100);
+              canvas.height = Math.min(img.height, 100);
+              const ctx = canvas.getContext("2d");
+              if (!ctx) {
+                resolve(false);
+                return;
+              }
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+              try {
+                const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+                for (let i = 3; i < imgData.length; i += 4) {
+                  if (imgData[i] < 255) {
+                    resolve(true);
+                    return;
+                  }
+                }
+              } catch (err) {
+                // cross-origin or other error
+              }
+              resolve(false);
+            };
+            img.onerror = () => resolve(false);
+          };
+          reader.onerror = () => resolve(false);
+          reader.readAsDataURL(file);
+        });
+      };
+
+      const isSticker = await checkIsSticker(imageFile);
+      const finalType = isSticker ? "sticker" : "image";
+
+      await sendViaStorage(imageFile, finalType);
+    }
+  };
+
   // --- UPLOAD HELPER ---
 
   const sendViaStorage = async (
     blob: Blob,
-    type: "image" | "audio" | "video",
+    type: "image" | "audio" | "video" | "sticker",
     waveform?: number[]
   ) => {
     setIsUploading(true);
@@ -239,7 +340,8 @@ export function MessageInput({
     }
 
     try {
-      const url = await uploadToCloudinary(processedBlob, type, (pct) => setUploadProgress(pct));
+      const uploadType = type === "sticker" ? "image" : type;
+      const url = await uploadToCloudinary(processedBlob, uploadType, (pct) => setUploadProgress(pct));
       onSendMessage(url, type, waveform);
     } catch (err) {
       console.warn("Cloudinary upload failed, attempting fallback to local base64:", err);
@@ -552,6 +654,10 @@ export function MessageInput({
                 ? "📷 Photo"
                 : replyingTo.type === "video"
                 ? "🎥 Video"
+                : replyingTo.type === "gif"
+                ? "🎞️ GIF"
+                : replyingTo.type === "sticker"
+                ? "💝 Sticker"
                 : "🎵 Voice note"}
             </p>
           </div>
@@ -644,11 +750,22 @@ export function MessageInput({
           <Textarea
             ref={textareaRef}
             placeholder="Type your love..."
-            className="min-h-[44px] max-h-[120px] bg-transparent border-none focus-visible:ring-0 resize-none py-3 px-4 text-sm"
+            className="min-h-[44px] max-h-[120px] bg-transparent border-none focus-visible:ring-0 focus-visible:ring-offset-0 resize-none py-3 px-4 text-[16px] leading-relaxed touch-manipulation"
             value={message}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            onFocus={() => {
+              // On mobile, ensure the input stays visible above keyboard
+              setTimeout(() => {
+                textareaRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+              }, 300);
+            }}
             rows={1}
+            enterKeyHint="send"
+            autoComplete="off"
+            autoCorrect="on"
+            style={{ fontSize: '16px' }} // Prevents iOS zoom on focus
           />
         </div>
 
@@ -658,7 +775,7 @@ export function MessageInput({
               {message.trim() ? (
                 <Button
                   size="icon"
-                  className="h-10 w-10 rounded-full bg-primary shadow-lg shadow-primary/20 hover:scale-105 active:scale-95 transition-all"
+                  className="h-10 w-10 rounded-full bg-primary shadow-lg shadow-primary/20 hover:scale-105 active:scale-95 transition-all touch-manipulation"
                   onClick={handleSend}
                 >
                   <Send className="h-5 w-5" />
@@ -668,7 +785,7 @@ export function MessageInput({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="text-primary/60 hover:text-primary h-10 w-10 rounded-full"
+                    className="text-primary/60 hover:text-primary h-10 w-10 rounded-full touch-manipulation"
                     onClick={startAudioRecording}
                     disabled={isUploading}
                   >
@@ -677,7 +794,7 @@ export function MessageInput({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="text-primary/60 hover:text-primary h-10 w-10 rounded-full"
+                    className="text-primary/60 hover:text-primary h-10 w-10 rounded-full touch-manipulation"
                     onClick={() => setIsCameraOpen(true)}
                     disabled={isUploading}
                   >

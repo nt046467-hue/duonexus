@@ -27,6 +27,7 @@ interface CallScreenProps {
   remoteStream: MediaStream | null;
   onHangUp: () => void;
   onGenerateSpark?: () => Promise<string | undefined>;
+  onSwitchCamera?: () => void;
 }
 
 const FILTERS = [
@@ -46,6 +47,7 @@ export function CallScreen({
   remoteStream,
   onHangUp,
   onGenerateSpark,
+  onSwitchCamera,
 }: CallScreenProps) {
   const [duration, setDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
@@ -362,6 +364,18 @@ export function CallScreen({
         >
           {isCamOff ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
         </Button>
+
+        {isShowingVideo && !isCamOff && onSwitchCamera && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onSwitchCamera}
+            className="w-12 h-12 rounded-full border border-white/10 text-white hover:bg-white/10 bg-white/10 transition-transform active:scale-95"
+            aria-label="Switch Camera"
+          >
+            <RefreshCw className="w-5 h-5" />
+          </Button>
+        )}
 
         {/* Speaker Toggle (Audio Call only) */}
         {!isShowingVideo && (

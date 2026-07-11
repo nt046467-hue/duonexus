@@ -87,14 +87,14 @@ interface Message {
   senderUid: string;
   senderName: string;
   content: string;
-  type: "text" | "image" | "audio" | "video" | "gif";
+  type: "text" | "image" | "audio" | "video" | "gif" | "sticker";
   timestamp: any;
   status: "sent" | "delivered" | "seen";
   waveform?: number[];
   replyToId?: string;
   replyToContent?: string;
   replyToSender?: string;
-  replyToType?: "text" | "image" | "audio" | "video" | "gif";
+  replyToType?: "text" | "image" | "audio" | "video" | "gif" | "sticker";
   senderRole?: string;
 }
 
@@ -254,6 +254,7 @@ export default function ChatPage() {
     answerCall,
     declineCall,
     endCall,
+    switchCamera,
     callType,
     callState,
     localStream,
@@ -463,6 +464,8 @@ export default function ChatPage() {
                   ? "📷 Sent a photo"
                   : latestMessage.type === "video"
                   ? "🎥 Sent a video"
+                  : latestMessage.type === "sticker"
+                  ? "💝 Sent a sticker"
                   : "🎵 Sent a voice note",
               // Partner avatar as left circle icon — like WhatsApp/Messenger
               icon: partnerAvatar || `${window.location.origin}/icon-192.png`,
@@ -633,7 +636,7 @@ export default function ChatPage() {
 
   const handleSendMessage = async (
     content: string,
-    type: "text" | "image" | "audio" | "video" | "gif",
+    type: "text" | "image" | "audio" | "video" | "gif" | "sticker",
     waveform?: number[]
   ) => {
 
@@ -1093,7 +1096,7 @@ export default function ChatPage() {
                   <div className="mx-4 mt-2 p-3 bg-primary/10 border border-primary/20 rounded-xl relative animate-in slide-in-from-bottom-2 shadow-sm">
                     <button
                       onClick={() => setShowPrompt(false)}
-                      className="absolute top-2 right-2 text-primary/60 hover:text-primary"
+                      className="absolute top-2 right-2 text-primary/60 hover:text-primary touch-manipulation"
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -1107,7 +1110,7 @@ export default function ChatPage() {
                   </div>
                 )}
 
-                <div className="px-4 py-2 sm:py-3">
+                <div className="px-3 py-2.5">
                   <MessageInput
                     onSendMessage={handleSendMessage}
                     onTyping={handleTyping}
@@ -1371,6 +1374,7 @@ export default function ChatPage() {
           remoteStream={remoteStream}
           onHangUp={endCall}
           onGenerateSpark={handleGenerateSparkForCall}
+          onSwitchCamera={switchCamera}
         />
       )}
     </div>

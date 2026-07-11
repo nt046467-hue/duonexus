@@ -62,7 +62,10 @@ html, body {
     height: 100%;
     width: 100%;
     overflow: hidden;
-    position: fixed;
+    /* position:fixed breaks mobile keyboard viewport adjustment;
+       use overflow:hidden + overscroll-behavior instead */
+    overscroll-behavior: none;
+    touch-action: manipulation;
   }
   * {
     @apply border-border;
@@ -105,7 +108,19 @@ html, body {
 }
 
 .h-dynamic-screen {
-  height: 100dvh;
+  height: var(--vvh, 100dvh);
+}
+
+/* Safe-area bottom padding for input bar */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* Prevent iOS from zooming on input focus — minimum 16px font */
+@supports (-webkit-touch-callout: none) {
+  input, textarea, select {
+    font-size: 16px !important;
+  }
 }
 
 .scrollbar-hide::-webkit-scrollbar {

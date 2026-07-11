@@ -31,7 +31,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 interface MessageBubbleProps {
   id: string;
   content: string;
-  type: "text" | "image" | "audio" | "video" | "gif";
+  type: "text" | "image" | "audio" | "video" | "gif" | "sticker";
   timestamp: number;
   isMe: boolean;
   status: "sent" | "delivered" | "seen";
@@ -39,7 +39,7 @@ interface MessageBubbleProps {
   replyToId?: string;
   replyToContent?: string;
   replyToSender?: string;
-  replyToType?: "text" | "image" | "audio" | "video" | "gif";
+  replyToType?: "text" | "image" | "audio" | "video" | "gif" | "sticker";
   onReply?: (id: string) => void;
   onScrollToMessage?: (id: string) => void;
   /** First message in a group — adds extra top margin */
@@ -327,9 +327,10 @@ export function MessageBubble({
           className={cn(
             "px-[14px] py-[9px] rounded-[18px] text-[15px] leading-relaxed relative shadow-sm border transition-all break-words",
             isEmojiOnly && "!bg-transparent !border-transparent !shadow-none !px-0 !py-0 text-4xl leading-none",
+            type === "sticker" && "!bg-transparent !border-transparent !shadow-none !p-0",
             isMe
-              ? "bg-primary text-primary-foreground border-primary/0 shadow-primary/10 shadow-md"
-              : "bg-card dark:bg-muted/60 border-primary/10 text-foreground shadow-black/5 shadow-md",
+              ? (type === "sticker" ? "text-foreground" : "bg-primary text-primary-foreground border-primary/0 shadow-primary/10 shadow-md")
+              : (type === "sticker" ? "text-foreground" : "bg-card dark:bg-muted/60 border-primary/10 text-foreground shadow-black/5 shadow-md"),
             isMe && isLastInGroup && "rounded-br-[4px]",
             !isMe && isLastInGroup && "rounded-bl-[4px]",
             isHighlighted &&
@@ -357,6 +358,8 @@ export function MessageBubble({
                   ? "📷 Photo"
                   : replyToType === "gif"
                   ? "🎞️ GIF"
+                  : replyToType === "sticker"
+                  ? "💝 Sticker"
                   : replyToType === "video"
                   ? "🎥 Video"
                   : "🎵 Voice note"}
@@ -367,6 +370,27 @@ export function MessageBubble({
           {/* Message content */}
           {type === "text" && (
             <span className={isEmojiOnly ? "" : "whitespace-pre-wrap"}>{content}</span>
+          )}
+
+          {type === "sticker" && (
+            <>
+              <div
+                className="cursor-pointer"
+                onClick={() => setIsViewerOpen(true)}
+              >
+                <img
+                  src={content}
+                  alt="Sticker"
+                  className="w-[140px] h-[140px] object-contain block select-none"
+                />
+              </div>
+              <MediaViewer
+                src={content}
+                alt="Sticker"
+                open={isViewerOpen}
+                onClose={() => setIsViewerOpen(false)}
+              />
+            </>
           )}
 
           {type === "image" && (

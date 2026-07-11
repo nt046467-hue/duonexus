@@ -37,6 +37,7 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const callStateRef = useRef<CallState>("idle");
+  const facingModeRef = useRef<"user" | "environment">("user");
   // callIdRef mirrors callId state — prevents stale closures in async callbacks
   const callIdRef = useRef<string | null>(null);
   const isCallerRef = useRef<boolean>(false);
@@ -142,6 +143,7 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
     setCallState(finalState);
     isCallerRef.current = false;
     setIsCaller(false);
+    facingModeRef.current = "user";
 
     onCallEndedRef.current?.();
   }, []);
@@ -197,7 +199,22 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
     // Add local tracks to peer connection
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => {
-        if (localStreamRef.current) pc.addTrack(track, localStreamRef.current);
+        if (localStreamRef.current) {
+          const sender = pc.addTrack(track, localStreamRef.current);
+          if (track.kind === "video") {
+            try {
+              const params = sender.getParameters();
+              params.encodings = [{ maxBitrate: 900_000, priority: "high" }];
+              sender.setParameters(params).then(() => {
+                console.log("[WebRTC] Initial video bitrate constraint of 900kbps set successfully");
+              }).catch((err) => {
+                console.warn("[WebRTC] Failed to set initial video bitrate constraint:", err);
+              });
+            } catch (err) {
+              console.warn("[WebRTC] Error setting initial video encoding parameters:", err);
+            }
+          }
+        }
       });
     }
 
@@ -250,16 +267,35 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
     }
   }, [db, cleanUp]);
 
-  // Get local user media (audio + optionally video)
+  // Get local user media (audio + optionally video with constraints)
   const getLocalStream = useCallback(async (type: CallType): Promise<MediaStream> => {
+    if (type === "audio") {
+      // Never request camera for pure audio calls
+      return navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    }
+
+    const currentFacing = facingModeRef.current;
+    const videoConstraints = {
+      facingMode: currentFacing,
+      width: { ideal: 1280, max: 1280 },
+      height: { ideal: 720, max: 720 },
+      frameRate: { ideal: 30, max: 30 },
+    };
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-      if (type === "audio") {
-        stream.getVideoTracks().forEach((t) => { t.enabled = false; });
-      }
-      return stream;
+      return await navigator.mediaDevices.getUserMedia({ audio: true, video: videoConstraints });
     } catch (err: any) {
-      console.warn("[WebRTC] Camera not available, falling back to audio-only:", err);
+      console.warn("[WebRTC] getUserMedia with ideal constraints failed, attempting fallback:", err);
+      if (err.name === "OverconstrainedError" || err.name === "ConstraintNotSatisfiedError") {
+        try {
+          return await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: { facingMode: currentFacing },
+          });
+        } catch (fallbackErr) {
+          console.warn("[WebRTC] getUserMedia fallback failed:", fallbackErr);
+        }
+      }
       if (onCameraErrorRef.current) {
         onCameraErrorRef.current(err.name || "Error");
       }
@@ -476,11 +512,85 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
     return () => unsub();
   }, [db, myId]);
 
+  const switchCamera = useCallback(async () => {
+    if (!localStreamRef.current || callType !== "video") return;
+
+    const videoTrack = localStreamRef.current.getVideoTracks()[0];
+    if (!videoTrack) return;
+
+    const nextFacing = facingModeRef.current === "user" ? "environment" : "user";
+    console.log(`[WebRTC] Switching camera from ${facingModeRef.current} to ${nextFacing}`);
+
+    const videoConstraints = {
+      facingMode: nextFacing,
+      width: { ideal: 1280, max: 1280 },
+      height: { ideal: 720, max: 720 },
+      frameRate: { ideal: 30, max: 30 },
+    };
+
+    let newStream: MediaStream;
+    try {
+      newStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: videoConstraints,
+      });
+    } catch (err: any) {
+      console.warn("[WebRTC] switchCamera with ideal constraints failed, retrying...", err);
+      if (err.name === "OverconstrainedError" || err.name === "ConstraintNotSatisfiedError") {
+        try {
+          newStream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode: nextFacing },
+          });
+        } catch (fallbackErr) {
+          console.error("[WebRTC] switchCamera fallback failed:", fallbackErr);
+          return;
+        }
+      } else {
+        console.error("[WebRTC] switchCamera failed:", err);
+        return;
+      }
+    }
+
+    const newVideoTrack = newStream.getVideoTracks()[0];
+    if (!newVideoTrack) {
+      newStream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+
+    if (pcRef.current) {
+      const sender = pcRef.current.getSenders().find((s) => s.track?.kind === "video");
+      if (sender) {
+        try {
+          await sender.replaceTrack(newVideoTrack);
+          console.log("[WebRTC] RTCRtpSender video track successfully replaced.");
+          const params = sender.getParameters();
+          params.encodings = [{ maxBitrate: 900_000, priority: "high" }];
+          await sender.setParameters(params);
+        } catch (e) {
+          console.error("[WebRTC] RTCRtpSender.replaceTrack failed:", e);
+          newVideoTrack.stop();
+          return;
+        }
+      }
+    }
+
+    videoTrack.stop();
+
+    const oldStream = localStreamRef.current;
+    oldStream.removeTrack(videoTrack);
+    oldStream.addTrack(newVideoTrack);
+
+    setLocalStream(new MediaStream(oldStream.getTracks()));
+    facingModeRef.current = nextFacing;
+  }, [callType]);
+
   return {
     startCall,
     answerCall,
     declineCall,
     endCall,
+    switchCamera,
     callId,
     callType,
     callState,

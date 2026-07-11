@@ -91,36 +91,57 @@ export function MediaViewer({ src, alt = "Image", open, onClose, usePortal = tru
       className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-black/95 backdrop-blur-md transition-opacity duration-200 select-none animate-in fade-in"
       style={{ opacity }}
       onClick={(e) => {
+        // Only close when tapping the backdrop itself, not any child element
         if (e.target === overlayRef.current) handleClose();
       }}
     >
-      {/* Top bar */}
-      <div className="absolute top-0 left-0 right-0 z-[10000] flex items-center justify-between p-4 bg-gradient-to-b from-black/80 to-transparent safe-top">
+      {/* Top bar — pointer-events-auto ensures taps hit buttons even over swipe area */}
+      <div
+        className="absolute top-0 left-0 right-0 z-[10001] flex items-center justify-between p-4 pb-6 bg-gradient-to-b from-black/80 via-black/40 to-transparent safe-top pointer-events-auto"
+        onClick={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+        onTouchMove={(e) => e.stopPropagation()}
+        onTouchEnd={(e) => e.stopPropagation()}
+      >
         <button
-          onClick={handleClose}
-          className="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-transform"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            handleClose();
+          }}
+          onTouchEnd={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            handleClose();
+          }}
+          className="w-12 h-12 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/25 active:scale-90 transition-all touch-manipulation cursor-pointer"
+          aria-label="Close viewer"
+          type="button"
         >
-          <X className="w-5 h-5 text-white" />
+          <X className="w-6 h-6 text-white pointer-events-none" />
         </button>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setScale((s) => Math.max(1, s - 0.5))}
             disabled={scale <= 1}
-            className="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-transform disabled:opacity-30"
+            className="w-11 h-11 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-transform disabled:opacity-30 touch-manipulation"
+            type="button"
           >
-            <ZoomOut className="w-4 h-4 text-white" />
+            <ZoomOut className="w-4 h-4 text-white pointer-events-none" />
           </button>
           <button
             onClick={() => setScale((s) => Math.min(4, s + 0.5))}
-            className="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-transform"
+            className="w-11 h-11 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-transform touch-manipulation"
+            type="button"
           >
-            <ZoomIn className="w-4 h-4 text-white" />
+            <ZoomIn className="w-4 h-4 text-white pointer-events-none" />
           </button>
           <button
             onClick={handleDownload}
-            className="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-transform"
+            className="w-11 h-11 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-transform touch-manipulation"
+            type="button"
           >
-            <Download className="w-4 h-4 text-white" />
+            <Download className="w-4 h-4 text-white pointer-events-none" />
           </button>
         </div>
       </div>
