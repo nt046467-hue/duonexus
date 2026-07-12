@@ -4,7 +4,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Send, Smile, Mic, X, Camera, RefreshCw, Reply } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Popover,
   PopoverContent,
@@ -174,7 +173,7 @@ export function MessageInput({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -187,8 +186,8 @@ export function MessageInput({
   const audioRecordingStreamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.focus();
+    if (composerRef.current) {
+      composerRef.current.focus();
     }
   }, []);
 
@@ -207,7 +206,7 @@ export function MessageInput({
       if (vv.height < window.innerHeight * 0.8) {
         // Keyboard is likely open
         requestAnimationFrame(() => {
-          textareaRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+          composerRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
         });
       }
     };
@@ -225,7 +224,7 @@ export function MessageInput({
   // Focus textarea when reply is set
   useEffect(() => {
     if (replyingTo) {
-      setTimeout(() => textareaRef.current?.focus(), 50);
+      setTimeout(() => composerRef.current?.focus(), 50);
     }
   }, [replyingTo]);
 
@@ -234,16 +233,142 @@ export function MessageInput({
     if (trimmed) {
       onSendMessage(trimmed, "text");
       setMessage("");
+      if (composerRef.current) {
+        composerRef.current.innerText = "";
+      }
       onTyping(false);
-      setTimeout(() => textareaRef.current?.focus(), 50);
+      setTimeout(() => composerRef.current?.focus(), 50);
     }
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setMessage(e.target.value);
+  const handleInput = async (e: React.FormEvent<HTMLDivElement>) => {
+    const el = composerRef.current;
+    if (!el) return;
+
+    // Scan for any <img> node (inserted natively by paste or Gboard keyboard commit)
+    const imgNode = el.querySelector("img");
+    if (imgNode) {
+      const src = imgNode.src;
+      imgNode.remove();
+      setMessage(el.innerText);
+
+      if (src) {
+        handleKeyboardMedia(src);
+      }
+      return;
+    }
+
+    setMessage(el.innerText);
     onTyping(true);
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => onTyping(false), 2000);
+  };
+
+  const handleKeyboardMedia = async (src: string) => {
+    setIsUploading(true);
+    setUploadProgress(0);
+
+    try {
+      const response = await fetch(src);
+      const blob = await response.blob();
+
+      const mimeType = blob.type || "image/png";
+      let finalType: "gif" | "sticker" | "image" = "image";
+
+      if (mimeType === "image/gif") {
+        finalType = "gif";
+      } else {
+        // Transparency and size check to identify stickers
+        const checkIsSticker = async (imageBlob: Blob): Promise<boolean> => {
+          if (imageBlob.size > 1024 * 1024) return false;
+          if (
+            mimeType !== "image/png" &&
+            mimeType !== "image/webp" &&
+            mimeType !== "image/gif"
+          ) {
+            return false;
+          }
+
+          return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              const img = new Image();
+              img.src = event.target?.result as string;
+              img.onload = () => {
+                const canvas = document.createElement("canvas");
+                canvas.width = Math.min(img.width, 100);
+                canvas.height = Math.min(img.height, 100);
+                const ctx = canvas.getContext("2d");
+                if (!ctx) {
+                  resolve(false);
+                  return;
+                }
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                try {
+                  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+                  for (let i = 3; i < imgData.length; i += 4) {
+                    if (imgData[i] < 255) {
+                      resolve(true);
+                      return;
+                    }
+                  }
+                } catch (err) {
+                  // cross-origin error
+                }
+                resolve(false);
+              };
+              img.onerror = () => resolve(false);
+            };
+            reader.onerror = () => resolve(false);
+            reader.readAsDataURL(imageBlob);
+          });
+        };
+
+        const isSticker = await checkIsSticker(blob);
+        finalType = isSticker ? "sticker" : "image";
+      }
+
+      await sendViaStorage(blob, finalType);
+    } catch (err) {
+      console.error("Keyboard media process error:", err);
+      toast({
+        variant: "destructive",
+        title: "Process failed",
+        description: "Failed to process keyboard media.",
+      });
+    } finally {
+      setIsUploading(false);
+      setUploadProgress(null);
+    }
+  };
+
+  const insertTextAtCursor = (text: string) => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.focus();
+
+    try {
+      const sel = window.getSelection();
+      let inside = false;
+      if (sel && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        inside = el.contains(range.commonAncestorContainer);
+      }
+
+      if (!inside) {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        range.collapse(false);
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      }
+
+      document.execCommand("insertText", false, text);
+    } catch (err) {
+      el.innerText += text;
+    }
+    setMessage(el.innerText);
+    onTyping(true);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -253,82 +378,34 @@ export function MessageInput({
     }
   };
 
-  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+  const handlePaste = async (e: React.ClipboardEvent<HTMLDivElement>) => {
     const items = e.clipboardData?.items;
     if (!items) return;
 
-    let imageFile: File | null = null;
+    let hasImage = false;
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.indexOf("image") !== -1) {
-        const file = items[i].getAsFile();
-        if (file) {
-          imageFile = file;
-          break;
-        }
+        hasImage = true;
+        break;
       }
     }
 
-    if (!imageFile && e.clipboardData.files && e.clipboardData.files.length > 0) {
-      const file = e.clipboardData.files[0];
-      if (file && file.type.indexOf("image") !== -1) {
-        imageFile = file;
-      }
+    if (hasImage) {
+      // Let standard browser paste insert the <img> node, which handleInput will intercept
+      return;
     }
 
-    if (imageFile) {
-      e.preventDefault();
-
-      const checkIsSticker = async (file: File): Promise<boolean> => {
-        if (file.size > 500 * 1024) return false;
-        if (file.type !== "image/png" && file.type !== "image/webp" && file.type !== "image/gif") return false;
-
-        return new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onload = (event) => {
-            const img = new Image();
-            img.src = event.target?.result as string;
-            img.onload = () => {
-              const canvas = document.createElement("canvas");
-              canvas.width = Math.min(img.width, 100);
-              canvas.height = Math.min(img.height, 100);
-              const ctx = canvas.getContext("2d");
-              if (!ctx) {
-                resolve(false);
-                return;
-              }
-              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-              try {
-                const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-                for (let i = 3; i < imgData.length; i += 4) {
-                  if (imgData[i] < 255) {
-                    resolve(true);
-                    return;
-                  }
-                }
-              } catch (err) {
-                // cross-origin or other error
-              }
-              resolve(false);
-            };
-            img.onerror = () => resolve(false);
-          };
-          reader.onerror = () => resolve(false);
-          reader.readAsDataURL(file);
-        });
-      };
-
-      const isSticker = await checkIsSticker(imageFile);
-      const finalType = isSticker ? "sticker" : "image";
-
-      await sendViaStorage(imageFile, finalType);
-    }
+    // Intercept and paste plain text to strip styles
+    e.preventDefault();
+    const text = e.clipboardData.getData("text/plain");
+    document.execCommand("insertText", false, text);
   };
 
   // --- UPLOAD HELPER ---
 
   const sendViaStorage = async (
     blob: Blob,
-    type: "image" | "audio" | "video" | "sticker",
+    type: "image" | "audio" | "video" | "sticker" | "gif",
     waveform?: number[]
   ) => {
     setIsUploading(true);
@@ -340,7 +417,7 @@ export function MessageInput({
     }
 
     try {
-      const uploadType = type === "sticker" ? "image" : type;
+      const uploadType = (type === "sticker" || type === "gif") ? "image" : type;
       const url = await uploadToCloudinary(processedBlob, uploadType, (pct) => setUploadProgress(pct));
       onSendMessage(url, type, waveform);
     } catch (err) {
@@ -731,7 +808,7 @@ export function MessageInput({
               sideOffset={10}
             >
               <GifPicker
-                onEmojiSelect={(emoji) => setMessage((prev) => prev + emoji)}
+                onEmojiSelect={(emoji) => insertTextAtCursor(emoji)}
                 onGifSelect={(gifUrl) => {
                   onSendMessage(gifUrl, "gif");
                 }}
@@ -747,24 +824,27 @@ export function MessageInput({
             isRecordingAudio && "hidden"
           )}
         >
-          <Textarea
-            ref={textareaRef}
-            placeholder="Type your love..."
-            className="min-h-[44px] max-h-[120px] bg-transparent border-none focus-visible:ring-0 focus-visible:ring-offset-0 resize-none py-3 px-4 text-[16px] leading-relaxed touch-manipulation"
-            value={message}
-            onChange={handleChange}
+          {!message && (
+            <div className="absolute left-4 top-3 text-muted-foreground/60 pointer-events-none select-none text-[16px] leading-relaxed">
+              Type your love...
+            </div>
+          )}
+          <div
+            ref={composerRef}
+            contentEditable
+            role="textbox"
+            aria-multiline="true"
+            className="min-h-[44px] max-h-[120px] bg-transparent border-none outline-none focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 resize-none py-3 px-4 text-[16px] leading-relaxed touch-manipulation overflow-y-auto w-full"
+            onInput={handleInput}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             onFocus={() => {
               // On mobile, ensure the input stays visible above keyboard
               setTimeout(() => {
-                textareaRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+                composerRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
               }, 300);
             }}
-            rows={1}
             enterKeyHint="send"
-            autoComplete="off"
-            autoCorrect="on"
             style={{ fontSize: '16px' }} // Prevents iOS zoom on focus
           />
         </div>
