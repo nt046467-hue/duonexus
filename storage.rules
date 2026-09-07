@@ -1,0 +1,17 @@
+
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Only authenticated users can read/write media files
+    match /media/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        // Max 50MB per file
+        && request.resource.size < 50 * 1024 * 1024
+        // Only allow image, video, and audio content types
+        && (request.resource.contentType.matches('image/.*')
+            || request.resource.contentType.matches('video/.*')
+            || request.resource.contentType.matches('audio/.*'));
+    }
+  }
+}
