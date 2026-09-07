@@ -11,13 +11,49 @@ export default function Home() {
   const { user, isLoading } = useUser();
 
   useEffect(() => {
+    let timeoutId: NodeJS.Timeout | null = null;
+    let fallbackId: NodeJS.Timeout | null = null;
+
+    const navigateTo = (path: string) => {
+      try {
+        router.push(path);
+      } catch {
+        window.location.replace(path);
+      }
+      // Backup navigation if Next.js router hangs on mobile Chrome
+      fallbackId = setTimeout(() => {
+        if (typeof window !== "undefined" && window.location.pathname === "/") {
+          window.location.replace(path);
+        }
+      }, 700);
+    };
+
+    // If user already logged in with stored role, redirect immediately to /chat
+    if (typeof window !== "undefined" && localStorage.getItem("duonexus_role")) {
+      navigateTo("/chat");
+      return () => {
+        if (fallbackId) clearTimeout(fallbackId);
+      };
+    }
+
     if (!isLoading) {
       if (user) {
-        router.push("/chat");
+        navigateTo("/chat");
       } else {
-        router.push("/login");
+        navigateTo("/login");
       }
+    } else {
+      // Safety timeout for mobile Chrome: if auth state doesn't resolve in 1.4s, proceed to login
+      timeoutId = setTimeout(() => {
+        const storedRole = typeof window !== "undefined" ? localStorage.getItem("duonexus_role") : null;
+        navigateTo(storedRole ? "/chat" : "/login");
+      }, 1400);
     }
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (fallbackId) clearTimeout(fallbackId);
+    };
   }, [user, isLoading, router]);
 
   return (

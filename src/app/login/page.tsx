@@ -5,10 +5,11 @@ import { useRouter } from "next/navigation";
 import { signInAnonymously, updateProfile } from "firebase/auth";
 import { useAuth, useUser } from "@/firebase";
 import { motion, AnimatePresence, useAnimation, useReducedMotion } from "motion/react";
-import { Delete, Check, AlertCircle, ExternalLink } from "lucide-react";
+import { Delete, Check, AlertCircle, ExternalLink, Sun, Moon } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 type ScreenState = "pin" | "verifying" | "success" | "exiting";
 
@@ -17,6 +18,7 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
   const [screenState, setScreenState] = useState<ScreenState>("pin");
+  const [isDark, setIsDark] = useState<boolean>(true);
 
   const controls = useAnimation();
   const shouldReduceMotion = useReducedMotion();
@@ -27,11 +29,40 @@ export default function LoginPage() {
 
   const isNavigatingRef = useRef(false);
 
-  // Prefetch /chat in background so page transition is instant & 100% smooth
+  // Sync theme with localStorage or system preference
   useEffect(() => {
     router.prefetch("/chat");
-    document.documentElement.classList.add("dark");
+    try {
+      const stored = localStorage.getItem("theme");
+      const systemDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      const shouldBeDark = stored ? stored === "dark" : (systemDark ?? true);
+      setIsDark(shouldBeDark);
+      if (shouldBeDark) {
+        document.documentElement.classList.add("dark");
+        document.documentElement.style.background = "#0C0C0C";
+      } else {
+        document.documentElement.classList.remove("dark");
+        document.documentElement.style.background = "#F8FAFC";
+      }
+    } catch {
+      setIsDark(true);
+    }
   }, [router]);
+
+  const toggleTheme = () => {
+    const nextDark = !isDark;
+    setIsDark(nextDark);
+    try {
+      localStorage.setItem("theme", nextDark ? "dark" : "light");
+      if (nextDark) {
+        document.documentElement.classList.add("dark");
+        document.documentElement.style.background = "#0C0C0C";
+      } else {
+        document.documentElement.classList.remove("dark");
+        document.documentElement.style.background = "#F8FAFC";
+      }
+    } catch {}
+  };
 
   // If already logged in with stored role, automatically redirect to chat
   useEffect(() => {
@@ -200,7 +231,10 @@ export default function LoginPage() {
 
   return (
     <div
-      className="h-[100dvh] w-full overflow-hidden bg-[#0C0C0C] flex flex-col items-center justify-center font-sans antialiased text-gray-100 selection:bg-gray-800 transition-colors duration-300 relative select-none"
+      className={cn(
+        "h-[100dvh] w-full overflow-hidden flex flex-col items-center justify-center font-sans antialiased transition-colors duration-300 relative select-none",
+        isDark ? "bg-[#0C0C0C] text-gray-100 selection:bg-gray-800" : "bg-[#F8FAFC] text-gray-900 selection:bg-rose-100"
+      )}
       style={{
         paddingTop: "max(1.25rem, env(safe-area-inset-top))",
         paddingBottom: "max(1.25rem, env(safe-area-inset-bottom))",
@@ -208,6 +242,23 @@ export default function LoginPage() {
         paddingRight: "max(1rem, env(safe-area-inset-right))",
       }}
     >
+      {/* Top Floating Theme Toggle */}
+      <div className="absolute top-4 right-4 z-20">
+        <button
+          type="button"
+          onClick={toggleTheme}
+          className={cn(
+            "p-2.5 rounded-full transition-all active:scale-90 cursor-pointer shadow-sm border",
+            isDark
+              ? "bg-[#181818] border-white/10 text-amber-400 hover:bg-[#222]"
+              : "bg-white border-gray-200 text-amber-500 hover:bg-gray-100 shadow-md"
+          )}
+          title={isDark ? "Switch to Bright Mode" : "Switch to Dark Mode"}
+        >
+          {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5 text-indigo-600" />}
+        </button>
+      </div>
+
       {/* Main Animated Card */}
       <AnimatePresence mode="wait">
         {screenState !== "exiting" && (
@@ -231,8 +282,22 @@ export default function LoginPage() {
             >
               {/* Hero Character Avatar */}
               <motion.div variants={itemVariants} className="mb-4 sm:mb-6 relative shrink-0">
-                <div className="absolute inset-0 bg-gradient-to-tr from-white/10 via-primary/10 to-transparent rounded-full blur-xl opacity-80 transform scale-110 pointer-events-none" />
-                <div className="relative w-20 h-20 sm:w-24 sm:h-24 shrink-0 rounded-full overflow-hidden bg-[#151515] p-1 shadow-[0_8px_32px_rgba(0,0,0,0.6)] border border-white/10 transition-colors duration-300">
+                <div
+                  className={cn(
+                    "absolute inset-0 rounded-full blur-xl transform scale-110 pointer-events-none transition-opacity",
+                    isDark
+                      ? "bg-gradient-to-tr from-white/10 via-primary/10 to-transparent opacity-80"
+                      : "bg-gradient-to-tr from-rose-200/50 via-pink-200/40 to-transparent opacity-90"
+                  )}
+                />
+                <div
+                  className={cn(
+                    "relative w-20 h-20 sm:w-24 sm:h-24 shrink-0 rounded-full overflow-hidden p-1 transition-colors duration-300 border",
+                    isDark
+                      ? "bg-[#151515] shadow-[0_8px_32px_rgba(0,0,0,0.6)] border-white/10"
+                      : "bg-white shadow-[0_8px_30px_rgba(0,0,0,0.08)] border-gray-200"
+                  )}
+                >
                   <img
                     src="/images/hero_character_1788746411651.jpg"
                     alt="Welcome Character"
@@ -255,7 +320,10 @@ export default function LoginPage() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -8 }}
                       transition={{ duration: 0.25, ease: "easeOut" }}
-                      className="text-3xl sm:text-[34px] leading-tight font-bold text-white tracking-tight"
+                      className={cn(
+                        "text-3xl sm:text-[34px] leading-tight font-bold tracking-tight",
+                        isDark ? "text-white" : "text-gray-900"
+                      )}
                     >
                       Verified successfully
                     </motion.h1>
@@ -266,7 +334,10 @@ export default function LoginPage() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -8 }}
                       transition={{ duration: 0.25, ease: "easeOut" }}
-                      className="text-3xl sm:text-[34px] leading-tight font-bold text-white tracking-tight"
+                      className={cn(
+                        "text-3xl sm:text-[34px] leading-tight font-bold tracking-tight",
+                        isDark ? "text-white" : "text-gray-900"
+                      )}
                     >
                       Welcome Back
                       <br />
@@ -285,7 +356,10 @@ export default function LoginPage() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -6 }}
                       transition={{ duration: 0.2 }}
-                      className="text-[14px] sm:text-base text-gray-400 font-medium"
+                      className={cn(
+                        "text-[14px] sm:text-base font-medium",
+                        isDark ? "text-gray-400" : "text-gray-500"
+                      )}
                     >
                       Enter your 4-digit PIN to continue.
                     </motion.p>
@@ -297,7 +371,10 @@ export default function LoginPage() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -6 }}
                       transition={{ duration: 0.2 }}
-                      className="text-[14px] sm:text-base text-gray-400 font-medium"
+                      className={cn(
+                        "text-[14px] sm:text-base font-medium",
+                        isDark ? "text-gray-400" : "text-gray-500"
+                      )}
                     >
                       Verifying...
                     </motion.p>
@@ -309,7 +386,7 @@ export default function LoginPage() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -6 }}
                       transition={{ duration: 0.2 }}
-                      className="text-[14px] sm:text-base text-emerald-400 font-medium"
+                      className="text-[14px] sm:text-base text-emerald-500 font-medium"
                     >
                       Entering your private space...
                     </motion.p>
@@ -324,7 +401,7 @@ export default function LoginPage() {
                   animate={{ opacity: 1, scale: 1 }}
                   className="w-full mb-4"
                 >
-                  <Alert variant="destructive" className="border-red-500/30 bg-red-500/10 text-red-300">
+                  <Alert variant="destructive" className="border-red-500/30 bg-red-500/10 text-red-400">
                     <AlertCircle className="h-4 w-4" />
                     <AlertTitle className="text-xs uppercase tracking-widest font-semibold">
                       Action Required
@@ -335,7 +412,10 @@ export default function LoginPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-7 text-[10px] gap-1 bg-black/30 border-red-700 text-red-200 hover:bg-red-950"
+                          className={cn(
+                            "h-7 text-[10px] gap-1 border-red-700 text-red-600 hover:bg-red-50",
+                            isDark ? "bg-black/30 text-red-200 hover:bg-red-950" : "bg-white"
+                          )}
                           onClick={() =>
                             window.open(
                               "https://console.firebase.google.com/u/0/project/our-sweet-conversation/authentication/providers",
@@ -371,7 +451,7 @@ export default function LoginPage() {
                         <motion.div
                           key={index}
                           animate={controls}
-                          className="rounded-2xl flex items-center justify-center border will-change-transform"
+                          className="rounded-2xl flex items-center justify-center will-change-transform"
                           style={{
                             width: "var(--box)",
                             height: "var(--box)",
@@ -383,30 +463,31 @@ export default function LoginPage() {
                           }}
                         >
                           <div
-                            className={`w-full h-full rounded-2xl flex items-center justify-center border transition-all duration-200
-                              ${
-                                isActive
+                            className={cn(
+                              "w-full h-full rounded-2xl flex items-center justify-center border transition-all duration-200",
+                              isDark
+                                ? isActive
                                   ? "border-gray-500 bg-[#1A1A1A] shadow-[0_0_0_4px_rgba(255,255,255,0.06)]"
-                                  : "border-white/10 bg-white/5"
-                              }
-                              ${
-                                isFilled
+                                  : isFilled
                                   ? "border-white/15 bg-[#1E1E1E] shadow-sm"
-                                  : ""
-                              }
-                              ${
-                                error && isActive
-                                  ? "border-red-500/50 shadow-[0_0_0_4px_rgba(239,68,68,0.15)]"
-                                  : ""
-                              }
-                            `}
+                                  : "border-white/10 bg-white/5"
+                                : isActive
+                                ? "border-gray-900 bg-white shadow-[0_0_0_4px_rgba(0,0,0,0.06)] ring-1 ring-gray-900/10"
+                                : isFilled
+                                ? "border-gray-300 bg-white shadow-xs"
+                                : "border-gray-200 bg-gray-50/80",
+                              error && isActive && "border-red-500/50 shadow-[0_0_0_4px_rgba(239,68,68,0.15)]"
+                            )}
                           >
                             {isFilled && (
                               <motion.div
                                 initial={{ scale: 0, opacity: 0 }}
                                 animate={{ scale: 1, opacity: 1 }}
                                 transition={{ type: "spring", stiffness: 450, damping: 25 }}
-                                className="w-3.5 h-3.5 sm:w-4 sm:h-4 bg-white rounded-full"
+                                className={cn(
+                                  "w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full",
+                                  isDark ? "bg-white" : "bg-gray-900"
+                                )}
                               />
                             )}
                           </div>
@@ -423,8 +504,8 @@ export default function LoginPage() {
                       height: "var(--box)",
                       transform: `scale(${merged ? 1 : 0.3})`,
                       opacity: merged ? 1 : 0,
-                      borderColor: isSuccess ? "rgb(16,185,129)" : "rgb(156,163,175)",
-                      backgroundColor: isSuccess ? "#101915" : "#17171a",
+                      borderColor: isSuccess ? "rgb(16,185,129)" : isDark ? "rgb(156,163,175)" : "rgb(209,213,219)",
+                      backgroundColor: isSuccess ? (isDark ? "#101915" : "#ECFDF5") : (isDark ? "#17171a" : "#FFFFFF"),
                       transition: shouldReduceMotion
                         ? "opacity 180ms ease, background-color 300ms ease, border-color 300ms ease"
                         : "transform 380ms cubic-bezier(0.4,0,0.2,1) 60ms, opacity 320ms ease 60ms, background-color 300ms ease, border-color 300ms ease",
@@ -432,7 +513,9 @@ export default function LoginPage() {
                         ? "0 0 0 0px rgba(16,185,129,0)"
                         : isSuccess
                         ? "0 0 0 4px rgba(16,185,129,0.2), 0 0 35px 12px rgba(16,185,129,0.35)"
-                        : "0 0 0 4px rgba(156,163,175,0.15), 0 0 24px 8px rgba(156,163,175,0.25)",
+                        : isDark
+                        ? "0 0 0 4px rgba(156,163,175,0.15), 0 0 24px 8px rgba(156,163,175,0.25)"
+                        : "0 0 0 4px rgba(0,0,0,0.06), 0 4px 20px rgba(0,0,0,0.1)",
                     }}
                   >
                     {screenState === "verifying" && (
@@ -443,7 +526,10 @@ export default function LoginPage() {
                           repeat: Infinity,
                           ease: "easeInOut",
                         }}
-                        className="absolute inset-0 rounded-2xl border border-gray-400/40 pointer-events-none"
+                        className={cn(
+                          "absolute inset-0 rounded-2xl border pointer-events-none",
+                          isDark ? "border-gray-400/40" : "border-gray-300"
+                        )}
                       />
                     )}
                     <AnimatePresence mode="wait">
@@ -454,7 +540,7 @@ export default function LoginPage() {
                           animate={{ scale: 1, opacity: 1, rotate: 0 }}
                           transition={{ type: "spring", stiffness: 420, damping: 22 }}
                         >
-                          <Check className="w-6 h-6 sm:w-8 sm:h-8 text-emerald-400" strokeWidth={3} />
+                          <Check className="w-6 h-6 sm:w-8 sm:h-8 text-emerald-500" strokeWidth={3} />
                         </motion.div>
                       )}
                     </AnimatePresence>
@@ -467,7 +553,7 @@ export default function LoginPage() {
                     <motion.p
                       initial={{ opacity: 0, y: -4 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="text-sm font-medium text-red-400"
+                      className="text-sm font-medium text-red-500"
                     >
                       {error}
                     </motion.p>
@@ -484,17 +570,18 @@ export default function LoginPage() {
                     className="w-full max-w-[280px] sm:max-w-[320px] mx-auto grid grid-cols-3 gap-y-2.5 sm:gap-y-3 gap-x-4 sm:gap-x-5 shrink-0"
                   >
                     {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
-                      <KeypadButton key={num} onClick={() => handleInput(num.toString())}>
+                      <KeypadButton key={num} onClick={() => handleInput(num.toString())} isDark={isDark}>
                         {num}
                       </KeypadButton>
                     ))}
                     <div className="pointer-events-none" />
-                    <KeypadButton onClick={() => handleInput("0")}>0</KeypadButton>
+                    <KeypadButton onClick={() => handleInput("0")} isDark={isDark}>0</KeypadButton>
                     <KeypadButton
                       onClick={() => handleInput("backspace")}
                       disabled={pin.length === 0}
+                      isDark={isDark}
                     >
-                      <Delete className="w-6 h-6 stroke-[2] text-gray-400" />
+                      <Delete className={cn("w-6 h-6 stroke-[2]", isDark ? "text-gray-400" : "text-gray-600")} />
                     </KeypadButton>
                   </motion.div>
                 )}
@@ -511,10 +598,12 @@ function KeypadButton({
   children,
   onClick,
   disabled,
+  isDark = true,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
+  isDark?: boolean;
 }) {
   return (
     <motion.button
@@ -524,7 +613,12 @@ function KeypadButton({
       onClick={onClick}
       disabled={disabled}
       aria-label={typeof children === "string" ? `Digit ${children}` : "Delete"}
-      className="h-[56px] sm:h-[60px] shrink-0 flex items-center justify-center text-[24px] sm:text-[28px] font-medium text-gray-100 rounded-2xl bg-[#151515] shadow-[0_1px_3px_rgba(0,0,0,0.4)] border border-white/5 hover:bg-[#1E1E1E] active:bg-[#252525] transition-all duration-150 select-none touch-manipulation cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#0C0C0C] disabled:opacity-40 disabled:cursor-not-allowed"
+      className={cn(
+        "h-[56px] sm:h-[60px] shrink-0 flex items-center justify-center text-[24px] sm:text-[28px] font-medium rounded-2xl transition-all duration-150 select-none touch-manipulation cursor-pointer focus:outline-none border disabled:opacity-40 disabled:cursor-not-allowed",
+        isDark
+          ? "text-gray-100 bg-[#151515] shadow-[0_1px_3px_rgba(0,0,0,0.4)] border-white/5 hover:bg-[#1E1E1E] active:bg-[#252525]"
+          : "text-gray-800 bg-white shadow-[0_2px_8px_rgba(0,0,0,0.06)] border-gray-200 hover:bg-gray-50 active:bg-gray-100 hover:shadow-md"
+      )}
     >
       {children}
     </motion.button>

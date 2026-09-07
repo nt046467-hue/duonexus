@@ -48,17 +48,15 @@ export default function RootLayout({
             __html: `
               (function() {
                 try {
-                  // Apply black background immediately to prevent white flash
-                  document.documentElement.style.background = '#000';
-                  document.body && (document.body.style.background = '#000');
                   var theme = localStorage.getItem('theme');
-                  var supportDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches === true;
-                  if (!theme && supportDarkMode) theme = 'dark';
-                  if (!theme) theme = 'dark';
+                  var supportDarkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches === true;
+                  if (!theme) theme = supportDarkMode ? 'dark' : 'dark';
                   if (theme === 'dark') {
                     document.documentElement.classList.add('dark');
+                    document.documentElement.style.background = '#000';
                   } else {
                     document.documentElement.classList.remove('dark');
+                    document.documentElement.style.background = '#FAFAFA';
                   }
                 } catch (e) {}
               })();
@@ -66,7 +64,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="font-body antialiased bg-black text-foreground overflow-hidden h-screen w-screen selection:bg-primary/20" style={{ backgroundColor: '#000' }}>
+      <body className="font-body antialiased bg-background text-foreground overflow-hidden h-[100dvh] w-screen selection:bg-primary/20">
         <FirebaseClientProvider>
           {children}
           <Toaster />

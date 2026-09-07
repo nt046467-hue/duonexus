@@ -66,12 +66,14 @@ interface MobileSelectionHeaderProps {
   onDelete: () => void;
   onCopy: () => void;
   onOpenInfo: () => void;
+  isDark?: boolean;
 }
 
 /**
- * WhatsApp-style Top Selection Header for Mobile (Screenshot 1)
- * Clean layout: Back Arrow + "1" on left, Reply + Star + Delete + Three Dots on right.
- * Forward icon removed as requested for breathing room on mobile devices.
+ * WhatsApp-style Top Selection Header for Mobile
+ * Clean layout: Back Arrow + "1" on left, Reply + Delete + Three Dots on right.
+ * Star icon removed as requested (unused).
+ * Supports both realistic Bright (Light) Mode and Dark Mode.
  */
 export function MobileSelectionHeader({
   selectedMessage,
@@ -80,54 +82,71 @@ export function MobileSelectionHeader({
   onDelete,
   onCopy,
   onOpenInfo,
+  isDark = true,
 }: MobileSelectionHeaderProps) {
   const [showMenu, setShowMenu] = useState(false);
-  const [isStarred, setIsStarred] = useState(false);
 
   return (
-    <div className="flex items-center justify-between w-full h-full px-2 text-white bg-[#1f2c34] animate-in fade-in duration-150 select-none">
+    <div
+      className={cn(
+        "flex items-center justify-between w-full h-full px-2 animate-in fade-in duration-150 select-none transition-colors",
+        isDark
+          ? "text-white bg-[#1f2c34]"
+          : "text-gray-900 bg-white border-b border-gray-200 shadow-xs"
+      )}
+    >
       {/* Left: Back / Deselect + Count */}
       <div className="flex items-center gap-3">
         <button
           type="button"
           onClick={onClearSelection}
-          className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-colors text-white cursor-pointer"
+          className={cn(
+            "w-9 h-9 flex items-center justify-center rounded-full active:scale-95 transition-colors cursor-pointer",
+            isDark
+              ? "text-white hover:bg-white/10"
+              : "text-gray-700 hover:bg-gray-100"
+          )}
           title="Clear selection"
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <span className="text-[19px] font-semibold tracking-wide text-white">
+        <span
+          className={cn(
+            "text-[19px] font-semibold tracking-wide",
+            isDark ? "text-white" : "text-gray-900"
+          )}
+        >
           1
         </span>
       </div>
 
-      {/* Right: Reply, Star, Delete, Three Dots (Clean spacing without crowding) */}
+      {/* Right: Reply, Delete, Three Dots (Clean spacing without crowding) */}
       <div className="flex items-center gap-1">
         {/* Reply */}
         <button
           type="button"
           onClick={onReply}
-          className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-colors text-white cursor-pointer"
+          className={cn(
+            "w-9 h-9 flex items-center justify-center rounded-full active:scale-95 transition-colors cursor-pointer",
+            isDark
+              ? "text-white hover:bg-white/10"
+              : "text-gray-700 hover:bg-gray-100"
+          )}
           title="Reply"
         >
           <CornerUpLeft className="w-5 h-5" />
-        </button>
-
-        {/* Star / Bookmark */}
-        <button
-          type="button"
-          onClick={() => setIsStarred(!isStarred)}
-          className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-colors text-white cursor-pointer"
-          title={isStarred ? "Unstar" : "Star"}
-        >
-          <Star className={cn("w-5 h-5", isStarred && "fill-amber-400 text-amber-400")} />
         </button>
 
         {/* Delete */}
         <button
           type="button"
           onClick={onDelete}
-          className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-colors text-white cursor-pointer"
+          className={cn(
+            "w-9 h-9 flex items-center justify-center rounded-full active:scale-95 transition-colors cursor-pointer",
+            isDark
+              ? "text-white hover:bg-white/10"
+              : "text-gray-700 hover:bg-gray-100 hover:text-red-500"
+          )}
           title="Delete"
         >
           <Trash2 className="w-5 h-5" />
@@ -138,7 +157,12 @@ export function MobileSelectionHeader({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/10 active:scale-95 transition-colors text-white cursor-pointer"
+              className={cn(
+                "w-9 h-9 flex items-center justify-center rounded-full active:scale-95 transition-colors cursor-pointer",
+                isDark
+                  ? "text-white hover:bg-white/10"
+                  : "text-gray-700 hover:bg-gray-100"
+              )}
               title="More options"
             >
               <MoreVertical className="w-5 h-5" />
@@ -146,16 +170,26 @@ export function MobileSelectionHeader({
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
-            className="w-48 py-1.5 bg-[#233138] border border-[#2a3942] text-white rounded-2xl shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100"
+            className={cn(
+              "w-48 py-1.5 rounded-2xl shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100 border",
+              isDark
+                ? "bg-[#233138] border-[#2a3942] text-white"
+                : "bg-white border-gray-200 text-gray-800 shadow-xl"
+            )}
           >
             <DropdownMenuItem
               onClick={() => {
                 setShowMenu(false);
                 onOpenInfo();
               }}
-              className="px-4 py-2.5 text-[15px] font-medium flex items-center gap-3 hover:bg-white/10 focus:bg-white/10 cursor-pointer rounded-xl mx-1"
+              className={cn(
+                "px-4 py-2.5 text-[15px] font-medium flex items-center gap-3 cursor-pointer rounded-xl mx-1",
+                isDark
+                  ? "hover:bg-white/10 focus:bg-white/10"
+                  : "hover:bg-gray-100 focus:bg-gray-100 text-gray-800"
+              )}
             >
-              <Info className="w-4 h-4 text-emerald-400" />
+              <Info className={cn("w-4 h-4", isDark ? "text-emerald-400" : "text-emerald-600")} />
               <span>Info</span>
             </DropdownMenuItem>
 
@@ -164,9 +198,14 @@ export function MobileSelectionHeader({
                 setShowMenu(false);
                 onCopy();
               }}
-              className="px-4 py-2.5 text-[15px] font-medium flex items-center gap-3 hover:bg-white/10 focus:bg-white/10 cursor-pointer rounded-xl mx-1"
+              className={cn(
+                "px-4 py-2.5 text-[15px] font-medium flex items-center gap-3 cursor-pointer rounded-xl mx-1",
+                isDark
+                  ? "hover:bg-white/10 focus:bg-white/10"
+                  : "hover:bg-gray-100 focus:bg-gray-100 text-gray-800"
+              )}
             >
-              <Copy className="w-4 h-4 text-blue-400" />
+              <Copy className={cn("w-4 h-4", isDark ? "text-blue-400" : "text-blue-600")} />
               <span>Copy</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -183,12 +222,13 @@ interface MobileReactionPillProps {
   onOpenFullPicker: () => void;
   isMe: boolean;
   sheetOpen?: boolean;
+  isDark?: boolean;
 }
 
 /**
- * WhatsApp-style Floating Quick Reaction Bar for Mobile (Screenshot 2)
- * Sleek dark pill with emerald tint, floating smoothly above the selected message.
- * Automatically hidden when the full reaction bottom sheet is open.
+ * WhatsApp-style Floating Quick Reaction Bar for Mobile
+ * Sleek floating pill with smooth backdrop blur, floating above the selected message.
+ * Supports both bright mode and dark mode.
  */
 export function MobileReactionPill({
   message,
@@ -197,12 +237,13 @@ export function MobileReactionPill({
   onOpenFullPicker,
   isMe,
   sheetOpen = false,
+  isDark = true,
 }: MobileReactionPillProps) {
   if (sheetOpen) return null;
 
-  // 6 sleek quick reactions (Screenshot 2 defaults: ❤️ 😆 😮 😢 😚 👍)
+  // 6 sleek quick reactions
   const emojis =
-    quickReactions.length > 0
+    quickReactions && quickReactions.length > 0
       ? quickReactions.slice(0, 6)
       : ["❤️", "😆", "😮", "😢", "😚", "👍"];
 
@@ -210,10 +251,15 @@ export function MobileReactionPill({
     <div
       onClick={(e) => e.stopPropagation()}
       className={cn(
-        "absolute -top-12 z-50 select-none flex items-center gap-1.5 px-2.5 py-1.5 rounded-full shadow-[0_8px_30px_rgba(0,0,0,0.6)] border transition-all animate-in fade-in zoom-in-95 duration-150",
-        isMe ? "right-0 origin-bottom-right" : "left-0 origin-bottom-left",
-        "bg-[#182229]/98 backdrop-blur-md border-[#26353d] text-white"
+        "absolute -top-12 z-[80] select-none flex items-center gap-1 min-[360px]:gap-1.5 px-2 min-[360px]:px-2.5 py-1 min-[360px]:py-1.5 rounded-full border shadow-2xl backdrop-blur-xl transition-all",
+        isMe ? "right-0" : "left-0",
+        isDark
+          ? "bg-[#1f2c34] border-[#2a3942] text-white shadow-[0_6px_28px_rgba(0,0,0,0.7)]"
+          : "bg-white border-gray-200 text-gray-900 shadow-[0_6px_28px_rgba(0,0,0,0.18)]"
       )}
+      style={{
+        maxWidth: "calc(100vw - 20px)",
+      }}
     >
       {emojis.map((emoji, index) => (
         <button
@@ -223,24 +269,29 @@ export function MobileReactionPill({
             e.stopPropagation();
             onReact(emoji);
           }}
-          className="w-8 h-8 flex items-center justify-center text-[21px] leading-none rounded-full hover:scale-130 active:scale-90 transition-transform duration-100 cursor-pointer"
+          className="w-7 h-7 min-[360px]:w-8 min-[360px]:h-8 flex items-center justify-center text-[19px] min-[360px]:text-[21px] leading-none rounded-full hover:scale-125 active:scale-90 transition-transform duration-100 cursor-pointer"
           title={emoji}
         >
           {emoji}
         </button>
       ))}
 
-      {/* WhatsApp Plus (+) button matching Screenshot 2 */}
+      {/* Plus (+) button */}
       <button
         type="button"
         onClick={(e) => {
           e.stopPropagation();
           onOpenFullPicker();
         }}
-        className="w-7 h-7 flex items-center justify-center rounded-full bg-[#24333c] hover:bg-[#2d404c] active:scale-90 transition-all text-gray-300 hover:text-white cursor-pointer ml-0.5"
+        className={cn(
+          "w-6 h-6 min-[360px]:w-7 min-[360px]:h-7 flex items-center justify-center rounded-full active:scale-90 transition-all cursor-pointer ml-0.5",
+          isDark
+            ? "bg-[#2a3942] hover:bg-[#374248] text-gray-300 hover:text-white"
+            : "bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-900"
+        )}
         title="More reactions"
       >
-        <Plus className="w-4 h-4 stroke-[2.5]" />
+        <Plus className="w-3.5 h-3.5 min-[360px]:w-4 min-[360px]:h-4 stroke-[2.5]" />
       </button>
     </div>
   );

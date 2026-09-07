@@ -20,6 +20,7 @@ import {
   where,
   startAfter,
   QueryDocumentSnapshot,
+  arrayUnion,
 } from "firebase/firestore";
 import {
   useFirestore,
@@ -29,6 +30,8 @@ import {
   useMemoFirebase,
   useAuth,
 } from "@/firebase";
+import { MediaViewer } from "@/components/chat/media-viewer";
+import { AvatarCropModal } from "@/components/chat/avatar-crop-modal";
 import { ProfileSheet } from "@/components/chat/profile-sheet";
 import { useWebRTC } from "@/hooks/use-webrtc";
 import { IncomingCall } from "@/components/chat/incoming-call";
@@ -119,6 +122,7 @@ import {
   Volume2,
   VolumeX,
   Smartphone,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -160,7 +164,9 @@ export interface Message {
   sender?: "me" | "other";
   content?: string;
   text?: string;
-  type?: "text" | "image" | "audio" | "video" | "gif" | "sticker";
+  type?: "text" | "image" | "audio" | "video" | "gif" | "sticker" | "location";
+  latitude?: number;
+  longitude?: number;
   timestamp?: any;
   time?: string;
   status?: "sent" | "delivered" | "read" | "seen";
@@ -168,7 +174,7 @@ export interface Message {
   replyToId?: string;
   replyToContent?: string;
   replyToSender?: string;
-  replyToType?: "text" | "image" | "audio" | "video" | "gif" | "sticker";
+  replyToType?: "text" | "image" | "audio" | "video" | "gif" | "sticker" | "location";
   replyTo?: {
     sender: "me" | "other";
     text: string;
@@ -477,6 +483,12 @@ function getCleanMessagePreview(msg?: Message | null, fallbackName: string = "pa
       text: "Sticker",
     };
   }
+  if (type === "location" || content.match(/Shared Location:.*maps\.google\.com/)) {
+    return {
+      type: "text" as const,
+      text: "📍 Shared a location",
+    };
+  }
   if (type === "gif" || content.includes("giphy.com") || content.includes("klipy.com") || content.includes("tenor.com")) {
     return {
       type: "gif" as const,
@@ -531,6 +543,14 @@ function RenderMessageSnippet({ msg, fallbackName }: { msg?: Message | null; fal
           GIF
         </span>
         <span>GIF animation</span>
+      </span>
+    );
+  }
+  if (preview.text === "📍 Shared a location") {
+    return (
+      <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
+        <MapPin className="w-3.5 h-3.5 shrink-0" />
+        <span>Shared a location</span>
       </span>
     );
   }
@@ -723,8 +743,9 @@ export default function ChatPage() {
     user?.displayName ||
     (myId ? myId.charAt(0).toUpperCase() + myId.slice(1) : "Me");
 
+  // myAvatar: prefer Firestore profile photoURL (supports base64 crops), fall back to auth URL or default
   const myAvatar =
-    (myProfile?.photoURL && !myProfile.photoURL.startsWith("data:"))
+    myProfile?.photoURL
       ? myProfile.photoURL
       : (user?.photoURL && !user.photoURL.startsWith("data:") ? user.photoURL : undefined) ||
       (myId === "karu" ? "/avatars/karu.png" : "/avatars/nabin.png");
@@ -800,15 +821,39 @@ export default function ChatPage() {
     if (!rawMessages) return [];
     // Filter out messages hidden for current user ("delete for me" feature)
     const hiddenKey = `hidden_msgs_${myId}`;
-    let hiddenIds: string[] = [];
+    let localHiddenIds: string[] = [];
     try {
-      hiddenIds = JSON.parse(localStorage.getItem(hiddenKey) || "[]");
-    } catch { hiddenIds = []; }
+      localHiddenIds = JSON.parse(localStorage.getItem(hiddenKey) || "[]");
+    } catch { localHiddenIds = []; }
+
+    // Merge with cloud profile hiddenMessages so laptop & mobile share deleted-for-me messages
+    const cloudHiddenIds: string[] = Array.isArray(myProfile?.hiddenMessages) ? myProfile.hiddenMessages : [];
+    const hiddenIdsSet = new Set([...localHiddenIds, ...cloudHiddenIds]);
+
+    // Keep localStorage in sync with cloud profile if cloud has new hidden messages
+    if (cloudHiddenIds.length > 0 && typeof window !== "undefined") {
+      try {
+        const merged = Array.from(hiddenIdsSet);
+        if (merged.length !== localHiddenIds.length) {
+          localStorage.setItem(hiddenKey, JSON.stringify(merged));
+        }
+      } catch { }
+    }
+
     return [...rawMessages]
       .filter((m: any) => {
-        if (hiddenIds.includes(m.id)) return false;
+        if (hiddenIdsSet.has(m.id)) return false;
+
+        // Multi-device robust check for messages belonging to current user
+        const isFromMe =
+          (m.senderRole && m.senderRole === myId) ||
+          (m.senderName && finalMyName && m.senderName.toLowerCase() === finalMyName.toLowerCase()) ||
+          (m.senderUid && user?.uid && m.senderUid === user.uid) ||
+          (m.deletedBy && m.deletedBy === myId) ||
+          (m.sender === "me");
+
         // If message is deleted/unsent and was sent by me, deleted by me, or belongs to my account, hide completely for this user
-        if (m.isDeleted && (m.senderRole === myId || m.senderUid === user?.uid || m.deletedBy === myId)) {
+        if (m.isDeleted && isFromMe) {
           return false;
         }
         return true;
@@ -819,7 +864,7 @@ export default function ChatPage() {
         return tA - tB;
       }) as Message[];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawMessages, myId, user?.uid, hiddenMsgVersion]);
+  }, [rawMessages, myId, user?.uid, finalMyName, myProfile?.hiddenMessages, hiddenMsgVersion]);
 
   // Real Streak Calculation from messages & Firestore
   const { realStreak, longestStreak, chattedToday } = useMemo(() => {
@@ -1041,6 +1086,12 @@ export default function ChatPage() {
   const [activeMessageMenu, setActiveMessageMenu] = useState<string | null>(null);
   const [activeReactionMenu, setActiveReactionMenu] = useState<string | null>(null);
   const [activeFullEmojiPicker, setActiveFullEmojiPicker] = useState<string | null>(null);
+  const [desktopPickerCoords, setDesktopPickerCoords] = useState<{
+    top: number;
+    left: number;
+    caretLeft: number;
+    placement: "up" | "down";
+  } | null>(null);
   const [menuPlacement, setMenuPlacement] = useState<"up" | "down">("up");
   const [touchedMessageId, setTouchedMessageId] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -1049,6 +1100,18 @@ export default function ChatPage() {
   const [isMobileReactionSheetOpen, setIsMobileReactionSheetOpen] = useState(false);
   const [selectedInfoMessage, setSelectedInfoMessage] = useState<Message | null>(null);
   const [mobileDeleteMessage, setMobileDeleteMessage] = useState<Message | null>(null);
+  const [activeMediaViewerSrc, setActiveMediaViewerSrc] = useState<string | null>(null);
+
+  // Helper to reliably update mobile selection and reset bottom sheet state
+  const selectMobileMsg = useCallback((msg: Message | null) => {
+    setSelectedMobileMessage(msg);
+    setIsMobileReactionSheetOpen(false);
+  }, []);
+
+  // Long press refs for mobile message bubbles
+  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const didLongPressRef = useRef<boolean>(false);
 
   // Real Firestore typing state & listeners
   const [otherIsTyping, setOtherIsTyping] = useState(false);
@@ -1222,6 +1285,10 @@ export default function ChatPage() {
     if (!el) return;
     const isUp = el.scrollHeight - el.scrollTop - el.clientHeight > 150;
     setShowScrollToBottom((prev) => (prev !== isUp ? isUp : prev));
+    setActiveFullEmojiPicker((prev) => {
+      if (prev) setDesktopPickerCoords(null);
+      return null;
+    });
   }, []);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
@@ -1244,14 +1311,48 @@ export default function ChatPage() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Scroll to bottom when messages first load after mount
-  const hasScrolledOnLoad = useRef(false);
+  // Multi-pass auto-scroll on mount and initial message load across ALL devices
+  // Ensures images, stickers, dynamic fonts, and wallpaper layout settling do not leave the last message cut off
   useEffect(() => {
-    if (!hasScrolledOnLoad.current && messages.length > 0 && !messagesLoading) {
-      hasScrolledOnLoad.current = true;
-      scrollToBottom("auto");
+    if (messages.length === 0) return;
+
+    scrollToBottom("auto");
+    const raf = requestAnimationFrame(() => scrollToBottom("auto"));
+    const t0 = setTimeout(() => scrollToBottom("auto"), 50);
+    const t1 = setTimeout(() => scrollToBottom("auto"), 150);
+    const t2 = setTimeout(() => scrollToBottom("auto"), 350);
+    const t3 = setTimeout(() => scrollToBottom("auto"), 600);
+    const t4 = setTimeout(() => scrollToBottom("auto"), 1000);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(t0);
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+      clearTimeout(t4);
+    };
+  }, [messages.length, messagesLoading, scrollToBottom]);
+
+  // ResizeObserver on the scroll container so any dynamic resizing (e.g. image loads) maintains scroll position
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    let resizeScrollCount = 0;
+    const ro = new ResizeObserver(() => {
+      if (resizeScrollCount < 10) {
+        resizeScrollCount++;
+        scrollToBottom("auto");
+      }
+    });
+
+    ro.observe(el);
+    if (el.firstElementChild) {
+      ro.observe(el.firstElementChild);
     }
-  }, [messages, messagesLoading, scrollToBottom]);
+    return () => ro.disconnect();
+  }, [scrollToBottom]);
 
   // Auto-scroll on new message or typing indicator
   // Only force-scroll if the user is already near the bottom, OR if their own message was just sent
@@ -1260,7 +1361,7 @@ export default function ChatPage() {
     const el = scrollContainerRef.current;
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const isNearBottom = distanceFromBottom < 200;
+    const isNearBottom = distanceFromBottom < 250;
     if (isNearBottom || lastSendWasMe.current) {
       scrollToBottom("smooth");
       lastSendWasMe.current = false;
@@ -1296,14 +1397,14 @@ export default function ChatPage() {
   // Sending message
   const handleSendMessage = async (
     content: string,
-    type: "text" | "image" | "audio" | "video" | "gif" | "sticker" = "text",
+    type: "text" | "image" | "audio" | "video" | "gif" | "sticker" | "location" = "text",
     waveform?: number[]
   ) => {
     if (!firestore || (!content.trim() && type === "text")) return;
 
-    // Detect link preview (ONLY for standard text, never for stickers, gifs, or media)
+    // Detect link preview (ONLY for standard text, never for stickers, gifs, media, or location)
     let linkPreview: { title: string; url: string } | undefined = undefined;
-    if (type === "text" && !content.includes("notoemoji") && !content.includes("gstatic.com")) {
+    if (type === "text" && !content.includes("notoemoji") && !content.includes("gstatic.com") && !content.match(/Shared Location:/)) {
       const urlMatch = content.match(/(https?:\/\/[^\s]+)/i);
       if (urlMatch) {
         try {
@@ -1444,10 +1545,47 @@ export default function ChatPage() {
     }
     toast({ title: "Sharing location... 📍", description: "Fetching your current GPS position." });
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
+      async (pos) => {
         const { latitude, longitude } = pos.coords;
-        const mapsUrl = `https://maps.google.com/?q=${latitude},${longitude}`;
-        handleSendMessage(`📍 Shared Location: ${mapsUrl}`, "text");
+        if (!firestore) return;
+        try {
+          sendAudioRef.current?.play().catch(() => {});
+          const locationMsgData: any = {
+            senderUid: user?.uid || myId,
+            senderName: myName,
+            senderRole: myId,
+            content: "📍 Shared Location",
+            text: "📍 Shared Location",
+            type: "location",
+            latitude,
+            longitude,
+            timestamp: serverTimestamp(),
+            status: "sent",
+            reactions: [],
+          };
+          if (replyingTo) {
+            locationMsgData.replyToId = replyingTo.id;
+            const cleanReplyText = getCleanMessagePreview(replyingTo, finalPartnerName).text;
+            locationMsgData.replyToContent = cleanReplyText;
+            locationMsgData.replyToSender =
+              replyingTo.senderRole === myId ? myName : finalPartnerName;
+            locationMsgData.replyToType = replyingTo.type || "text";
+            locationMsgData.replyTo = {
+              sender: replyingTo.senderRole === myId ? "me" : "other",
+              text: cleanReplyText,
+            };
+          }
+          await addDoc(collection(firestore, "messages"), locationMsgData);
+          setReplyingTo(null);
+          stopMyTyping();
+          setActiveDesktopPopup(null);
+          setShowMobileLeftIcons(false);
+          lastSendWasMe.current = true;
+          toast({ title: "Location shared! 📍", description: "Your location has been sent." });
+        } catch (err) {
+          console.error("Failed to send location:", err);
+          toast({ variant: "destructive", title: "Send failed", description: "Could not send location. Try again." });
+        }
       },
       (err) => {
         console.warn("Location error:", err);
@@ -1538,8 +1676,8 @@ export default function ChatPage() {
     setActiveMessageMenu(null);
   };
 
-  const handleDeleteForMe = (id: string) => {
-    // Store hidden message IDs in localStorage per user (client-side only "delete for me")
+  const handleDeleteForMe = async (id: string) => {
+    // Store hidden message IDs in localStorage per user for zero-latency local hiding
     try {
       const hiddenKey = `hidden_msgs_${myId}`;
       const existing: string[] = JSON.parse(localStorage.getItem(hiddenKey) || "[]");
@@ -1548,6 +1686,23 @@ export default function ChatPage() {
         localStorage.setItem(hiddenKey, JSON.stringify(existing));
       }
     } catch { }
+
+    // Sync hidden message to user's Firestore profile so it stays deleted across all devices (laptop, mobile, etc.)
+    if (firestore && myId) {
+      try {
+        await setDoc(
+          doc(firestore, "profiles", myId),
+          {
+            hiddenMessages: arrayUnion(id),
+            lastActive: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      } catch (err) {
+        console.warn("Failed to sync hidden message to cloud profile:", err);
+      }
+    }
+
     // Increment version to force messages useMemo to recompute and hide this message
     setHiddenMsgVersion((v) => v + 1);
     setActiveMessageMenu(null);
@@ -1950,6 +2105,8 @@ export default function ChatPage() {
   const [editMyName, setEditMyName] = useState("");
   const [editMyPhotoURL, setEditMyPhotoURL] = useState("");
   const [isSavingMyProfile, setIsSavingMyProfile] = useState(false);
+  const [rawCropImageSrc, setRawCropImageSrc] = useState<string | null>(null);
+  const [isCropModalOpen, setIsCropModalOpen] = useState(false);
   const myPhotoInputRef = useRef<HTMLInputElement | null>(null);
 
   // Sync editing fields when opening My Profile
@@ -1960,37 +2117,17 @@ export default function ChatPage() {
     }
   }, [isMyProfileOpen, finalMyName, myAvatar]);
 
-  const resizeImage = (base64Str: string): Promise<string> => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.src = base64Str;
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        const MAX = 500;
-        let w = img.width, h = img.height;
-        if (w > h) {
-          if (w > MAX) { h *= MAX / w; w = MAX; }
-        } else {
-          if (h > MAX) { w *= MAX / h; h = MAX; }
-        }
-        canvas.width = w;
-        canvas.height = h;
-        canvas.getContext("2d")?.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL("image/jpeg", 0.9));
-      };
-    });
-  };
-
   const handleMyPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = async () => {
-        const resized = await resizeImage(reader.result as string);
-        setEditMyPhotoURL(resized);
+      reader.onloadend = () => {
+        setRawCropImageSrc(reader.result as string);
+        setIsCropModalOpen(true);
       };
       reader.readAsDataURL(file);
     }
+    e.target.value = "";
   };
 
   const handleSaveMyProfile = async () => {
@@ -2000,6 +2137,7 @@ export default function ChatPage() {
       const updatedPhoto = editMyPhotoURL || myAvatar;
       const updatedName = editMyName.trim();
 
+      // 1. Save directly to Firestore profile (handles full image base64, shared in real-time)
       await setDoc(
         doc(firestore, "profiles", myId),
         {
@@ -2010,11 +2148,19 @@ export default function ChatPage() {
         { merge: true }
       );
 
+      // 2. Safe Firebase Auth update: only update displayName, and only pass photoURL if it's a short URL (not data: base64)
       if (user) {
-        await updateProfile(user, {
-          displayName: updatedName,
-          photoURL: updatedPhoto,
-        });
+        try {
+          const authPayload: { displayName: string; photoURL?: string } = {
+            displayName: updatedName,
+          };
+          if (updatedPhoto && !updatedPhoto.startsWith("data:") && updatedPhoto.length < 2000) {
+            authPayload.photoURL = updatedPhoto;
+          }
+          await updateProfile(user, authPayload);
+        } catch (authErr) {
+          console.warn("Firebase Auth updateProfile non-critical warning:", authErr);
+        }
       }
 
       toast({
@@ -2982,6 +3128,19 @@ export default function ChatPage() {
     const fitMode = wallpaperConfig.fit || "smart";
     const opacityVal = (wallpaperConfig.opacity || 85) / 100;
 
+    // Desktop: Track whether any popover, picker, or menu is currently open.
+    // When open, hover action buttons on other messages are suppressed to prevent visual overlap.
+    const isAnyDesktopPopoverOpen = Boolean(
+      activeDesktopPopup ||
+      showPlusMenu ||
+      activeFullEmojiPicker ||
+      activeReactionMenu ||
+      activeMessageMenu ||
+      isCustomizingReactions ||
+      showReactionCustomizer ||
+      viewingReactionsMsg
+    );
+
     return (
       <div
         className={`h-full w-full flex flex-col relative font-sans transition-colors duration-300 overflow-hidden ${c(
@@ -3082,10 +3241,10 @@ export default function ChatPage() {
           /* MOBILE SELECTION HEADER (WhatsApp style - Screenshot 1) */
           <MobileSelectionHeader
             selectedMessage={selectedMobileMessage}
-            onClearSelection={() => setSelectedMobileMessage(null)}
+            onClearSelection={() => selectMobileMsg(null)}
             onReply={() => {
               setReplyingTo(selectedMobileMessage);
-              setSelectedMobileMessage(null);
+              selectMobileMsg(null);
               setTimeout(() => inputRef.current?.focus(), 50);
             }}
             onDelete={() => {
@@ -3097,12 +3256,13 @@ export default function ChatPage() {
                 selectedMobileMessage.content || selectedMobileMessage.text || ""
               );
               toast({ title: "Copied", description: "Message copied to clipboard" });
-              setSelectedMobileMessage(null);
+              selectMobileMsg(null);
             }}
             onOpenInfo={() => {
               setSelectedInfoMessage(selectedMobileMessage);
-              setSelectedMobileMessage(null);
+              selectMobileMsg(null);
             }}
+            isDark={darkMode}
           />
         ) : isMobile ? (
           /* MOBILE HEADER (<768px): Rebuilt as clean single row with zero overlapping elements */
@@ -3585,7 +3745,7 @@ export default function ChatPage() {
             setShowInputEmojiPicker(false);
             setShowMobileGallery(false);
             setTouchedMessageId(null);
-            setSelectedMobileMessage(null);
+            selectMobileMsg(null);
           }}
         >
           {/* Date Pill */}
@@ -3633,13 +3793,59 @@ export default function ChatPage() {
               const msgTs = msg.timestamp?.seconds ? msg.timestamp.seconds * 1000 : Date.now();
               const timeStr = format(new Date(msgTs), "h:mm a");
 
-              const actionButtons = (
+              // Helper: parse URLs in text and render them as real clickable links
+              const renderWithLinks = (text: string, query?: string) => {
+                const urlRegex = /(https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)])/g;
+                const parts: (string | React.ReactNode)[] = [];
+                let lastIndex = 0;
+                let match: RegExpExecArray | null;
+                while ((match = urlRegex.exec(text)) !== null) {
+                  if (match.index > lastIndex) {
+                    const plain = text.slice(lastIndex, match.index);
+                    parts.push(query?.trim() ? highlightMatch(plain, query) : plain);
+                  }
+                  parts.push(
+                    <a
+                      key={match.index}
+                      href={match[0]}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="underline underline-offset-2 text-blue-400 hover:text-blue-300 transition-colors break-all"
+                    >
+                      {match[0]}
+                    </a>
+                  );
+                  lastIndex = match.index + match[0].length;
+                }
+                if (lastIndex < text.length) {
+                  const remaining = text.slice(lastIndex);
+                  parts.push(query?.trim() ? highlightMatch(remaining, query) : remaining);
+                }
+                return parts.length > 0 ? <>{parts}</> : <>{text}</>;
+              };
+
+              const isThisMsgMenuOpen = Boolean(
+                activeMessageMenu === msg.id ||
+                activeReactionMenu === msg.id ||
+                activeFullEmojiPicker === msg.id ||
+                touchedMessageId === msg.id
+              );
+
+              // Desktop-only: action buttons (reaction/reply/more). Never show on mobile — mobile uses long-press.
+              // Suppress hover action buttons on desktop whenever any picker/popover is open.
+              const actionButtons = isMobile ? null : (
                 <div
                   onClick={(e) => e.stopPropagation()}
-                  className={`absolute ${isMe ? "right-0 sm:right-full sm:mr-1.5 flex-row-reverse" : "left-0 sm:left-full sm:ml-1.5 flex-row"
-                    } -top-10 sm:inset-y-0 sm:my-auto sm:h-8 flex items-center gap-1 px-1.5 py-0.5 rounded-full shadow-md sm:shadow-none bg-white sm:bg-transparent dark:bg-zinc-800 sm:dark:bg-transparent border border-gray-100 sm:border-transparent dark:border-zinc-700 sm:dark:border-transparent transition-opacity duration-200 z-30 ${activeMessageMenu === msg.id || activeReactionMenu === msg.id || activeFullEmojiPicker === msg.id || touchedMessageId === msg.id
-                      ? "opacity-100 pointer-events-auto"
-                      : "opacity-0 sm:group-hover:opacity-100 pointer-events-none sm:group-hover:pointer-events-auto"
+                  className={`absolute ${isMe ? "right-0 sm:right-full sm:mr-2 flex-row-reverse" : "left-0 sm:left-full sm:ml-2 flex-row"
+                    } sm:inset-y-0 sm:my-auto sm:h-9 flex items-center gap-1.5 transition-opacity duration-150 ${
+                      // When a reaction/emoji picker is open for this msg, keep buttons visible (pill is positioned relative to them).
+                      // When only the "more" context menu is open, hide the buttons — the dropdown is already visible.
+                      (activeReactionMenu === msg.id || activeFullEmojiPicker === msg.id)
+                        ? "z-50 opacity-100 pointer-events-auto overflow-visible"
+                        : activeMessageMenu === msg.id
+                          ? "z-50 opacity-0 pointer-events-none"
+                          : `z-20 opacity-0 ${!isAnyDesktopPopoverOpen ? "sm:group-hover:opacity-100 sm:group-hover:pointer-events-auto" : "pointer-events-none"}`
                     }`}
                 >
                   {/* Reaction button */}
@@ -3649,268 +3855,44 @@ export default function ChatPage() {
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          const openDown = rect.top < 410;
-                          setMenuPlacement(openDown ? "down" : "up");
-
-                          if (activeReactionMenu === msg.id || activeFullEmojiPicker === msg.id) {
-                            setActiveReactionMenu(null);
+                          if (activeFullEmojiPicker === msg.id) {
                             setActiveFullEmojiPicker(null);
-                          } else {
-                            setActiveReactionMenu(msg.id);
-                            setActiveFullEmojiPicker(null);
+                            setDesktopPickerCoords(null);
+                            return;
                           }
+                          const btnRect = e.currentTarget.getBoundingClientRect();
+                          const btnCenterX = btnRect.left + btnRect.width / 2;
+                          const popoverWidth = 340;
+                          const popoverHeight = 420;
+
+                          const spaceAbove = btnRect.top - 12;
+                          const spaceBelow = window.innerHeight - btnRect.bottom - 12;
+                          const placement: "up" | "down" = (spaceAbove >= popoverHeight || spaceAbove >= spaceBelow) ? "up" : "down";
+
+                          let top = placement === "up" ? btnRect.top - popoverHeight - 8 : btnRect.bottom + 8;
+                          top = Math.max(10, Math.min(window.innerHeight - popoverHeight - 10, top));
+
+                          let left = isMe ? btnCenterX - (popoverWidth - 28) : btnCenterX - 28;
+                          left = Math.max(12, Math.min(window.innerWidth - popoverWidth - 12, left));
+
+                          const caretLeft = Math.max(16, Math.min(popoverWidth - 24, btnCenterX - left));
+
+                          setDesktopPickerCoords({ top, left, caretLeft, placement });
+                          setActiveFullEmojiPicker(msg.id);
+                          setActiveReactionMenu(null);
                           setActiveMessageMenu(null);
                           setIsCustomizingReactions(false);
+                          setEmojiSearchQuery("");
                         }}
-                        className={`w-8 h-8 flex items-center justify-center rounded-full transition-all hover:scale-110 active:scale-95 ${activeReactionMenu === msg.id || activeFullEmojiPicker === msg.id
-                          ? c("bg-[#D1E0DA] text-gray-900 shadow-sm", "bg-zinc-700 text-white shadow-sm")
-                          : c("bg-[#E8F0ED] hover:bg-[#D1E0DA] text-gray-700", "bg-zinc-800 hover:bg-zinc-700 text-gray-300")
-                          }`}
+                        className={`w-9 h-9 flex items-center justify-center rounded-full transition-all hover:scale-110 active:scale-95 shadow-md ${
+                          activeFullEmojiPicker === msg.id
+                            ? c("bg-[#d9fdd3] text-gray-800 shadow-sm", "bg-[#005c4b] text-white shadow-sm")
+                            : c("bg-white text-gray-700 hover:text-gray-900 hover:bg-gray-50 shadow-gray-400/30", "bg-zinc-700 text-gray-100 hover:text-white hover:bg-zinc-600 shadow-black/40")
+                        }`}
                         title="React"
                       >
-                        <Smile className="w-[16px] h-[16px]" />
+                        <Smile className="w-[18px] h-[18px]" strokeWidth={1.75} />
                       </button>
-
-                      {/* Step 1: Floating Quick Reaction Bar (6 emojis + Plus button) */}
-                      {activeReactionMenu === msg.id && (
-                        <>
-                          <div
-                            className="fixed inset-0 z-40 cursor-default"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveReactionMenu(null);
-                            }}
-                          />
-                          <div
-                            onClick={(e) => e.stopPropagation()}
-                            className={`absolute ${menuPlacement === "down" ? "top-full mt-2" : "bottom-full mb-2"} ${isMe ? "right-0" : "left-0"
-                              } ${menuPlacement === "down" ? (isMe ? "origin-top-right" : "origin-top-left") : (isMe ? "origin-bottom-right" : "origin-bottom-left")
-                              } flex items-center gap-0.5 sm:gap-1 p-1 sm:p-1.5 rounded-full shadow-2xl border z-50 animate-in fade-in zoom-in-90 duration-150 select-none ${c(
-                                "bg-white/95 backdrop-blur-xl border-gray-100 text-gray-900 shadow-black/15",
-                                "bg-[#242426]/95 backdrop-blur-xl border-zinc-800 text-gray-100 shadow-black/40"
-                              )}`}
-                          >
-                            {quickReactions.slice(0, 6).map((emoji, slotIdx) => (
-                              <button
-                                key={slotIdx}
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleReact(msg.id, emoji);
-                                  setActiveReactionMenu(null);
-                                }}
-                                className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center text-[20px] sm:text-[22px] rounded-full hover:scale-130 active:scale-95 transition-all duration-150 hover:-translate-y-0.5 cursor-pointer"
-                                title={emoji}
-                              >
-                                {emoji}
-                              </button>
-                            ))}
-
-                            {/* Plus button to open full emoji reaction picker */}
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                const openDown = rect.top < 410;
-                                setMenuPlacement(openDown ? "down" : "up");
-
-                                setActiveReactionMenu(null);
-                                setActiveFullEmojiPicker(msg.id);
-                              }}
-                              className={`w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-full transition-all hover:scale-110 active:scale-95 ml-0.5 cursor-pointer ${c(
-                                "bg-gray-100 hover:bg-gray-200 text-gray-600",
-                                "bg-zinc-800 hover:bg-zinc-700 text-gray-300"
-                              )}`}
-                              title="More reactions"
-                            >
-                              <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
-                            </button>
-                          </div>
-                        </>
-                      )}
-
-                      {/* Step 2: Full Reaction Picker (Opened when clicking '+' on quick reaction bar) */}
-                      {activeFullEmojiPicker === msg.id && (
-                        <>
-                          <div
-                            className="fixed inset-0 z-40 cursor-default"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveFullEmojiPicker(null);
-                              setIsCustomizingReactions(false);
-                            }}
-                          />
-                          <div
-                            onClick={(e) => e.stopPropagation()}
-                            className={`absolute ${menuPlacement === "down" ? "top-full mt-2" : "bottom-full mb-3.5"} ${isMe ? "right-0" : "left-0"
-                              } ${menuPlacement === "down" ? (isMe ? "origin-top-right" : "origin-top-left") : (isMe ? "origin-bottom-right" : "origin-bottom-left")
-                              } w-[300px] sm:w-[325px] max-h-[min(395px,calc(100vh-140px))] h-[395px] flex flex-col rounded-3xl shadow-2xl border z-50 animate-in fade-in zoom-in-95 duration-150 overflow-hidden ${c(
-                                "bg-white border-gray-100 text-gray-900",
-                                "bg-[#242426] border-zinc-800 text-gray-100"
-                              )}`}
-                          >
-                            {/* Search Header */}
-                            <div className={`p-3 pb-2 shrink-0 border-b ${c("border-gray-100", "border-zinc-800/80")}`}>
-                              <div className={`flex items-center px-3 py-1.5 rounded-full ${c("bg-gray-100 text-gray-800", "bg-zinc-800 text-gray-200")}`}>
-                                <Search className="w-4 h-4 mr-2 text-gray-400 shrink-0" />
-                                <input
-                                  type="text"
-                                  placeholder="Search emoji"
-                                  value={emojiSearchQuery}
-                                  onChange={(e) => setEmojiSearchQuery(e.target.value)}
-                                  className="bg-transparent outline-none text-[13px] w-full"
-                                />
-                                {emojiSearchQuery && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setEmojiSearchQuery("")}
-                                    className="text-gray-400 hover:text-gray-200 ml-1"
-                                  >
-                                    <X className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Your reactions / Customise Header */}
-                            <div className="px-3.5 pt-2 pb-1 flex items-center justify-between shrink-0">
-                              <span className="text-[12px] font-semibold text-muted-foreground">
-                                {isCustomizingReactions ? "Choose slot to customize:" : "Your reactions"}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setIsCustomizingReactions(!isCustomizingReactions);
-                                }}
-                                className="text-[12px] font-bold text-blue-500 hover:underline cursor-pointer"
-                              >
-                                {isCustomizingReactions ? "Done" : "Customise"}
-                              </button>
-                            </div>
-
-                            {/* 6 Quick Reaction Emojis */}
-                            <div className="px-3 pb-2 flex items-center justify-between shrink-0">
-                              {quickReactions.map((emoji, slotIdx) => (
-                                <button
-                                  key={slotIdx}
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (isCustomizingReactions) {
-                                      setSelectedCustomizeSlot(slotIdx);
-                                    } else {
-                                      handleReact(msg.id, emoji);
-                                      setActiveFullEmojiPicker(null);
-                                    }
-                                  }}
-                                  className={cn(
-                                    "w-10 h-10 flex items-center justify-center text-[24px] rounded-xl transition-all",
-                                    isCustomizingReactions && selectedCustomizeSlot === slotIdx
-                                      ? "ring-2 ring-blue-500 bg-blue-500/15 scale-110"
-                                      : "hover:scale-125 hover:bg-muted/40 active:scale-95"
-                                  )}
-                                  title={isCustomizingReactions ? `Slot ${slotIdx + 1}` : emoji}
-                                >
-                                  {emoji}
-                                </button>
-                              ))}
-                            </div>
-
-                            {/* Category Header */}
-                            <div className="px-3.5 pt-1 pb-1 shrink-0">
-                              <span className="text-[12px] font-semibold text-muted-foreground">
-                                {emojiSearchQuery ? "Search Results" : emojiActiveCategory}
-                              </span>
-                            </div>
-
-                            {/* Emoji Grid */}
-                            <div className="flex-1 overflow-y-auto px-3 pb-2 scrollbar-hide">
-                              {(() => {
-                                const displayEmojis = emojiSearchQuery.trim()
-                                  ? searchEmojis(
-                                    emojiSearchQuery,
-                                    Object.values(fullEmojiCategories).flat()
-                                  )
-                                  : fullEmojiCategories[emojiActiveCategory] || [];
-
-                                if (displayEmojis.length === 0) {
-                                  return (
-                                    <div className="flex flex-col items-center justify-center h-28 text-center text-xs text-muted-foreground">
-                                      No emoji found
-                                    </div>
-                                  );
-                                }
-
-                                return (
-                                  <div className="grid grid-cols-6 gap-1">
-                                    {displayEmojis.map((emoji) => (
-                                      <button
-                                        key={emoji}
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          if (isCustomizingReactions) {
-                                            const updated = [...quickReactions];
-                                            updated[selectedCustomizeSlot] = emoji;
-                                            setQuickReactions(updated);
-                                            try {
-                                              localStorage.setItem("customReactions", JSON.stringify(updated));
-                                            } catch { }
-                                            setSelectedCustomizeSlot((prev) => (prev + 1) % 6);
-                                          } else {
-                                            handleReact(msg.id, emoji);
-                                            setActiveFullEmojiPicker(null);
-                                          }
-                                        }}
-                                        className="w-10 h-10 flex items-center justify-center text-[22px] rounded-xl hover:scale-125 hover:bg-muted/30 transition-transform"
-                                      >
-                                        {emoji}
-                                      </button>
-                                    ))}
-                                  </div>
-                                );
-                              })()}
-                            </div>
-
-                            {/* Bottom Category Icon Bar */}
-                            {!emojiSearchQuery && (
-                              <div className={`flex items-center justify-between px-2 py-1.5 border-t shrink-0 ${c("border-gray-100 bg-gray-50/90", "border-zinc-800 bg-[#1e1e20]")}`}>
-                                {emojiTabIcons.map((tab) => (
-                                  <button
-                                    key={tab.key}
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setEmojiActiveCategory(tab.key);
-                                    }}
-                                    className={cn(
-                                      "w-7 h-7 flex items-center justify-center rounded-lg transition-colors text-xs",
-                                      emojiActiveCategory === tab.key
-                                        ? "text-blue-500 bg-blue-500/15 font-bold"
-                                        : "text-muted-foreground hover:text-foreground"
-                                    )}
-                                    title={tab.label}
-                                  >
-                                    {tab.icon}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-
-                            {/* Tooltip speech caret pointing toward the Smile button */}
-                            <div
-                              className={`absolute w-0 h-0 border-x-8 border-x-transparent ${isMe ? "right-3.5" : "left-3.5"
-                                } ${menuPlacement === "down"
-                                  ? `-top-2 border-b-8 border-t-0 ${c("border-b-white", "border-b-[#242426]")}`
-                                  : `-bottom-2 border-t-8 border-b-0 ${c("border-t-white", "border-t-[#242426]")}`
-                                }`}
-                            />
-                          </div>
-                        </>
-                      )}
                     </div>
                   )}
 
@@ -4077,9 +4059,9 @@ export default function ChatPage() {
                   key={msg.id}
                   id={`msg-${msg.id}`}
                   className={`chat-message-item flex ${isMe ? "justify-end" : "justify-start"} relative group items-center mb-1 transition-colors ${
-                    isMsgSelectedOnMobile
-                      ? "bg-[#005c4b]/20 dark:bg-[#005c4b]/30 -mx-3 px-3 py-1 rounded-none"
-                      : ""
+                    isMsgSelectedOnMobile || isThisMsgMenuOpen
+                      ? "z-[60] overflow-visible bg-[#005c4b]/20 dark:bg-[#005c4b]/30 -mx-3 px-3 py-1 rounded-none"
+                      : "z-10"
                   } ${debouncedSearchQuery.trim() ? "cursor-pointer hover:bg-white/5 p-1 rounded-xl transition-colors" : ""
                     }`}
                   onClick={() => {
@@ -4101,7 +4083,9 @@ export default function ChatPage() {
                     </div>
                   )}
 
-                  <div className="relative flex items-center max-w-[85%] sm:max-w-[75%] md:max-w-[65%] lg:max-w-[55%] xl:max-w-[520px]">
+                  <div className={`relative flex items-center max-w-[85%] sm:max-w-[75%] md:max-w-[65%] lg:max-w-[55%] xl:max-w-[520px] ${
+                      isMsgSelectedOnMobile ? "overflow-visible z-[61]" : ""
+                    }`}>
                     {/* Mobile Floating Quick Reaction Bar (Screenshot 2) */}
                     {isMsgSelectedOnMobile && !isMobileReactionSheetOpen && (
                       <MobileReactionPill
@@ -4110,35 +4094,79 @@ export default function ChatPage() {
                         sheetOpen={isMobileReactionSheetOpen}
                         onReact={(emoji) => {
                           handleReact(msg.id, emoji);
-                          setSelectedMobileMessage(null);
+                          selectMobileMsg(null);
                         }}
                         onOpenFullPicker={() => {
                           setIsMobileReactionSheetOpen(true);
                         }}
                         isMe={isMe}
+                        isDark={darkMode}
                       />
                     )}
 
                     {isMe && actionButtons}
 
                     <div
-                      onClick={(e) => {
-                        if (isMobile) {
-                          e.stopPropagation();
-                          if (selectedMobileMessage?.id === msg.id) {
-                            setSelectedMobileMessage(null);
-                          } else {
-                            setSelectedMobileMessage(msg);
-                            setActiveReactionMenu(null);
-                            setActiveMessageMenu(null);
-                            setActiveFullEmojiPicker(null);
+                      onTouchStart={(e) => {
+                        if (!isMobile) return;
+                        touchStartPosRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                        didLongPressRef.current = false;
+                        if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+                        longPressTimerRef.current = setTimeout(() => {
+                          didLongPressRef.current = true;
+                          if (typeof window !== "undefined" && window.navigator?.vibrate) {
+                            try { window.navigator.vibrate(45); } catch {}
                           }
+                          selectMobileMsg(msg);
+                          setActiveReactionMenu(null);
+                          setActiveMessageMenu(null);
+                          setActiveFullEmojiPicker(null);
+                        }, 420);
+                      }}
+                      onTouchMove={(e) => {
+                        if (!touchStartPosRef.current) return;
+                        const deltaX = Math.abs(e.touches[0].clientX - touchStartPosRef.current.x);
+                        const deltaY = Math.abs(e.touches[0].clientY - touchStartPosRef.current.y);
+                        if (deltaX > 10 || deltaY > 10) {
+                          if (longPressTimerRef.current) {
+                            clearTimeout(longPressTimerRef.current);
+                            longPressTimerRef.current = null;
+                          }
+                        }
+                      }}
+                      onTouchEnd={() => {
+                        if (longPressTimerRef.current) {
+                          clearTimeout(longPressTimerRef.current);
+                          longPressTimerRef.current = null;
+                        }
+                      }}
+                      onTouchCancel={() => {
+                        if (longPressTimerRef.current) {
+                          clearTimeout(longPressTimerRef.current);
+                          longPressTimerRef.current = null;
+                        }
+                      }}
+                      onClick={(e) => {
+                        if (didLongPressRef.current) {
+                          didLongPressRef.current = false;
+                          return;
+                        }
+                        if (isMobile) {
+                          if (selectedMobileMessage) {
+                            e.stopPropagation();
+                            if (selectedMobileMessage.id === msg.id) {
+                              selectMobileMsg(null);
+                            } else {
+                              selectMobileMsg(msg);
+                            }
+                          }
+                          // Normal tap without hold does NOT select the message on mobile!
                         } else if (!debouncedSearchQuery.trim()) {
                           setTouchedMessageId(touchedMessageId === msg.id ? null : msg.id);
                         }
                       }}
                       className={cn(
-                        "relative w-full transition-all",
+                        "relative w-full transition-all select-none",
                         isSticker
                           ? "bg-transparent border-none shadow-none px-0 py-0 flex flex-col items-end"
                           : cn(
@@ -4195,14 +4223,98 @@ export default function ChatPage() {
                           />
                         </div>
                       ) : msg.type === "image" && msgContent ? (
-                        <div className="mb-1 rounded-xl overflow-hidden max-w-sm">
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isMobile && selectedMobileMessage) {
+                              selectMobileMsg(selectedMobileMessage.id === msg.id ? null : msg);
+                            } else {
+                              setActiveMediaViewerSrc(msgContent);
+                            }
+                          }}
+                          className="mb-1 rounded-xl overflow-hidden max-w-sm cursor-pointer hover:opacity-95 active:scale-[0.99] transition-all"
+                          title="Click to view image"
+                        >
                           <img src={msgContent} alt="Uploaded" className="w-full h-auto max-h-72 object-cover" />
                         </div>
                       ) : msg.type === "video" && msgContent ? (
                         <div className="mb-1 rounded-xl overflow-hidden max-w-sm">
                           <video src={msgContent} controls className="w-full h-auto max-h-72" />
                         </div>
-                      ) : (msg.type === "audio" && msgContent) || (msg.type !== "image" && msg.type !== "video" && msg.type !== "sticker" && typeof msgContent === "string" && msgContent.startsWith("data:audio/")) ? (
+                      ) : (msg.type === "location" || (typeof msgContent === "string" && (msgContent.includes("Shared Location") || msgContent.includes("maps.google.com")))) ? (
+                        // ── Location Card ──────────────────────────────────────
+                        (() => {
+                          // Prefer structured lat/lng; fall back to parsing old text-format messages
+                          let lat: number | undefined = msg.latitude;
+                          let lng: number | undefined = msg.longitude;
+                          if (lat == null || lng == null) {
+                            const m = msgContent.match(/q=([-\d.]+),([-\d.]+)/) || msgContent.match(/([-\d.]+),([-\d.]+)/);
+                            if (m) { lat = parseFloat(m[1]); lng = parseFloat(m[2]); }
+                          }
+                          const mapsUrl = lat != null && lng != null
+                            ? `https://maps.google.com/?q=${lat},${lng}`
+                            : "https://maps.google.com";
+                          // OpenStreetMap static tile (no API key required)
+                          const staticMapUrl = lat != null && lng != null
+                            ? `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=15&size=300x160&markers=${lat},${lng},red-pushpin`
+                            : null;
+                          return (
+                            <a
+                              href={mapsUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="block -mx-4 -mt-2.5 rounded-xl overflow-hidden cursor-pointer hover:opacity-90 active:opacity-80 transition-opacity select-none"
+                            >
+                              {/* Map tile preview */}
+                              <div className="relative w-full overflow-hidden" style={{ aspectRatio: "16/9", minHeight: 130 }}>
+                                {staticMapUrl ? (
+                                  <img
+                                    src={staticMapUrl}
+                                    alt="Map preview"
+                                    className="w-full h-full object-cover"
+                                    loading="lazy"
+                                  />
+                                ) : (
+                                  <div className={`w-full h-full flex items-center justify-center ${
+                                    isMe
+                                      ? "bg-[#9ab52c]"
+                                      : c("bg-gray-200", "bg-zinc-700")
+                                  }`}>
+                                    <MapPin className="w-12 h-12 opacity-20" />
+                                  </div>
+                                )}
+                                {/* Red pin overlay centered */}
+                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                  <div className="flex flex-col items-center -mt-4">
+                                    <div className={`w-9 h-9 rounded-full border-[3px] border-white shadow-xl flex items-center justify-center bg-red-500`}>
+                                      <MapPin className="w-4 h-4 text-white fill-white" />
+                                    </div>
+                                    <div className="w-2 h-2 rounded-full bg-red-500/40 mt-0.5" />
+                                  </div>
+                                </div>
+                                {/* Gradient fade at bottom */}
+                                <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-black/20 to-transparent pointer-events-none" />
+                              </div>
+                              {/* Label bar */}
+                              <div className={`px-3 py-2 flex items-center gap-2 ${
+                                isMe
+                                  ? "bg-[#c3de38]/40"
+                                  : c("bg-gray-50 border-t border-gray-100", "bg-zinc-800/90 border-t border-zinc-700/50")
+                              }`}>
+                                <MapPin className="w-4 h-4 text-red-500 shrink-0" />
+                                <div className="flex flex-col min-w-0 flex-1">
+                                  <span className="text-[13px] font-bold leading-tight">Shared Location</span>
+                                  {lat != null && lng != null && (
+                                    <span className="text-[11px] opacity-60 font-mono tabular-nums">{lat.toFixed(4)}, {lng.toFixed(4)}</span>
+                                  )}
+                                </div>
+                                <ExternalLink className="w-3.5 h-3.5 opacity-40 shrink-0" />
+                              </div>
+                            </a>
+                          );
+                        })()
+                      ) : (msg.type === "audio" && msgContent) || (msg.type !== "image" && msg.type !== "video" && msg.type !== "sticker" && msg.type !== "location" && typeof msgContent === "string" && msgContent.startsWith("data:audio/")) ? (
                         // Voice note player — custom styled, no raw browser widget
                         <ChatAudioMessage
                           src={msgContent}
@@ -4210,17 +4322,19 @@ export default function ChatPage() {
                           waveform={msg.waveform}
                         />
                       ) : (
-                        <p className="text-[15px] leading-[1.4] whitespace-pre-wrap font-medium">
-                          {debouncedSearchQuery.trim()
-                            ? highlightMatch(msgContent, debouncedSearchQuery)
-                            : msgContent}
+                        <p className="text-[15px] leading-[1.4] whitespace-pre-wrap font-medium break-words">
+                          {renderWithLinks(msgContent, debouncedSearchQuery)}
                         </p>
                       )}
 
-                      {/* Link Preview (never show on stickers or deleted messages) */}
-                      {!isSticker && !msg.isDeleted && msg.linkPreview && (
-                        <div
-                          className={`mt-1.5 mb-1.5 rounded-xl border overflow-hidden cursor-pointer ${c(
+                      {/* Link Preview (never show on stickers, deleted messages, or location messages) */}
+                      {!isSticker && !msg.isDeleted && msg.linkPreview && msg.type !== "location" && !(typeof msgContent === "string" && (msgContent.includes("Shared Location") || msgContent.includes("maps.google.com"))) && (
+                        <a
+                          href={msg.linkPreview.url.startsWith("http") ? msg.linkPreview.url : `https://${msg.linkPreview.url}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className={`mt-1.5 mb-1.5 rounded-xl border overflow-hidden cursor-pointer block hover:opacity-90 transition-opacity ${c(
                             "bg-gray-50 border-gray-200",
                             "bg-[#1E1E1E] border-zinc-700"
                           )}`}
@@ -4231,7 +4345,7 @@ export default function ChatPage() {
                             </h4>
                             <p className="text-[11px] font-semibold uppercase text-blue-500">{msg.linkPreview.url}</p>
                           </div>
-                        </div>
+                        </a>
                       )}
 
                       {/* Time & Read Status */}
@@ -4347,7 +4461,7 @@ export default function ChatPage() {
             )}
           </AnimatePresence>
 
-          <div ref={messagesEndRef} />
+          <div ref={messagesEndRef} className="h-6 sm:h-8 shrink-0 select-none pointer-events-none" />
         </div>
 
         {/* Floating Scroll to Bottom Button (Messenger style) */}
@@ -4365,7 +4479,9 @@ export default function ChatPage() {
 
       {/* Bottom Input Area */}
       <div
-        className="px-3 sm:px-4 pt-2.5 bg-transparent mt-auto z-10 flex flex-col relative shrink-0"
+        className={`px-3 sm:px-4 pt-2.5 bg-transparent mt-auto flex flex-col relative shrink-0 ${
+          activeDesktopPopup ? "z-50" : "z-10"
+        }`}
         style={{ paddingBottom: isMobile ? ((showInputEmojiPicker || showMobileGallery) ? "0.5rem" : "max(1.5rem, env(safe-area-inset-bottom))") : "0.75rem" }}
       >
         {/* Replying banner */}
@@ -5766,6 +5882,20 @@ export default function ChatPage() {
         }}
       />
 
+      {/* Avatar Crop & Adjustment Modal */}
+      <AvatarCropModal
+        open={isCropModalOpen}
+        imageSrc={rawCropImageSrc}
+        onClose={() => {
+          setIsCropModalOpen(false);
+          setRawCropImageSrc(null);
+        }}
+        onCropComplete={(croppedBase64) => {
+          setEditMyPhotoURL(croppedBase64);
+        }}
+        isDark={darkMode}
+      />
+
       {/* Live Camera Viewfinder Modal */}
       <CameraModal
         open={isCameraModalOpen}
@@ -5786,8 +5916,7 @@ export default function ChatPage() {
         <MobileReactionSheet
           open={isMobileReactionSheetOpen}
           onClose={() => {
-            setIsMobileReactionSheetOpen(false);
-            setSelectedMobileMessage(null);
+            selectMobileMsg(null);
           }}
           quickReactions={quickReactions}
           onUpdateQuickReactions={(updated) => {
@@ -5799,7 +5928,7 @@ export default function ChatPage() {
           onReact={(emoji) => {
             if (selectedMobileMessage) {
               handleReact(selectedMobileMessage.id, emoji);
-              setSelectedMobileMessage(null);
+              selectMobileMsg(null);
             }
           }}
           fullEmojiCategories={fullEmojiCategories}
@@ -5833,23 +5962,221 @@ export default function ChatPage() {
           myId={myId}
           onClose={() => {
             setMobileDeleteMessage(null);
-            setSelectedMobileMessage(null);
+            selectMobileMsg(null);
           }}
           onDeleteForEveryone={(id) => {
             handleDeleteForEveryone(id);
             toast({ title: "Deleted", description: "Message unsent for everyone." });
-            setSelectedMobileMessage(null);
+            selectMobileMsg(null);
             setMobileDeleteMessage(null);
           }}
           onDeleteForMe={(id) => {
             handleDeleteForMe(id);
-            toast({ title: "Deleted", description: "Message removed from this device." });
-            setSelectedMobileMessage(null);
+            toast({ title: "Deleted", description: "Message deleted for you across your devices." });
+            selectMobileMsg(null);
             setMobileDeleteMessage(null);
           }}
           isDark={darkMode}
         />
       )}
+
+      {/* WhatsApp Desktop Style Floating Reaction Popover */}
+      {!isMobile && activeFullEmojiPicker && desktopPickerCoords && (
+        <>
+          {/* Backdrop to dismiss on click outside */}
+          <div
+            className="fixed inset-0 z-[190] cursor-default bg-transparent"
+            onClick={(e) => {
+              e.stopPropagation();
+              setActiveFullEmojiPicker(null);
+              setDesktopPickerCoords(null);
+              setIsCustomizingReactions(false);
+            }}
+          />
+
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: "fixed",
+              top: `${desktopPickerCoords.top}px`,
+              left: `${desktopPickerCoords.left}px`,
+            }}
+            className={`w-[340px] h-[420px] max-h-[calc(100vh-24px)] flex flex-col rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.18)] border z-[200] animate-in fade-in zoom-in-95 duration-150 select-none overflow-hidden ${c(
+              "bg-white border-gray-100 text-gray-900",
+              "bg-[#202c33] border-[#313d45] text-gray-100"
+            )}`}
+          >
+            {/* Tooltip caret pointing toward the Smile button */}
+            <div
+              style={{ left: `${desktopPickerCoords.caretLeft}px` }}
+              className={`absolute w-0 h-0 border-x-[8px] border-x-transparent pointer-events-none -translate-x-1/2 ${
+                desktopPickerCoords.placement === "up"
+                  ? `-bottom-2 border-t-[8px] border-b-0 ${c("border-t-white", "border-t-[#202c33]")}`
+                  : `-top-2 border-b-[8px] border-t-0 ${c("border-b-white", "border-b-[#202c33]")}`
+              }`}
+            />
+
+            {/* Search Header */}
+            <div className={`p-3 pb-2 shrink-0 border-b ${c("border-gray-100", "border-zinc-800/80")}`}>
+              <div className={`flex items-center px-3.5 py-1.5 rounded-xl ${c("bg-[#f0f2f5] text-gray-800", "bg-[#111b21] text-gray-200")}`}>
+                <Search className="w-4 h-4 mr-2.5 text-gray-400 shrink-0" />
+                <input
+                  type="text"
+                  placeholder="Search emoji"
+                  value={emojiSearchQuery}
+                  onChange={(e) => setEmojiSearchQuery(e.target.value)}
+                  className="bg-transparent outline-none text-[13.5px] w-full placeholder:text-gray-400"
+                  autoFocus
+                />
+                {emojiSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setEmojiSearchQuery("")}
+                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 ml-1"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Your reactions / Customise Header */}
+            <div className="px-3.5 pt-2 pb-1 flex items-center justify-between shrink-0">
+              <span className="text-[13px] font-medium text-gray-500 dark:text-gray-400">
+                {isCustomizingReactions ? "Choose slot to customize:" : "Your reactions"}
+              </span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsCustomizingReactions(!isCustomizingReactions);
+                }}
+                className="text-[13px] font-semibold text-gray-800 dark:text-gray-200 hover:text-emerald-600 dark:hover:text-emerald-400 cursor-pointer"
+              >
+                {isCustomizingReactions ? "Done" : "Customise"}
+              </button>
+            </div>
+
+            {/* 6 Quick Reaction Emojis */}
+            <div className="px-3 pb-2 flex items-center justify-between shrink-0">
+              {quickReactions.slice(0, 6).map((emoji, slotIdx) => (
+                <button
+                  key={slotIdx}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isCustomizingReactions) {
+                      setSelectedCustomizeSlot(slotIdx);
+                    } else {
+                      handleReact(activeFullEmojiPicker, emoji);
+                      setActiveFullEmojiPicker(null);
+                      setDesktopPickerCoords(null);
+                    }
+                  }}
+                  className={cn(
+                    "w-10 h-10 flex items-center justify-center text-[26px] rounded-xl transition-all",
+                    isCustomizingReactions && selectedCustomizeSlot === slotIdx
+                      ? "ring-2 ring-emerald-500 bg-emerald-500/15 scale-110"
+                      : "hover:scale-125 hover:bg-black/5 dark:hover:bg-white/5 active:scale-95 cursor-pointer"
+                  )}
+                  title={isCustomizingReactions ? `Slot ${slotIdx + 1}` : emoji}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+
+            {/* Category Title / Search Status */}
+            <div className="px-3.5 pt-1 pb-1 shrink-0">
+              <span className="text-[13px] font-medium text-gray-500 dark:text-gray-400">
+                {emojiSearchQuery ? "Search Results" : emojiActiveCategory}
+              </span>
+            </div>
+
+            {/* Emoji Grid (6 columns) */}
+            <div className="flex-1 overflow-y-auto px-3 pb-2 scrollbar-thin">
+              {(() => {
+                const displayEmojis = emojiSearchQuery.trim()
+                  ? searchEmojis(
+                    emojiSearchQuery,
+                    Object.values(fullEmojiCategories).flat()
+                  )
+                  : fullEmojiCategories[emojiActiveCategory] || [];
+
+                if (displayEmojis.length === 0) {
+                  return (
+                    <div className="flex flex-col items-center justify-center h-28 text-center text-xs text-muted-foreground">
+                      No emoji found
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="grid grid-cols-6 gap-1 justify-items-center">
+                    {displayEmojis.map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isCustomizingReactions) {
+                            const updated = [...quickReactions];
+                            updated[selectedCustomizeSlot] = emoji;
+                            setQuickReactions(updated);
+                            try {
+                              localStorage.setItem("customReactions", JSON.stringify(updated));
+                            } catch { }
+                            setSelectedCustomizeSlot((prev) => (prev + 1) % 6);
+                          } else {
+                            handleReact(activeFullEmojiPicker, emoji);
+                            setActiveFullEmojiPicker(null);
+                            setDesktopPickerCoords(null);
+                          }
+                        }}
+                        className="w-10 h-10 flex items-center justify-center text-[24px] rounded-xl hover:scale-125 hover:bg-black/5 dark:hover:bg-white/5 active:scale-95 transition-transform cursor-pointer"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Bottom Category Icon Bar (WhatsApp style, hidden when searching) */}
+            {!emojiSearchQuery && (
+              <div className={`flex items-center justify-between px-2 py-1.5 border-t shrink-0 relative z-10 ${c("border-gray-100 bg-[#f9fafb]", "border-[#2a3942] bg-[#111b21]")}`}>
+                {emojiTabIcons.map((tab) => (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEmojiActiveCategory(tab.key);
+                    }}
+                    className={cn(
+                      "w-8 h-8 flex items-center justify-center rounded-lg transition-colors text-xs cursor-pointer",
+                      emojiActiveCategory === tab.key
+                        ? c("text-emerald-600 bg-emerald-50 font-bold", "text-emerald-400 bg-emerald-950/40 font-bold")
+                        : "text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+                    )}
+                    title={tab.label}
+                  >
+                    {tab.icon}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Global Image / Media Viewer Lightbox */}
+      <MediaViewer
+        open={!!activeMediaViewerSrc}
+        src={activeMediaViewerSrc || ""}
+        onClose={() => setActiveMediaViewerSrc(null)}
+      />
     </>
   );
 }

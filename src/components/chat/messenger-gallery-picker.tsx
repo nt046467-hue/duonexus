@@ -48,9 +48,9 @@ export function MessengerGalleryIcon({ className = "w-5 h-5" }: { className?: st
       strokeLinejoin="round"
       className={className}
     >
-      <rect width="18" height="18" x="3" y="3" rx="4" fill="currentColor" fillOpacity="0.12" />
-      <circle cx="9" cy="9" r="2" fill="currentColor" />
-      <path d="m21 15-4.5-4.5a2 2 0 0 0-2.8 0L5 19" strokeWidth="2.2" />
+      <rect width="18" height="18" x="3" y="3" rx="3.5" />
+      <circle cx="8.5" cy="8.5" r="2" fill="currentColor" stroke="none" />
+      <path d="M21 16.5l-5.5-5.5a2 2 0 0 0-2.8 0L3.5 20" />
     </svg>
   );
 }
@@ -259,8 +259,8 @@ export function MessengerGalleryPicker({
       exit={{ y: 340, opacity: 0 }}
       transition={{ type: "spring", stiffness: 380, damping: 32 }}
       className={`w-full flex flex-col select-none relative z-30 shadow-2xl border-t ${darkMode
-          ? "bg-[#181818] border-zinc-800/80 text-white"
-          : "bg-white border-gray-200 text-gray-900"
+        ? "bg-[#181818] border-zinc-800/80 text-white"
+        : "bg-white border-gray-200 text-gray-900"
         }`}
       style={{
         height: "390px",
@@ -293,8 +293,8 @@ export function MessengerGalleryPicker({
           type="button"
           onClick={onClose}
           className={`w-8 h-8 rounded-full flex items-center justify-center transition-all active:scale-90 cursor-pointer ${darkMode
-              ? "text-gray-400 hover:bg-zinc-800 hover:text-gray-200"
-              : "text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+            ? "text-gray-400 hover:bg-zinc-800 hover:text-gray-200"
+            : "text-gray-500 hover:bg-gray-100 hover:text-gray-800"
             }`}
           title="Close"
         >
@@ -310,8 +310,8 @@ export function MessengerGalleryPicker({
             type="button"
             onClick={() => setShowAlbumMenu(!showAlbumMenu)}
             className={`flex items-center gap-1.5 py-1 px-1.5 -ml-1 rounded-lg text-[15px] font-semibold tracking-tight transition-colors active:scale-95 ${darkMode
-                ? "text-white hover:bg-zinc-800"
-                : "text-gray-900 hover:bg-gray-100"
+              ? "text-white hover:bg-zinc-800"
+              : "text-gray-900 hover:bg-gray-100"
               }`}
           >
             <span>
@@ -336,8 +336,8 @@ export function MessengerGalleryPicker({
               />
               <div
                 className={`absolute top-full left-0 mt-1.5 w-48 rounded-xl shadow-2xl border p-1 z-50 animate-in fade-in zoom-in-95 duration-150 ${darkMode
-                    ? "bg-[#242424] border-zinc-700 text-gray-100"
-                    : "bg-white border-gray-200 text-gray-800"
+                  ? "bg-[#242424] border-zinc-700 text-gray-100"
+                  : "bg-white border-gray-200 text-gray-800"
                   }`}
               >
                 <button
@@ -347,10 +347,10 @@ export function MessengerGalleryPicker({
                     setShowAlbumMenu(false);
                   }}
                   className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeAlbum === "all"
-                      ? "text-[#00d2ff] bg-[#00d2ff]/10 font-bold"
-                      : darkMode
-                        ? "hover:bg-zinc-800"
-                        : "hover:bg-gray-100"
+                    ? "text-[#00d2ff] bg-[#00d2ff]/10 font-bold"
+                    : darkMode
+                      ? "hover:bg-zinc-800"
+                      : "hover:bg-gray-100"
                     }`}
                 >
                   <span>All photos</span>
@@ -364,10 +364,10 @@ export function MessengerGalleryPicker({
                     setShowAlbumMenu(false);
                   }}
                   className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeAlbum === "chat"
-                      ? "text-[#00d2ff] bg-[#00d2ff]/10 font-bold"
-                      : darkMode
-                        ? "hover:bg-zinc-800"
-                        : "hover:bg-gray-100"
+                    ? "text-[#00d2ff] bg-[#00d2ff]/10 font-bold"
+                    : darkMode
+                      ? "hover:bg-zinc-800"
+                      : "hover:bg-gray-100"
                     }`}
                 >
                   <span>Shared in chat</span>
@@ -381,10 +381,10 @@ export function MessengerGalleryPicker({
                     setShowAlbumMenu(false);
                   }}
                   className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeAlbum === "curated"
-                      ? "text-[#00d2ff] bg-[#00d2ff]/10 font-bold"
-                      : darkMode
-                        ? "hover:bg-zinc-800"
-                        : "hover:bg-gray-100"
+                    ? "text-[#00d2ff] bg-[#00d2ff]/10 font-bold"
+                    : darkMode
+                      ? "hover:bg-zinc-800"
+                      : "hover:bg-gray-100"
                     }`}
                 >
                   <span>Romantic & Wallpapers</span>
@@ -431,19 +431,19 @@ export function MessengerGalleryPicker({
             type="button"
             onClick={toggleHD}
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-semibold transition-all active:scale-95 cursor-pointer ${isHD
-                ? "border-[#00d2ff] bg-[#00d2ff]/15 text-[#00d2ff]"
-                : darkMode
-                  ? "border-zinc-700 bg-zinc-800/80 text-gray-300 hover:border-zinc-600"
-                  : "border-gray-300 bg-gray-100 text-gray-700 hover:border-gray-400"
+              ? "border-[#00d2ff] bg-[#00d2ff]/15 text-[#00d2ff]"
+              : darkMode
+                ? "border-zinc-700 bg-zinc-800/80 text-gray-300 hover:border-zinc-600"
+                : "border-gray-300 bg-gray-100 text-gray-700 hover:border-gray-400"
               }`}
             title={isHD ? "HD Quality is ON (1080p+)" : "Turn HD Quality ON"}
           >
             <span
               className={`text-[9px] font-black tracking-tighter px-1 py-[0.5px] rounded border ${isHD
-                  ? "border-[#00d2ff] bg-[#00d2ff] text-slate-950 font-bold"
-                  : darkMode
-                    ? "border-zinc-600 text-gray-400"
-                    : "border-gray-400 text-gray-600"
+                ? "border-[#00d2ff] bg-[#00d2ff] text-slate-950 font-bold"
+                : darkMode
+                  ? "border-zinc-600 text-gray-400"
+                  : "border-gray-400 text-gray-600"
                 }`}
             >
               HD
@@ -474,8 +474,8 @@ export function MessengerGalleryPicker({
           <div
             onClick={onOpenCamera}
             className={`aspect-square relative flex flex-col items-center justify-center rounded-[2px] transition-all cursor-pointer active:scale-95 group ${darkMode
-                ? "bg-zinc-800/90 hover:bg-zinc-700/90 text-zinc-300"
-                : "bg-gray-100 hover:bg-gray-200 text-gray-700"
+              ? "bg-zinc-800/90 hover:bg-zinc-700/90 text-zinc-300"
+              : "bg-gray-100 hover:bg-gray-200 text-gray-700"
               }`}
           >
             <div className="w-10 h-10 rounded-full flex items-center justify-center bg-black/20 dark:bg-white/10 mb-1.5 group-hover:scale-110 transition-transform">

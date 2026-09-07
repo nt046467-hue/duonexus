@@ -202,7 +202,7 @@ export function DesktopStickerPicker({
     <div
       ref={containerRef}
       onClick={(e) => e.stopPropagation()}
-      className={`absolute bottom-full left-[-8px] mb-3 z-50 w-[340px] sm:w-[360px] h-[460px] flex flex-col rounded-2xl shadow-2xl border ${
+      className={`absolute bottom-full left-[-8px] mb-3 z-50 w-[340px] sm:w-[360px] h-[460px] flex flex-col rounded-2xl shadow-2xl border overflow-hidden ${
         darkMode
           ? "bg-[#18181A] border-zinc-800 text-white"
           : "bg-white border-gray-200 text-gray-900"
@@ -561,7 +561,7 @@ export function DesktopGifPicker({
     <div
       ref={containerRef}
       onClick={(e) => e.stopPropagation()}
-      className={`absolute bottom-full left-[-40px] mb-3 z-50 w-[350px] sm:w-[380px] h-[480px] flex flex-col rounded-2xl shadow-2xl border ${
+      className={`absolute bottom-full left-[-40px] mb-3 z-50 w-[350px] sm:w-[380px] h-[480px] flex flex-col rounded-2xl shadow-2xl border overflow-hidden ${
         darkMode
           ? "bg-[#18181A] border-zinc-800 text-white"
           : "bg-white border-gray-200 text-gray-900"
@@ -756,7 +756,7 @@ export function DesktopEmojiPicker({
     <div
       ref={containerRef}
       onClick={(e) => e.stopPropagation()}
-      className={`absolute bottom-full right-0 mb-3 z-50 w-[340px] sm:w-[360px] h-[480px] flex flex-col rounded-2xl shadow-2xl border ${
+      className={`absolute bottom-full right-0 mb-3 z-50 w-[340px] sm:w-[360px] h-[480px] flex flex-col rounded-2xl shadow-2xl border overflow-hidden ${
         darkMode
           ? "bg-[#18181A] border-zinc-800 text-white"
           : "bg-white border-gray-200 text-gray-900"
@@ -884,8 +884,8 @@ export function DesktopEmojiPicker({
 
       {/* Bottom Category Navigation Bar */}
       <div
-        className={`shrink-0 border-t flex items-center justify-between px-2 py-1 rounded-b-2xl ${
-          darkMode ? "border-zinc-800/80 bg-[#161618]" : "border-gray-100 bg-gray-50"
+        className={`shrink-0 border-t flex items-center justify-between px-2 py-1 rounded-b-2xl relative z-10 ${
+          darkMode ? "border-zinc-800 bg-[#161618]" : "border-gray-200 bg-[#F9FAFB]"
         }`}
       >
         {emojiTabIcons.map((t) => (
