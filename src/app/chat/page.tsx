@@ -751,7 +751,7 @@ export default function ChatPage() {
       (myId === "karu" ? "/avatars/karu.png" : "/avatars/nabin.png");
 
   const partnerAvatar =
-    (partnerProfile?.photoURL && !partnerProfile.photoURL.startsWith("data:"))
+    partnerProfile?.photoURL
       ? partnerProfile.photoURL
       : (partnerId === "karu" ? "/avatars/karu.png" : "/avatars/nabin.png");
 
@@ -759,23 +759,23 @@ export default function ChatPage() {
 
   // Wallpaper state & config
   const [isWallpaperModalOpen, setIsWallpaperModalOpen] = useState(false);
-  const [wallpaperConfig, setWallpaperConfig] = useState<WallpaperConfig>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = localStorage.getItem("duonexus_chat_wallpaper");
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          const isV2 = localStorage.getItem("duonexus_wallpaper_v2");
-          return {
-            ...DEFAULT_WALLPAPER,
-            ...parsed,
-            fit: isV2 ? (parsed.fit || "smart") : "smart",
-          };
-        }
-      } catch { }
-    }
-    return DEFAULT_WALLPAPER;
-  });
+  const [wallpaperConfig, setWallpaperConfig] = useState<WallpaperConfig>(DEFAULT_WALLPAPER);
+
+  // Sync wallpaper from localStorage after mount to avoid hydration mismatch between SSR & client
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("duonexus_chat_wallpaper");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const isV2 = localStorage.getItem("duonexus_wallpaper_v2");
+        setWallpaperConfig({
+          ...DEFAULT_WALLPAPER,
+          ...parsed,
+          fit: isV2 ? (parsed.fit || "smart") : "smart",
+        });
+      }
+    } catch { }
+  }, []);
 
   const handleSaveWallpaper = (config: WallpaperConfig) => {
     setWallpaperConfig(config);
@@ -1093,20 +1093,49 @@ export default function ChatPage() {
     placement: "up" | "down";
   } | null>(null);
   const [menuPlacement, setMenuPlacement] = useState<"up" | "down">("up");
+  const [desktopMenuCoords, setDesktopMenuCoords] = useState<{ top: number; left: number } | null>(null);
+  const [desktopQuickReactionCoords, setDesktopQuickReactionCoords] = useState<{ top: number; left: number } | null>(null);
   const [touchedMessageId, setTouchedMessageId] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   // Mobile WhatsApp-style selection, reactions & message info
   const [selectedMobileMessage, setSelectedMobileMessage] = useState<Message | null>(null);
+  const [mobilePillCoords, setMobilePillCoords] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
   const [isMobileReactionSheetOpen, setIsMobileReactionSheetOpen] = useState(false);
   const [selectedInfoMessage, setSelectedInfoMessage] = useState<Message | null>(null);
   const [mobileDeleteMessage, setMobileDeleteMessage] = useState<Message | null>(null);
   const [activeMediaViewerSrc, setActiveMediaViewerSrc] = useState<string | null>(null);
 
-  // Helper to reliably update mobile selection and reset bottom sheet state
+  // Helper to reliably update mobile selection and compute floating pill coordinates
   const selectMobileMsg = useCallback((msg: Message | null) => {
     setSelectedMobileMessage(msg);
     setIsMobileReactionSheetOpen(false);
-  }, []);
+    if (!msg) {
+      setMobilePillCoords(null);
+      return;
+    }
+    const updateCoords = () => {
+      const el = document.getElementById(`msg-${msg.id}`);
+      if (!el) return;
+      const bubble = el.querySelector(".chat-bubble-content") || el.querySelector(".relative.w-full") || el;
+      const rect = bubble.getBoundingClientRect();
+      const pillWidth = 280;
+      const pillHeight = 44;
+      const showAbove = rect.top >= 65;
+      const top = showAbove ? rect.top - pillHeight - 6 : rect.bottom + 6;
+
+      const isMe = msg.senderRole ? msg.senderRole === myId : msg.senderUid === user?.uid;
+      let left = isMe ? rect.right - pillWidth : rect.left;
+      left = Math.max(10, Math.min(window.innerWidth - pillWidth - 10, left));
+
+      setMobilePillCoords({ top, left });
+    };
+
+    updateCoords();
+    requestAnimationFrame(updateCoords);
+  }, [myId, user?.uid]);
 
   // Long press refs for mobile message bubbles
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -1289,7 +1318,31 @@ export default function ChatPage() {
       if (prev) setDesktopPickerCoords(null);
       return null;
     });
-  }, []);
+    setActiveMessageMenu(null);
+    setDesktopMenuCoords(null);
+    setActiveReactionMenu(null);
+    setDesktopQuickReactionCoords(null);
+    if (selectedMobileMessage) {
+      const msgEl = document.getElementById(`msg-${selectedMobileMessage.id}`);
+      if (msgEl) {
+        const bubble = msgEl.querySelector(".chat-bubble-content") || msgEl.querySelector(".relative.w-full") || msgEl;
+        const rect = bubble.getBoundingClientRect();
+        if (rect.bottom < 60 || rect.top > window.innerHeight - 60) {
+          // If scrolled out of view, dismiss selection
+          selectMobileMsg(null);
+        } else {
+          const pillWidth = 280;
+          const pillHeight = 44;
+          const showAbove = rect.top >= 65;
+          const top = showAbove ? rect.top - pillHeight - 6 : rect.bottom + 6;
+          const isMe = selectedMobileMessage.senderRole ? selectedMobileMessage.senderRole === myId : selectedMobileMessage.senderUid === user?.uid;
+          let left = isMe ? rect.right - pillWidth : rect.left;
+          left = Math.max(10, Math.min(window.innerWidth - pillWidth - 10, left));
+          setMobilePillCoords({ top, left });
+        }
+      }
+    }
+  }, [myId, selectedMobileMessage, selectMobileMsg, user?.uid]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
     if (scrollContainerRef.current) {
@@ -3152,6 +3205,7 @@ export default function ChatPage() {
         <div className="absolute inset-0 pointer-events-none z-0 overflow-hidden select-none">
           {/* Ambient atmosphere backdrop */}
           <div
+            suppressHydrationWarning
             className="absolute inset-0 transition-all duration-500 pointer-events-none"
             style={{
               backgroundImage: `url("${wallpaperSrc}")`,
@@ -3166,6 +3220,7 @@ export default function ChatPage() {
           {/* Crisp Wallpaper (Full Cover edge-to-edge on mobile, smart adaptive on desktop) */}
           <div className="absolute inset-0 transition-all duration-300 pointer-events-none flex items-center justify-center">
             <div
+              suppressHydrationWarning
               className="w-full h-full transition-all duration-300"
               style={{
                 backgroundImage: `url("${wallpaperSrc}")`,
@@ -3832,6 +3887,11 @@ export default function ChatPage() {
                 touchedMessageId === msg.id
               );
 
+              // True when ANY message has an open popover (suppress hover-buttons on OTHER messages)
+              const isAnyDesktopPopoverOpen = Boolean(
+                activeMessageMenu || activeReactionMenu || activeFullEmojiPicker
+              );
+
               // Desktop-only: action buttons (reaction/reply/more). Never show on mobile — mobile uses long-press.
               // Suppress hover action buttons on desktop whenever any picker/popover is open.
               const actionButtons = isMobile ? null : (
@@ -3839,53 +3899,41 @@ export default function ChatPage() {
                   onClick={(e) => e.stopPropagation()}
                   className={`absolute ${isMe ? "right-0 sm:right-full sm:mr-2 flex-row-reverse" : "left-0 sm:left-full sm:ml-2 flex-row"
                     } sm:inset-y-0 sm:my-auto sm:h-9 flex items-center gap-1.5 transition-opacity duration-150 ${
-                      // When a reaction/emoji picker is open for this msg, keep buttons visible (pill is positioned relative to them).
-                      // When only the "more" context menu is open, hide the buttons — the dropdown is already visible.
-                      (activeReactionMenu === msg.id || activeFullEmojiPicker === msg.id)
+                      // Keep buttons visible when any menu, reaction, or picker is open for this message
+                      (activeReactionMenu === msg.id || activeFullEmojiPicker === msg.id || activeMessageMenu === msg.id)
                         ? "z-50 opacity-100 pointer-events-auto overflow-visible"
-                        : activeMessageMenu === msg.id
-                          ? "z-50 opacity-0 pointer-events-none"
-                          : `z-20 opacity-0 ${!isAnyDesktopPopoverOpen ? "sm:group-hover:opacity-100 sm:group-hover:pointer-events-auto" : "pointer-events-none"}`
+                        : `z-20 opacity-0 ${!isAnyDesktopPopoverOpen ? "sm:group-hover:opacity-100 sm:group-hover:pointer-events-auto" : "pointer-events-none"}`
                     }`}
                 >
-                  {/* Reaction button */}
+                  {/* Reaction button — step 1: shows 6-emoji quick pill */}
                   {!msg.isDeleted && (
                     <div className="relative">
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (activeFullEmojiPicker === msg.id) {
-                            setActiveFullEmojiPicker(null);
-                            setDesktopPickerCoords(null);
+                          if (activeReactionMenu === msg.id) {
+                            setActiveReactionMenu(null);
+                            setDesktopQuickReactionCoords(null);
                             return;
                           }
                           const btnRect = e.currentTarget.getBoundingClientRect();
-                          const btnCenterX = btnRect.left + btnRect.width / 2;
-                          const popoverWidth = 340;
-                          const popoverHeight = 420;
-
+                          const pillWidth = 290;
+                          const pillHeight = 52;
                           const spaceAbove = btnRect.top - 12;
-                          const spaceBelow = window.innerHeight - btnRect.bottom - 12;
-                          const placement: "up" | "down" = (spaceAbove >= popoverHeight || spaceAbove >= spaceBelow) ? "up" : "down";
-
-                          let top = placement === "up" ? btnRect.top - popoverHeight - 8 : btnRect.bottom + 8;
-                          top = Math.max(10, Math.min(window.innerHeight - popoverHeight - 10, top));
-
-                          let left = isMe ? btnCenterX - (popoverWidth - 28) : btnCenterX - 28;
-                          left = Math.max(12, Math.min(window.innerWidth - popoverWidth - 12, left));
-
-                          const caretLeft = Math.max(16, Math.min(popoverWidth - 24, btnCenterX - left));
-
-                          setDesktopPickerCoords({ top, left, caretLeft, placement });
-                          setActiveFullEmojiPicker(msg.id);
-                          setActiveReactionMenu(null);
+                          const showAbove = spaceAbove >= pillHeight + 8;
+                          const top = showAbove ? btnRect.top - pillHeight - 8 : btnRect.bottom + 8;
+                          let left = isMe ? btnRect.right - pillWidth : btnRect.left;
+                          left = Math.max(8, Math.min(window.innerWidth - pillWidth - 8, left));
+                          setDesktopQuickReactionCoords({ top, left });
+                          setActiveReactionMenu(msg.id);
+                          setActiveFullEmojiPicker(null);
+                          setDesktopPickerCoords(null);
                           setActiveMessageMenu(null);
-                          setIsCustomizingReactions(false);
-                          setEmojiSearchQuery("");
+                          setDesktopMenuCoords(null);
                         }}
                         className={`w-9 h-9 flex items-center justify-center rounded-full transition-all hover:scale-110 active:scale-95 shadow-md ${
-                          activeFullEmojiPicker === msg.id
+                          activeReactionMenu === msg.id
                             ? c("bg-[#d9fdd3] text-gray-800 shadow-sm", "bg-[#005c4b] text-white shadow-sm")
                             : c("bg-white text-gray-700 hover:text-gray-900 hover:bg-gray-50 shadow-gray-400/30", "bg-zinc-700 text-gray-100 hover:text-white hover:bg-zinc-600 shadow-black/40")
                         }`}
@@ -3919,18 +3967,35 @@ export default function ChatPage() {
                     </button>
                   )}
 
-                  {/* More Menu */}
+                  {/* More Menu — opens fixed-position dropdown at root level to avoid clipping */}
                   <div className="relative">
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
+                        if (activeMessageMenu === msg.id) {
+                          setActiveMessageMenu(null);
+                          setDesktopMenuCoords(null);
+                          return;
+                        }
                         const rect = e.currentTarget.getBoundingClientRect();
-                        const openDown = rect.top < 240;
-                        setMenuPlacement(openDown ? "down" : "up");
-                        setActiveMessageMenu(activeMessageMenu === msg.id ? null : msg.id);
+                        const menuHeight = 160;
+                        const spaceBelow = window.innerHeight - rect.bottom - 8;
+                        const spaceAbove = rect.top - 8;
+                        const openDown = spaceBelow >= menuHeight || spaceBelow >= spaceAbove;
+                        const top = openDown ? rect.bottom + 6 : rect.top - menuHeight - 6;
+                        // align right edge of menu to right edge of button for isMe, else left edge
+                        const menuWidth = 192;
+                        const left = isMe
+                          ? Math.max(8, Math.min(window.innerWidth - menuWidth - 8, rect.right - menuWidth))
+                          : Math.max(8, Math.min(window.innerWidth - menuWidth - 8, rect.left));
+                        setDesktopMenuCoords({ top: Math.max(8, top), left });
+                        // store the msg id for the menu along with the delete options meta
+                        setActiveMessageMenu(msg.id);
                         setActiveReactionMenu(null);
+                        setDesktopQuickReactionCoords(null);
                         setActiveFullEmojiPicker(null);
+                        setDesktopPickerCoords(null);
                       }}
                       className={`w-8 h-8 flex items-center justify-center rounded-full transition-all hover:scale-110 active:scale-95 flex-shrink-0 ${activeMessageMenu === msg.id
                         ? c("bg-[#D1E0DA] text-gray-900 shadow-sm", "bg-zinc-700 text-white shadow-sm")
@@ -3940,107 +4005,6 @@ export default function ChatPage() {
                     >
                       <MoreVertical className="w-[16px] h-[16px]" />
                     </button>
-
-                    {activeMessageMenu === msg.id && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-40 cursor-default"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setActiveMessageMenu(null);
-                          }}
-                        />
-                        <div
-                          onClick={(e) => e.stopPropagation()}
-                          className={`absolute ${menuPlacement === "down" ? "top-full mt-2" : "bottom-full mb-2"
-                            } ${isMe ? "right-0" : "left-0"} ${menuPlacement === "down"
-                              ? (isMe ? "origin-top-right" : "origin-top-left")
-                              : (isMe ? "origin-bottom-right" : "origin-bottom-left")
-                            } w-48 rounded-xl shadow-2xl border z-50 py-1.5 animate-in fade-in zoom-in-95 duration-100 ${c(
-                              "bg-white border-gray-200 text-gray-900",
-                              "bg-[#2A2726] border-zinc-700 text-gray-100"
-                            )}`}
-                        >
-                          {/* Reply option */}
-                          {!msg.isDeleted && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setReplyingTo(msg);
-                                setActiveMessageMenu(null);
-                                inputRef.current?.focus();
-                              }}
-                              className={`w-full px-4 py-2 flex items-center gap-3 text-left transition-colors ${c(
-                                "hover:bg-gray-50 text-gray-800",
-                                "hover:bg-zinc-800 text-gray-200"
-                              )}`}
-                            >
-                              <CornerUpLeft className="w-4 h-4 text-blue-500" />
-                              <span className="text-[14px] font-medium">Reply</span>
-                            </button>
-                          )}
-
-                          {!msg.isDeleted && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleCopy(msg.id, msgContent);
-                              }}
-                              className={`w-full px-4 py-2 flex items-center gap-3 text-left transition-colors ${c(
-                                "hover:bg-gray-50 text-gray-800",
-                                "hover:bg-zinc-800 text-gray-200"
-                              )}`}
-                            >
-                              {copiedMessageId === msg.id ? (
-                                <>
-                                  <CheckCheck className="w-4 h-4 text-emerald-500" />
-                                  <span className="text-[14px] font-medium text-emerald-500">Copied</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Copy className="w-4 h-4 text-gray-500" />
-                                  <span className="text-[14px] font-medium">Copy text</span>
-                                </>
-                              )}
-                            </button>
-                          )}
-
-                          {isMe && !msg.isDeleted && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteForEveryone(msg.id);
-                              }}
-                              className={`w-full px-4 py-2 flex items-center gap-3 text-left transition-colors ${c(
-                                "hover:bg-gray-50 text-red-600",
-                                "hover:bg-zinc-800 text-red-400"
-                              )}`}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                              <span className="text-[14px] font-medium">Unsend for everyone</span>
-                            </button>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteForMe(msg.id);
-                            }}
-                            className={`w-full px-4 py-2 flex items-center gap-3 text-left transition-colors ${c(
-                              "hover:bg-gray-50 text-red-600",
-                              "hover:bg-zinc-800 text-red-400"
-                            )}`}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                            <span className="text-[14px] font-medium">Remove for you</span>
-                          </button>
-                        </div>
-                      </>
-                    )}
                   </div>
                 </div>
               );
@@ -4053,12 +4017,15 @@ export default function ChatPage() {
                       msgContent.includes("fonts.gstatic.com/s/e/notoemoji"))));
 
               const isMsgSelectedOnMobile = isMobile && selectedMobileMessage?.id === msg.id;
+              const hasReactions = Boolean(msg.reactions && msg.reactions.length > 0);
 
               return (
                 <div
                   key={msg.id}
                   id={`msg-${msg.id}`}
-                  className={`chat-message-item flex ${isMe ? "justify-end" : "justify-start"} relative group items-center mb-1 transition-colors ${
+                  className={`chat-message-item flex ${isMe ? "justify-end" : "justify-start"} relative group items-center ${
+                    hasReactions ? "mb-4" : "mb-1"
+                  } overflow-visible transition-colors ${
                     isMsgSelectedOnMobile || isThisMsgMenuOpen
                       ? "z-[60] overflow-visible bg-[#005c4b]/20 dark:bg-[#005c4b]/30 -mx-3 px-3 py-1 rounded-none"
                       : "z-10"
@@ -4083,27 +4050,9 @@ export default function ChatPage() {
                     </div>
                   )}
 
-                  <div className={`relative flex items-center max-w-[85%] sm:max-w-[75%] md:max-w-[65%] lg:max-w-[55%] xl:max-w-[520px] ${
+                  <div className={`relative flex items-center overflow-visible max-w-[85%] sm:max-w-[75%] md:max-w-[65%] lg:max-w-[55%] xl:max-w-[520px] ${
                       isMsgSelectedOnMobile ? "overflow-visible z-[61]" : ""
                     }`}>
-                    {/* Mobile Floating Quick Reaction Bar (Screenshot 2) */}
-                    {isMsgSelectedOnMobile && !isMobileReactionSheetOpen && (
-                      <MobileReactionPill
-                        message={msg}
-                        quickReactions={quickReactions}
-                        sheetOpen={isMobileReactionSheetOpen}
-                        onReact={(emoji) => {
-                          handleReact(msg.id, emoji);
-                          selectMobileMsg(null);
-                        }}
-                        onOpenFullPicker={() => {
-                          setIsMobileReactionSheetOpen(true);
-                        }}
-                        isMe={isMe}
-                        isDark={darkMode}
-                      />
-                    )}
-
                     {isMe && actionButtons}
 
                     <div
@@ -4121,13 +4070,13 @@ export default function ChatPage() {
                           setActiveReactionMenu(null);
                           setActiveMessageMenu(null);
                           setActiveFullEmojiPicker(null);
-                        }, 420);
+                        }, 350);
                       }}
                       onTouchMove={(e) => {
                         if (!touchStartPosRef.current) return;
                         const deltaX = Math.abs(e.touches[0].clientX - touchStartPosRef.current.x);
                         const deltaY = Math.abs(e.touches[0].clientY - touchStartPosRef.current.y);
-                        if (deltaX > 10 || deltaY > 10) {
+                        if (deltaX > 20 || deltaY > 20) {
                           if (longPressTimerRef.current) {
                             clearTimeout(longPressTimerRef.current);
                             longPressTimerRef.current = null;
@@ -4146,6 +4095,41 @@ export default function ChatPage() {
                           longPressTimerRef.current = null;
                         }
                       }}
+                      onMouseDown={(e) => {
+                        if (!isMobile) return;
+                        touchStartPosRef.current = { x: e.clientX, y: e.clientY };
+                        didLongPressRef.current = false;
+                        if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+                        longPressTimerRef.current = setTimeout(() => {
+                          didLongPressRef.current = true;
+                          selectMobileMsg(msg);
+                          setActiveReactionMenu(null);
+                          setActiveMessageMenu(null);
+                          setActiveFullEmojiPicker(null);
+                        }, 350);
+                      }}
+                      onMouseMove={(e) => {
+                        if (!isMobile || !touchStartPosRef.current) return;
+                        const deltaX = Math.abs(e.clientX - touchStartPosRef.current.x);
+                        const deltaY = Math.abs(e.clientY - touchStartPosRef.current.y);
+                        if (deltaX > 20 || deltaY > 20) {
+                          if (longPressTimerRef.current) {
+                            clearTimeout(longPressTimerRef.current);
+                            longPressTimerRef.current = null;
+                          }
+                        }
+                      }}
+                      onMouseUp={() => {
+                        if (longPressTimerRef.current) {
+                          clearTimeout(longPressTimerRef.current);
+                          longPressTimerRef.current = null;
+                        }
+                      }}
+                      onContextMenu={(e) => {
+                        if (isMobile) {
+                          e.preventDefault();
+                        }
+                      }}
                       onClick={(e) => {
                         if (didLongPressRef.current) {
                           didLongPressRef.current = false;
@@ -4160,13 +4144,16 @@ export default function ChatPage() {
                               selectMobileMsg(msg);
                             }
                           }
-                          // Normal tap without hold does NOT select the message on mobile!
                         } else if (!debouncedSearchQuery.trim()) {
                           setTouchedMessageId(touchedMessageId === msg.id ? null : msg.id);
                         }
                       }}
+                      style={{
+                        WebkitTouchCallout: "none",
+                        touchAction: "pan-y",
+                      }}
                       className={cn(
-                        "relative w-full transition-all select-none",
+                        "chat-bubble-content relative w-full transition-all select-none overflow-visible",
                         isSticker
                           ? "bg-transparent border-none shadow-none px-0 py-0 flex flex-col items-end"
                           : cn(
@@ -4254,10 +4241,17 @@ export default function ChatPage() {
                           const mapsUrl = lat != null && lng != null
                             ? `https://maps.google.com/?q=${lat},${lng}`
                             : "https://maps.google.com";
-                          // OpenStreetMap static tile (no API key required)
-                          const staticMapUrl = lat != null && lng != null
-                            ? `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=15&size=300x160&markers=${lat},${lng},red-pushpin`
-                            : null;
+                          // Official OpenStreetMap live raster tile
+                          const zoom = 15;
+                          let staticMapUrl: string | null = null;
+                          if (lat != null && lng != null) {
+                            const x = Math.floor(((lng + 180) / 360) * Math.pow(2, zoom));
+                            const y = Math.floor(
+                              ((1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2) *
+                                Math.pow(2, zoom)
+                            );
+                            staticMapUrl = `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
+                          }
                           return (
                             <a
                               href={mapsUrl}
@@ -4267,34 +4261,32 @@ export default function ChatPage() {
                               className="block -mx-4 -mt-2.5 rounded-xl overflow-hidden cursor-pointer hover:opacity-90 active:opacity-80 transition-opacity select-none"
                             >
                               {/* Map tile preview */}
-                              <div className="relative w-full overflow-hidden" style={{ aspectRatio: "16/9", minHeight: 130 }}>
+                              <div className="relative w-full overflow-hidden bg-[#e5e3df] dark:bg-[#2b3543]" style={{ aspectRatio: "16/9", minHeight: 130 }}>
                                 {staticMapUrl ? (
                                   <img
                                     src={staticMapUrl}
                                     alt="Map preview"
-                                    className="w-full h-full object-cover"
+                                    className="w-full h-full object-cover scale-125 transition-transform"
                                     loading="lazy"
+                                    onError={(e) => {
+                                      // Hide broken image icon if offline
+                                      (e.currentTarget as HTMLElement).style.display = "none";
+                                    }}
                                   />
-                                ) : (
-                                  <div className={`w-full h-full flex items-center justify-center ${
-                                    isMe
-                                      ? "bg-[#9ab52c]"
-                                      : c("bg-gray-200", "bg-zinc-700")
-                                  }`}>
-                                    <MapPin className="w-12 h-12 opacity-20" />
-                                  </div>
-                                )}
+                                ) : null}
+                                {/* Subtle map grid pattern (fallback / background) */}
+                                <div className="absolute inset-0 pointer-events-none opacity-20 bg-[radial-gradient(#4b5563_1px,transparent_1px)] [background-size:14px_14px]" />
                                 {/* Red pin overlay centered */}
-                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                  <div className="flex flex-col items-center -mt-4">
-                                    <div className={`w-9 h-9 rounded-full border-[3px] border-white shadow-xl flex items-center justify-center bg-red-500`}>
+                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                                  <div className="flex flex-col items-center -mt-4 drop-shadow-md">
+                                    <div className="w-9 h-9 rounded-full border-[3px] border-white shadow-xl flex items-center justify-center bg-red-500">
                                       <MapPin className="w-4 h-4 text-white fill-white" />
                                     </div>
                                     <div className="w-2 h-2 rounded-full bg-red-500/40 mt-0.5" />
                                   </div>
                                 </div>
                                 {/* Gradient fade at bottom */}
-                                <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-black/20 to-transparent pointer-events-none" />
+                                <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-black/20 to-transparent pointer-events-none z-10" />
                               </div>
                               {/* Label bar */}
                               <div className={`px-3 py-2 flex items-center gap-2 ${
@@ -4314,7 +4306,7 @@ export default function ChatPage() {
                             </a>
                           );
                         })()
-                      ) : (msg.type === "audio" && msgContent) || (msg.type !== "image" && msg.type !== "video" && msg.type !== "sticker" && msg.type !== "location" && typeof msgContent === "string" && msgContent.startsWith("data:audio/")) ? (
+                      ) : (msg.type === "audio" && msgContent) || (msg.type !== "image" && msg.type !== "video" && msg.type !== "sticker" && typeof msgContent === "string" && msgContent.startsWith("data:audio/")) ? (
                         // Voice note player — custom styled, no raw browser widget
                         <ChatAudioMessage
                           src={msgContent}
@@ -4381,33 +4373,39 @@ export default function ChatPage() {
                       })()}
 
                       {/* Reactions Badge — Clicking opens Messenger-style details */}
-                      {msg.reactions && msg.reactions.length > 0 && (
-                        <div
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setViewingReactionsMsg(msg);
-                            setReactionDetailFilter("all");
-                          }}
-                          className={`absolute -bottom-2.5 ${isMe ? "right-2" : "left-2"} flex items-center gap-1 px-1.5 py-0.5 rounded-full shadow-sm border cursor-pointer z-10 transition-transform hover:scale-105 active:scale-95 select-none ${c(
-                            "bg-white border-gray-200 text-gray-800",
-                            "bg-[#202c33] border-[#2a3942] text-white"
-                          )}`}
-                          title="View reactions"
-                        >
-                          <div className="flex items-center -space-x-0.5">
-                            {Array.from(new Set(msg.reactions)).map((r, i) => (
-                              <span key={i} className="text-[13px] leading-none">
-                                {r}
+                      {hasReactions && msg.reactions && (() => {
+                        const uniqueReactions = Array.from(new Set(msg.reactions));
+                        const isSingle = msg.reactions.length === 1;
+                        return (
+                          <div
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setViewingReactionsMsg(msg);
+                              setReactionDetailFilter("all");
+                            }}
+                            className={`absolute -bottom-2.5 -right-1 flex items-center justify-center rounded-full cursor-pointer z-20 transition-all hover:scale-110 active:scale-95 select-none ${
+                              isSingle ? "w-[24px] h-[24px]" : "h-[24px] px-1.5 gap-1"
+                            } ${c(
+                              "bg-white border-2 border-white text-gray-800 shadow-[0_2px_6px_rgba(0,0,0,0.18)]",
+                              "bg-[#202c33] border-2 border-[#18181A] text-white shadow-[0_2px_6px_rgba(0,0,0,0.35)]"
+                            )}`}
+                            title="View reactions"
+                          >
+                            <div className="flex items-center justify-center -space-x-1">
+                              {uniqueReactions.map((r, i) => (
+                                <span key={i} className="text-[13px] leading-none flex items-center justify-center">
+                                  {r}
+                                </span>
+                              ))}
+                            </div>
+                            {!isSingle && (
+                              <span className="text-[10px] font-bold opacity-80 tabular-nums">
+                                {msg.reactions.length}
                               </span>
-                            ))}
+                            )}
                           </div>
-                          {msg.reactions.length > 1 && (
-                            <span className="text-[11px] font-bold opacity-80 ml-0.5">
-                              {msg.reactions.length}
-                            </span>
-                          )}
-                        </div>
-                      )}
+                        );
+                      })()}
                     </div>
 
                     {!isMe && actionButtons}
@@ -5143,7 +5141,7 @@ export default function ChatPage() {
             isOnline={!!partnerPresence?.online}
             isTyping={otherIsTyping}
             streak={streak}
-            lastMessage={messages.length > 0 ? messages[messages.length - 1] : null}
+            lastMessage={messages.length > 0 ? (messages[messages.length - 1] as any) : null}
             isActive={selectedConversation === "karu" && activeTab === "chat"}
             onSelectConversation={() => {
               setActiveTab("chat");
@@ -5911,6 +5909,48 @@ export default function ChatPage() {
         }}
       />
 
+      {/* Mobile-Only WhatsApp Floating Quick Reaction Pill (Fixed Viewport, Never Clipped) */}
+      {isMobile && selectedMobileMessage && mobilePillCoords && !isMobileReactionSheetOpen && (
+        <>
+          {/* Backdrop to tap outside and dismiss selection */}
+          <div
+            className="fixed inset-0 z-[70] bg-transparent cursor-default"
+            onClick={(e) => {
+              e.stopPropagation();
+              selectMobileMsg(null);
+            }}
+          />
+
+          <div
+            style={{
+              position: "fixed",
+              top: `${mobilePillCoords.top}px`,
+              left: `${mobilePillCoords.left}px`,
+              zIndex: 85,
+            }}
+          >
+            <MobileReactionPill
+              message={selectedMobileMessage}
+              quickReactions={quickReactions}
+              sheetOpen={isMobileReactionSheetOpen}
+              onReact={(emoji) => {
+                handleReact(selectedMobileMessage.id, emoji);
+                selectMobileMsg(null);
+              }}
+              onOpenFullPicker={() => {
+                setIsMobileReactionSheetOpen(true);
+              }}
+              isMe={
+                selectedMobileMessage.senderRole
+                  ? selectedMobileMessage.senderRole === myId
+                  : selectedMobileMessage.senderUid === user?.uid
+              }
+              isDark={darkMode}
+            />
+          </div>
+        </>
+      )}
+
       {/* Mobile-Only WhatsApp Reactions Bottom Sheet with Customizer */}
       {isMobile && (
         <MobileReactionSheet
@@ -5980,10 +6020,204 @@ export default function ChatPage() {
         />
       )}
 
+      {/* Desktop Quick Reaction Pill — 6 emojis + '+' to open full picker */}
+      {!isMobile && activeReactionMenu && desktopQuickReactionCoords && (() => {
+        const reactionMsgId = activeReactionMenu;
+        return (
+          <>
+            {/* Transparent backdrop to dismiss */}
+            <div
+              className="fixed inset-0 z-[190] cursor-default bg-transparent"
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveReactionMenu(null);
+                setDesktopQuickReactionCoords(null);
+              }}
+            />
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                position: "fixed",
+                top: `${desktopQuickReactionCoords.top}px`,
+                left: `${desktopQuickReactionCoords.left}px`,
+                zIndex: 200,
+              }}
+              className={`flex items-center gap-1 px-2.5 py-2 rounded-full shadow-2xl border animate-in fade-in zoom-in-95 duration-150 select-none ${
+                darkMode
+                  ? "bg-[#2A2726] border-zinc-700"
+                  : "bg-white border-gray-200"
+              }`}
+            >
+              {quickReactions.slice(0, 6).map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleReact(reactionMsgId, emoji);
+                    setActiveReactionMenu(null);
+                    setDesktopQuickReactionCoords(null);
+                  }}
+                  className="w-9 h-9 flex items-center justify-center text-[22px] rounded-full hover:scale-125 hover:bg-black/5 dark:hover:bg-white/5 active:scale-95 transition-transform cursor-pointer"
+                >
+                  {emoji}
+                </button>
+              ))}
+              {/* + button → opens full emoji picker */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const btnRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  const popoverWidth = 340;
+                  const popoverHeight = 420;
+                  const btnCenterX = btnRect.left + btnRect.width / 2;
+                  const spaceAbove = btnRect.top - 12;
+                  const spaceBelow = window.innerHeight - btnRect.bottom - 12;
+                  const placement: "up" | "down" = (spaceAbove >= popoverHeight || spaceAbove >= spaceBelow) ? "up" : "down";
+                  let top = placement === "up" ? btnRect.top - popoverHeight - 8 : btnRect.bottom + 8;
+                  top = Math.max(10, Math.min(window.innerHeight - popoverHeight - 10, top));
+                  let left = btnCenterX - popoverWidth / 2;
+                  left = Math.max(12, Math.min(window.innerWidth - popoverWidth - 12, left));
+                  const caretLeft = Math.max(16, Math.min(popoverWidth - 24, btnCenterX - left));
+                  setDesktopPickerCoords({ top, left, caretLeft, placement });
+                  setActiveFullEmojiPicker(reactionMsgId);
+                  setIsCustomizingReactions(false);
+                  setEmojiSearchQuery("");
+                  setActiveReactionMenu(null);
+                  setDesktopQuickReactionCoords(null);
+                }}
+                className={`w-9 h-9 flex items-center justify-center rounded-full transition-all hover:scale-110 active:scale-95 ${
+                  darkMode
+                    ? "bg-zinc-700 text-gray-200 hover:bg-zinc-600"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+                title="More emoji"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+          </>
+        );
+      })()}
+
+      {/* Desktop Fixed Context Menu (three-dots) — positioned at root level to avoid clipping */}
+      {!isMobile && activeMessageMenu && desktopMenuCoords && (() => {
+        const menuMsg = messages.find((m) => m.id === activeMessageMenu);
+        if (!menuMsg) return null;
+        const menuIsMe = menuMsg.senderRole ? menuMsg.senderRole === myId : menuMsg.senderUid === user?.uid;
+        const menuMsgContent = menuMsg.content || menuMsg.text || "";
+        return (
+          <>
+            <div
+              className="fixed inset-0 z-[190] cursor-default bg-transparent"
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveMessageMenu(null);
+                setDesktopMenuCoords(null);
+              }}
+            />
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                position: "fixed",
+                top: `${desktopMenuCoords.top}px`,
+                left: `${desktopMenuCoords.left}px`,
+                zIndex: 200,
+              }}
+              className={`w-48 rounded-xl shadow-2xl border py-1.5 animate-in fade-in zoom-in-95 duration-100 ${
+                darkMode
+                  ? "bg-[#2A2726] border-zinc-700 text-gray-100"
+                  : "bg-white border-gray-200 text-gray-900"
+              }`}
+            >
+              {/* Reply */}
+              {!menuMsg.isDeleted && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setReplyingTo(menuMsg);
+                    setActiveMessageMenu(null);
+                    setDesktopMenuCoords(null);
+                    inputRef.current?.focus();
+                  }}
+                  className={`w-full px-4 py-2 flex items-center gap-3 text-left transition-colors ${
+                    darkMode ? "hover:bg-zinc-800 text-gray-200" : "hover:bg-gray-50 text-gray-800"
+                  }`}
+                >
+                  <CornerUpLeft className="w-4 h-4 text-blue-500" />
+                  <span className="text-[14px] font-medium">Reply</span>
+                </button>
+              )}
+              {/* Copy */}
+              {!menuMsg.isDeleted && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCopy(menuMsg.id, menuMsgContent);
+                  }}
+                  className={`w-full px-4 py-2 flex items-center gap-3 text-left transition-colors ${
+                    darkMode ? "hover:bg-zinc-800 text-gray-200" : "hover:bg-gray-50 text-gray-800"
+                  }`}
+                >
+                  {copiedMessageId === menuMsg.id ? (
+                    <>
+                      <CheckCheck className="w-4 h-4 text-emerald-500" />
+                      <span className="text-[14px] font-medium text-emerald-500">Copied</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4 text-gray-500" />
+                      <span className="text-[14px] font-medium">Copy text</span>
+                    </>
+                  )}
+                </button>
+              )}
+              {/* Unsend for everyone */}
+              {menuIsMe && !menuMsg.isDeleted && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteForEveryone(menuMsg.id);
+                    setActiveMessageMenu(null);
+                    setDesktopMenuCoords(null);
+                  }}
+                  className={`w-full px-4 py-2 flex items-center gap-3 text-left transition-colors ${
+                    darkMode ? "hover:bg-zinc-800 text-red-400" : "hover:bg-gray-50 text-red-600"
+                  }`}
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span className="text-[14px] font-medium">Unsend for everyone</span>
+                </button>
+              )}
+              {/* Remove for you */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeleteForMe(menuMsg.id);
+                  setActiveMessageMenu(null);
+                  setDesktopMenuCoords(null);
+                }}
+                className={`w-full px-4 py-2 flex items-center gap-3 text-left transition-colors ${
+                  darkMode ? "hover:bg-zinc-800 text-red-400" : "hover:bg-gray-50 text-red-600"
+                }`}
+              >
+                <Trash2 className="w-4 h-4" />
+                <span className="text-[14px] font-medium">Remove for you</span>
+              </button>
+            </div>
+          </>
+        );
+      })()}
+
       {/* WhatsApp Desktop Style Floating Reaction Popover */}
       {!isMobile && activeFullEmojiPicker && desktopPickerCoords && (
         <>
-          {/* Backdrop to dismiss on click outside */}
+          {/* Single wrapper: click backdrop area to dismiss, scroll inside picker freely */}
           <div
             className="fixed inset-0 z-[190] cursor-default bg-transparent"
             onClick={(e) => {
@@ -5992,20 +6226,22 @@ export default function ChatPage() {
               setDesktopPickerCoords(null);
               setIsCustomizingReactions(false);
             }}
-          />
-
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              position: "fixed",
-              top: `${desktopPickerCoords.top}px`,
-              left: `${desktopPickerCoords.left}px`,
-            }}
-            className={`w-[340px] h-[420px] max-h-[calc(100vh-24px)] flex flex-col rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.18)] border z-[200] animate-in fade-in zoom-in-95 duration-150 select-none overflow-hidden ${c(
-              "bg-white border-gray-100 text-gray-900",
-              "bg-[#202c33] border-[#313d45] text-gray-100"
-            )}`}
           >
+            {/* Picker panel — clicks & scroll stay inside via stopPropagation */}
+            <div
+              onClick={(e) => e.stopPropagation()}
+              onWheel={(e) => e.stopPropagation()}
+              onTouchMove={(e) => e.stopPropagation()}
+              style={{
+                position: "absolute",
+                top: `${desktopPickerCoords.top}px`,
+                left: `${desktopPickerCoords.left}px`,
+              }}
+              className={`w-[340px] h-[420px] max-h-[calc(100vh-24px)] flex flex-col rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.18)] border z-[200] animate-in fade-in zoom-in-95 duration-150 select-none overflow-hidden cursor-default ${c(
+                "bg-white border-gray-100 text-gray-900",
+                "bg-[#202c33] border-[#313d45] text-gray-100"
+              )}`}
+            >
             {/* Tooltip caret pointing toward the Smile button */}
             <div
               style={{ left: `${desktopPickerCoords.caretLeft}px` }}
@@ -6093,8 +6329,11 @@ export default function ChatPage() {
               </span>
             </div>
 
-            {/* Emoji Grid (6 columns) */}
-            <div className="flex-1 overflow-y-auto px-3 pb-2 scrollbar-thin">
+            {/* Emoji Grid (6 columns) — scrollable */}
+            <div
+              className="flex-1 overflow-y-auto px-3 pb-2 scrollbar-thin"
+              onWheel={(e) => e.stopPropagation()}
+            >
               {(() => {
                 const displayEmojis = emojiSearchQuery.trim()
                   ? searchEmojis(
@@ -6167,7 +6406,8 @@ export default function ChatPage() {
                 ))}
               </div>
             )}
-          </div>
+            </div>{/* end picker panel */}
+          </div>{/* end backdrop wrapper */}
         </>
       )}
 

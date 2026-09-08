@@ -218,10 +218,10 @@ html, body {
   will-change: scroll-position;
 }
 
-/* Off-screen chat message optimization: skips rendering & style recalculation for off-screen items */
+/* Allow overflowing badges (e.g. reaction emojis) to render outside bubble bounds without clipping */
 .chat-message-item {
-  content-visibility: auto;
-  contain-intrinsic-size: 0 48px;
+  contain: none;
+  overflow: visible;
 }
 
 /* GPU promotion for modal dialogs and sheets */

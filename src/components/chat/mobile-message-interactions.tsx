@@ -42,7 +42,7 @@ export interface MobileInteractionMessage {
   sender?: "me" | "other";
   content?: string;
   text?: string;
-  type?: "text" | "image" | "audio" | "video" | "gif" | "sticker";
+  type?: "text" | "image" | "audio" | "video" | "gif" | "sticker" | "location";
   timestamp?: any;
   time?: string;
   status?: "sent" | "delivered" | "read" | "seen";
@@ -251,8 +251,7 @@ export function MobileReactionPill({
     <div
       onClick={(e) => e.stopPropagation()}
       className={cn(
-        "absolute -top-12 z-[80] select-none flex items-center gap-1 min-[360px]:gap-1.5 px-2 min-[360px]:px-2.5 py-1 min-[360px]:py-1.5 rounded-full border shadow-2xl backdrop-blur-xl transition-all",
-        isMe ? "right-0" : "left-0",
+        "select-none flex items-center gap-1 min-[360px]:gap-1.5 px-2 min-[360px]:px-2.5 py-1 min-[360px]:py-1.5 rounded-full border shadow-2xl backdrop-blur-xl transition-all animate-in fade-in zoom-in-95 duration-150",
         isDark
           ? "bg-[#1f2c34] border-[#2a3942] text-white shadow-[0_6px_28px_rgba(0,0,0,0.7)]"
           : "bg-white border-gray-200 text-gray-900 shadow-[0_6px_28px_rgba(0,0,0,0.18)]"
@@ -313,8 +312,8 @@ const FREQUENTLY_USED_EMOJIS = [
 ];
 
 /**
- * WhatsApp-style Full Emoji Reaction Bottom Sheet with Customizer (Screenshot 3)
- * Performance-optimized: zero lag, instant category switching, flags removed to prevent 2-letter codes.
+ * WhatsApp-style Full Emoji Reaction Bottom Sheet with Customizer
+ * Continuous scrollable list with ALL categories — like real WhatsApp.
  */
 export function MobileReactionSheet({
   open,
@@ -325,10 +324,12 @@ export function MobileReactionSheet({
   fullEmojiCategories,
 }: MobileReactionSheetProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeCategory, setActiveCategory] = useState<string>("Recent");
   const [isCustomizing, setIsCustomizing] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<number>(0);
+  const [activeTabCategory, setActiveTabCategory] = useState<string>("Recent");
   const scrollContentRef = useRef<HTMLDivElement>(null);
+  // Refs for each section header so we can scroll-to-section
+  const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // Filter out 'Flags' category completely so no 2-letter codes render on Windows browsers
   const cleanCategories = useMemo(() => {
@@ -340,7 +341,6 @@ export function MobileReactionSheet({
     return cats;
   }, [fullEmojiCategories]);
 
-  // Tab icon mapping (8 clean icons that fit comfortably across mobile)
   const categoryIcons: { key: string; label: string; icon: React.ReactNode }[] = [
     { key: "Recent", label: "Recent", icon: <Clock className="w-5 h-5" /> },
     { key: "Smileys & people", label: "Smileys", icon: <Smile className="w-5 h-5" /> },
@@ -352,27 +352,56 @@ export function MobileReactionSheet({
     { key: "Symbols", label: "Symbols", icon: <Hash className="w-5 h-5" /> },
   ];
 
-  // Reset search when opening
+  // All sections to render in the continuous scroll
+  const allSections = useMemo(() => [
+    { key: "Recent", label: "Frequently used", emojis: FREQUENTLY_USED_EMOJIS },
+    ...Object.entries(cleanCategories).map(([key, emojis]) => ({
+      key,
+      label: key,
+      emojis,
+    })),
+  ], [cleanCategories]);
+
+  // Reset on open
   useEffect(() => {
     if (open) {
       setSearchQuery("");
       setIsCustomizing(false);
       setSelectedSlot(0);
-      setActiveCategory("Recent");
+      setActiveTabCategory("Recent");
     }
+  }, [open]);
+
+  // Update active tab highlight based on scroll position
+  useEffect(() => {
+    if (!open) return;
+    const container = scrollContentRef.current;
+    if (!container) return;
+    const onScroll = () => {
+      const scrollTop = container.scrollTop;
+      // Walk sectionRefs to find which section is in view
+      let current = "Recent";
+      for (const [key, el] of Object.entries(sectionRefs.current)) {
+        if (el && el.offsetTop - container.offsetTop <= scrollTop + 40) {
+          current = key;
+        }
+      }
+      setActiveTabCategory(current);
+    };
+    container.addEventListener("scroll", onScroll, { passive: true });
+    return () => container.removeEventListener("scroll", onScroll);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   if (!open) return null;
 
   const handleEmojiClick = (emoji: string) => {
     if (isCustomizing) {
-      // In customize mode: update the selected quick reaction slot
       const updated = [...quickReactions];
       updated[selectedSlot] = emoji;
       onUpdateQuickReactions(updated);
       setSelectedSlot((prev) => (prev + 1) % Math.min(quickReactions.length, 6));
     } else {
-      // React to the message and close
       onReact(emoji);
       onClose();
     }
@@ -383,16 +412,19 @@ export function MobileReactionSheet({
     onUpdateQuickReactions(defaults);
   };
 
-  // Instant debounced-free search
+  const scrollToSection = (key: string) => {
+    const el = sectionRefs.current[key];
+    const container = scrollContentRef.current;
+    if (el && container) {
+      const offset = el.offsetTop - container.offsetTop;
+      container.scrollTo({ top: offset, behavior: "smooth" });
+    }
+    setActiveTabCategory(key);
+  };
+
   const displayedFilteredEmojis = searchQuery.trim()
     ? searchEmojis(searchQuery, Object.values(cleanCategories).flat())
     : null;
-
-  // Active category emojis for fast, zero-lag rendering
-  const currentCategoryEmojis =
-    activeCategory === "Recent"
-      ? FREQUENTLY_USED_EMOJIS
-      : cleanCategories[activeCategory] || [];
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end select-none animate-in fade-in duration-150">
@@ -405,6 +437,7 @@ export function MobileReactionSheet({
       {/* Sheet Content Container */}
       <div
         onClick={(e) => e.stopPropagation()}
+        onTouchMove={(e) => e.stopPropagation()}
         className="relative z-10 w-full max-h-[82vh] h-[520px] flex flex-col rounded-t-[26px] bg-[#1f2c34] text-[#e9edef] border-t border-[#2a3942] shadow-2xl animate-in slide-in-from-bottom duration-200 overflow-hidden"
       >
         {/* Top Handle Bar */}
@@ -412,7 +445,7 @@ export function MobileReactionSheet({
           <div className="w-10 h-1 rounded-full bg-[#8696a0]/40" />
         </div>
 
-        {/* Search Bar matching Screenshot 3 */}
+        {/* Search Bar */}
         <div className="px-3.5 py-2 flex items-center gap-2 border-b border-[#2a3942]/60 shrink-0">
           <div className="flex-1 flex items-center px-3 py-1.5 rounded-full bg-[#111b21] border border-[#2a3942] text-sm">
             <Search className="w-4 h-4 mr-2 text-[#8696a0] shrink-0" />
@@ -433,7 +466,6 @@ export function MobileReactionSheet({
               </button>
             )}
           </div>
-          {/* Smiley mode pill icon */}
           <div className="w-8 h-8 rounded-full bg-[#2a3942]/60 flex items-center justify-center text-emerald-400 shrink-0">
             <Smile className="w-4 h-4" />
           </div>
@@ -498,10 +530,10 @@ export function MobileReactionSheet({
           </div>
         </div>
 
-        {/* Scrollable Emojis View (Fast & zero-lag) */}
+        {/* Scrollable Emoji Area — continuous like real WhatsApp */}
         <div
           ref={scrollContentRef}
-          className="flex-1 overflow-y-auto px-3 py-2 scrollbar-hide will-change-scroll"
+          className="flex-1 overflow-y-auto px-3 py-2 scrollbar-hide overscroll-contain"
         >
           {displayedFilteredEmojis ? (
             /* Search Results */
@@ -529,40 +561,43 @@ export function MobileReactionSheet({
               )}
             </div>
           ) : (
-            /* Active Category with zero lag */
-            <div>
-              <h4 className="text-[13px] font-semibold text-[#8696a0] mb-2">
-                {activeCategory === "Recent" ? "Frequently used" : activeCategory}
-              </h4>
-              <div className="grid grid-cols-6 gap-1">
-                {currentCategoryEmojis.map((emoji, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => handleEmojiClick(emoji)}
-                    className="w-11 h-11 flex items-center justify-center text-[24px] rounded-xl hover:bg-white/10 active:scale-90 transition-transform cursor-pointer"
-                  >
-                    {emoji}
-                  </button>
-                ))}
+            /* All categories continuously — no tab switching */
+            allSections.map((section) => (
+              <div
+                key={section.key}
+                ref={(el) => { sectionRefs.current[section.key] = el; }}
+                className="mb-3"
+              >
+                <h4 className="text-[13px] font-semibold text-[#8696a0] mb-1.5 sticky top-0 bg-[#1f2c34] py-1 z-10">
+                  {section.label}
+                </h4>
+                <div className="grid grid-cols-6 gap-1">
+                  {section.emojis.map((emoji, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => handleEmojiClick(emoji)}
+                      className="w-11 h-11 flex items-center justify-center text-[24px] rounded-xl hover:bg-white/10 active:scale-90 transition-transform cursor-pointer"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            ))
           )}
         </div>
 
-        {/* Bottom Category Icon Bar (Fast Category Switching) */}
+        {/* Bottom Category Icon Bar — now scrolls to section instead of tab-switching */}
         {!searchQuery && (
           <div className="flex items-center justify-between px-2 py-2 bg-[#111b21] border-t border-[#2a3942] shrink-0">
             {categoryIcons.map((tab) => {
-              const isActive = activeCategory === tab.key;
+              const isActive = activeTabCategory === tab.key;
               return (
                 <button
                   key={tab.key}
                   type="button"
-                  onClick={() => {
-                    setActiveCategory(tab.key);
-                    scrollContentRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-                  }}
+                  onClick={() => scrollToSection(tab.key)}
                   className={cn(
                     "p-2 rounded-xl transition-all cursor-pointer",
                     isActive

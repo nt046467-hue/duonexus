@@ -31,7 +31,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 interface MessageBubbleProps {
   id: string;
   content: string;
-  type: "text" | "image" | "audio" | "video" | "gif" | "sticker";
+  type: "text" | "image" | "audio" | "video" | "gif" | "sticker" | "location";
   timestamp: number;
   isMe: boolean;
   status: "sent" | "delivered" | "seen";
@@ -39,7 +39,7 @@ interface MessageBubbleProps {
   replyToId?: string;
   replyToContent?: string;
   replyToSender?: string;
-  replyToType?: "text" | "image" | "audio" | "video" | "gif" | "sticker";
+  replyToType?: "text" | "image" | "audio" | "video" | "gif" | "sticker" | "location";
   onReply?: (id: string) => void;
   onScrollToMessage?: (id: string) => void;
   /** First message in a group — adds extra top margin */
@@ -307,7 +307,9 @@ export function MessageBubble({
       className={cn(
         "flex gap-2 chat-bubble-spring group",
         isFirstInGroup ? "mt-3" : "mt-[2px]",
-        isLastInGroup ? "mb-1" : "mb-[2px]",
+        isLastInGroup
+          ? (reactions.length > 0 ? "mb-3.5" : "mb-1")
+          : (reactions.length > 0 ? "mb-3" : "mb-[2px]"),
         isMe ? "justify-end" : "justify-start",
         isHighlighted && "scale-[1.02]"
       )}
@@ -344,13 +346,13 @@ export function MessageBubble({
 
       <div
         className={cn(
-          "relative flex items-center gap-1 max-w-[80%]",
+          "relative flex items-center gap-1 max-w-[80%] overflow-visible",
           isMe && "flex-row-reverse"
         )}
       >
         <div
           className={cn(
-            "px-[14px] py-[9px] rounded-[18px] text-[15px] leading-relaxed relative shadow-sm border transition-all break-words",
+            "px-[14px] py-[9px] rounded-[18px] text-[15px] leading-relaxed relative shadow-sm border transition-all break-words overflow-visible",
             isEmojiOnly && "!bg-transparent !border-transparent !shadow-none !px-0 !py-0 text-4xl leading-none",
             type === "sticker" && "!bg-transparent !border-transparent !shadow-none !p-0",
             isMe
@@ -528,22 +530,27 @@ export function MessageBubble({
           {reactions.length > 0 && (
             <div
               className={cn(
-                "absolute -bottom-3 flex gap-1",
-                isMe ? "right-2" : "left-2"
+                "absolute -bottom-2.5 -right-1 flex items-center justify-center gap-1 z-20",
               )}
             >
-              {reactions.map((r) => (
-                <button
-                  key={r.emoji}
-                  onClick={() => toggleReaction(r.emoji)}
-                  className="bg-background/95 border border-primary/10 rounded-full px-2 py-0.5 text-[10px] shadow-sm flex items-center gap-1 hover:scale-110 transition-transform"
-                >
-                  <span>{r.emoji}</span>
-                  {r.count > 1 && (
-                    <span className="font-bold">{r.count}</span>
-                  )}
-                </button>
-              ))}
+              {reactions.map((r) => {
+                const isSingle = reactions.length === 1 && r.count === 1;
+                return (
+                  <button
+                    key={r.emoji}
+                    onClick={() => toggleReaction(r.emoji)}
+                    className={cn(
+                      "bg-white dark:bg-[#202c33] border-2 border-white dark:border-[#18181A] rounded-full shadow-[0_2px_6px_rgba(0,0,0,0.18)] flex items-center justify-center hover:scale-110 active:scale-95 transition-transform",
+                      isSingle ? "w-[24px] h-[24px] p-0" : "h-[24px] px-1.5 gap-1"
+                    )}
+                  >
+                    <span className="text-[13px] leading-none flex items-center justify-center select-none">{r.emoji}</span>
+                    {r.count > 1 && (
+                      <span className="text-[10px] font-bold opacity-80 tabular-nums">{r.count}</span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
