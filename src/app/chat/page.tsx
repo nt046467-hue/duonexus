@@ -4888,6 +4888,56 @@ export default function ChatPage() {
                     }
                   }}
                   onBlur={() => stopMyTyping()}
+                  onPaste={(e) => {
+                    const clipboardData = e.clipboardData;
+                    if (!clipboardData) return;
+
+                    // Check for pasted image/gif/video files from keyboard clipboard or desktop
+                    const items = clipboardData.items;
+                    const files: File[] = [];
+                    if (items) {
+                      for (let i = 0; i < items.length; i++) {
+                        const item = items[i];
+                        if (item.type.startsWith("image/") || item.type.startsWith("video/")) {
+                          const file = item.getAsFile();
+                          if (file) files.push(file);
+                        }
+                      }
+                    }
+                    if (files.length === 0 && clipboardData.files?.length) {
+                      for (let i = 0; i < clipboardData.files.length; i++) {
+                        const f = clipboardData.files[i];
+                        if (f.type.startsWith("image/") || f.type.startsWith("video/")) {
+                          files.push(f);
+                        }
+                      }
+                    }
+
+                    if (files.length > 0) {
+                      e.preventDefault();
+                      files.forEach((file) => {
+                        const reader = new FileReader();
+                        reader.onload = async () => {
+                          const dataUrl = reader.result as string;
+                          const isVideo = file.type.startsWith("video/");
+                          const isGif = file.type === "image/gif" || file.name.toLowerCase().endsWith(".gif");
+                          const isImage = file.type.startsWith("image/");
+                          const msgType = isVideo ? "video" : isGif ? "gif" : isImage ? "image" : "text";
+                          await handleSendMessage(dataUrl, msgType);
+                        };
+                        reader.readAsDataURL(file);
+                      });
+                      return;
+                    }
+
+                    // Check if pasted text is an image or GIF direct URL
+                    const text = clipboardData.getData("text")?.trim();
+                    if (text && text.match(/^https?:\/\/.+\.(gif|webp|png|jpg|jpeg)(\?.*)?$/i)) {
+                      e.preventDefault();
+                      const isGif = Boolean(text.match(/\.gif(\?.*)?$/i));
+                      handleSendMessage(text, isGif ? "gif" : "image");
+                    }
+                  }}
                   placeholder={isMobile ? "Message" : "Aa"}
                   className={`flex-1 bg-transparent outline-none font-medium min-w-0 text-[14px] sm:text-[15px] ${c(
                     "text-gray-900 placeholder-gray-400",
