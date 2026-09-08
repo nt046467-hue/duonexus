@@ -123,6 +123,9 @@ import {
   VolumeX,
   Smartphone,
   ExternalLink,
+  FileText,
+  File,
+  FolderArchive,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -164,7 +167,10 @@ export interface Message {
   sender?: "me" | "other";
   content?: string;
   text?: string;
-  type?: "text" | "image" | "audio" | "video" | "gif" | "sticker" | "location";
+  type?: "text" | "image" | "audio" | "video" | "gif" | "sticker" | "location" | "file";
+  fileName?: string;
+  fileSize?: number;
+  fileType?: string;
   latitude?: number;
   longitude?: number;
   timestamp?: any;
@@ -174,7 +180,7 @@ export interface Message {
   replyToId?: string;
   replyToContent?: string;
   replyToSender?: string;
-  replyToType?: "text" | "image" | "audio" | "video" | "gif" | "sticker" | "location";
+  replyToType?: "text" | "image" | "audio" | "video" | "gif" | "sticker" | "location" | "file";
   replyTo?: {
     sender: "me" | "other";
     text: string;
@@ -495,6 +501,12 @@ function getCleanMessagePreview(msg?: Message | null, fallbackName: string = "pa
       text: "GIF",
     };
   }
+  if (type === "file" || (msg as any)?.fileName) {
+    return {
+      type: "file" as const,
+      text: (msg as any)?.fileName ? `📄 ${(msg as any).fileName}` : "Attached File",
+    };
+  }
   return {
     type: "text" as const,
     text: content || "Started a conversation",
@@ -504,6 +516,14 @@ function getCleanMessagePreview(msg?: Message | null, fallbackName: string = "pa
 function RenderMessageSnippet({ msg, fallbackName }: { msg?: Message | null; fallbackName: string }) {
   const preview = getCleanMessagePreview(msg, fallbackName);
 
+  if (preview.type === "file") {
+    return (
+      <span className="flex items-center gap-1.5 text-blue-500 dark:text-blue-400 font-medium">
+        <FileText className="w-3.5 h-3.5 shrink-0" />
+        <span className="truncate">{preview.text}</span>
+      </span>
+    );
+  }
   if (preview.type === "audio") {
     return (
       <span className="flex items-center gap-1.5 text-blue-500 dark:text-blue-400 font-medium">
@@ -941,7 +961,7 @@ export default function ChatPage() {
     setNotificationsEnabled(enabled);
     try {
       localStorage.setItem("duonexus_notifications", String(enabled));
-    } catch {}
+    } catch { }
 
     if (enabled) {
       if (typeof window !== "undefined" && "Notification" in window) {
@@ -957,7 +977,7 @@ export default function ChatPage() {
                 body: "Notifications are now active for your chat! 💕",
                 icon: partnerAvatar || "/favicon.ico",
               });
-            } catch {}
+            } catch { }
           } else {
             toast({
               title: "Permission Blocked",
@@ -975,7 +995,7 @@ export default function ChatPage() {
               body: "Notifications are now active for your chat! 💕",
               icon: partnerAvatar || "/favicon.ico",
             });
-          } catch {}
+          } catch { }
         } else {
           toast({
             title: "Browser Permission Denied",
@@ -1027,11 +1047,11 @@ export default function ChatPage() {
           try {
             const bodyPreview =
               latest.type === "image" ? "📷 Sent a photo" :
-              latest.type === "video" ? "🎥 Sent a video" :
-              latest.type === "audio" ? "🎙️ Sent a voice note" :
-              latest.type === "sticker" ? "🎭 Sent a sticker" :
-              latest.type === "gif" ? "✨ Sent a GIF" :
-              (latest.text || latest.content || "New message 💕");
+                latest.type === "video" ? "🎥 Sent a video" :
+                  latest.type === "audio" ? "🎙️ Sent a voice note" :
+                    latest.type === "sticker" ? "🎭 Sent a sticker" :
+                      latest.type === "gif" ? "✨ Sent a GIF" :
+                        (latest.text || latest.content || "New message 💕");
 
             const notif = new Notification(finalPartnerName || "DuoNexus", {
               body: bodyPreview,
@@ -1298,6 +1318,7 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
+  const documentFileInputRef = useRef<HTMLInputElement>(null);
 
   // Floating scroll-to-bottom state
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -1450,8 +1471,9 @@ export default function ChatPage() {
   // Sending message
   const handleSendMessage = async (
     content: string,
-    type: "text" | "image" | "audio" | "video" | "gif" | "sticker" | "location" = "text",
-    waveform?: number[]
+    type: "text" | "image" | "audio" | "video" | "gif" | "sticker" | "location" | "file" = "text",
+    waveform?: number[],
+    fileMeta?: { fileName?: string; fileSize?: number; fileType?: string }
   ) => {
     if (!firestore || (!content.trim() && type === "text")) return;
 
@@ -1484,6 +1506,12 @@ export default function ChatPage() {
         status: "sent",
         reactions: [],
       };
+
+      if (fileMeta) {
+        if (fileMeta.fileName) newMsgData.fileName = fileMeta.fileName;
+        if (fileMeta.fileSize) newMsgData.fileSize = fileMeta.fileSize;
+        if (fileMeta.fileType) newMsgData.fileType = fileMeta.fileType;
+      }
 
       if (waveform) newMsgData.waveform = waveform;
       if (linkPreview) newMsgData.linkPreview = linkPreview;
@@ -1602,7 +1630,7 @@ export default function ChatPage() {
         const { latitude, longitude } = pos.coords;
         if (!firestore) return;
         try {
-          sendAudioRef.current?.play().catch(() => {});
+          sendAudioRef.current?.play().catch(() => { });
           const locationMsgData: any = {
             senderUid: user?.uid || myId,
             senderName: myName,
@@ -1775,6 +1803,36 @@ export default function ChatPage() {
         const msgType = isVideo ? "video" : isImage ? "image" : "text";
 
         await handleSendMessage(dataUrl, msgType);
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = "";
+  };
+
+  // Real Document / File Upload - handles all files (PDF, docs, zips, any format)
+  const handleDocumentUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    Array.from(files).forEach((file) => {
+      const isVideo = file.type.startsWith("video/");
+      const isImage = file.type.startsWith("image/");
+      const isGif = file.type === "image/gif" || file.name.toLowerCase().endsWith(".gif");
+      const msgType = isVideo ? "video" : isGif ? "gif" : isImage ? "image" : "file";
+
+      toast({
+        title: "Sending File 📎",
+        description: `${file.name} (${(file.size / 1024).toFixed(1)} KB)`,
+      });
+
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const dataUrl = reader.result as string;
+        await handleSendMessage(dataUrl, msgType, undefined, {
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type || "application/octet-stream",
+        });
       };
       reader.readAsDataURL(file);
     });
@@ -2627,9 +2685,9 @@ export default function ChatPage() {
                     setSoundEffectsEnabled(checked);
                     try {
                       localStorage.setItem("duonexus_sound_effects", String(checked));
-                    } catch {}
+                    } catch { }
                     if (checked) {
-                      sendAudioRef.current?.play().catch(() => {});
+                      sendAudioRef.current?.play().catch(() => { });
                     }
                   }}
                   className="data-[state=checked]:bg-primary"
@@ -2657,7 +2715,7 @@ export default function ChatPage() {
                     setVibrationEnabled(checked);
                     try {
                       localStorage.setItem("duonexus_vibration", String(checked));
-                    } catch {}
+                    } catch { }
                     if (checked && typeof navigator !== "undefined" && navigator.vibrate) {
                       navigator.vibrate(50);
                     }
@@ -2719,7 +2777,7 @@ export default function ChatPage() {
                     setHdDefaultEnabled(checked);
                     try {
                       localStorage.setItem("duonexus_hd_default", String(checked));
-                    } catch {}
+                    } catch { }
                   }}
                   className="data-[state=checked]:bg-[#00d2ff]"
                 />
@@ -2746,7 +2804,7 @@ export default function ChatPage() {
                     setReadReceiptsEnabled(checked);
                     try {
                       localStorage.setItem("duonexus_read_receipts", String(checked));
-                    } catch {}
+                    } catch { }
                   }}
                   className="data-[state=checked]:bg-blue-500"
                 />
@@ -3249,1903 +3307,1946 @@ export default function ChatPage() {
 
         {/* Top Header */}
         <header
-          className={`px-3 sm:px-4 pb-3 flex items-end justify-between border-b transition-colors duration-300 min-h-[65px] backdrop-blur-md ${
-            isMobile && selectedMobileMessage
+          className={`px-3 sm:px-4 pb-3 flex items-end justify-between border-b transition-colors duration-300 min-h-[65px] backdrop-blur-md ${isMobile && selectedMobileMessage
               ? `z-[80] ${c("bg-white border-gray-200", "bg-[#1f2c34] border-[#2a3942]")}`
               : `z-20 ${c("bg-[#F6F5F0]/85 border-gray-200/80", "bg-[#18181A]/85 border-zinc-800/80")}`
-          }`}
+            }`}
           style={{ paddingTop: isMobile ? "max(0.75rem, env(safe-area-inset-top))" : "0.75rem" }}
         >
-        {isSearching ? (
-          <div className="flex items-center w-full gap-3 h-full animate-in fade-in slide-in-from-right-4 duration-200">
-            <button
-              onClick={() => {
-                setIsSearching(false);
-                setSearchQuery("");
-              }}
-              className={`p-2 -ml-2 rounded-full transition-colors ${c(
-                "hover:bg-gray-200 text-gray-700",
-                "hover:bg-zinc-800 text-gray-200"
-              )}`}
-            >
-              <ArrowLeft className="w-6 h-6" />
-            </button>
-            <input
-              autoFocus
-              type="text"
-              placeholder="Search in conversation..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className={`flex-1 bg-transparent border-none outline-none text-[16px] font-medium min-w-0 ${c(
-                "text-gray-900 placeholder-gray-500",
-                "text-gray-100 placeholder-gray-400"
-              )}`}
-            />
-            {searchQuery && (
+          {isSearching ? (
+            <div className="flex items-center w-full gap-3 h-full animate-in fade-in slide-in-from-right-4 duration-200">
               <button
-                onClick={() => setSearchQuery("")}
-                className={`p-1.5 rounded-full transition-colors ${c(
-                  "hover:bg-gray-200 text-gray-600",
-                  "hover:bg-zinc-700 text-gray-300"
-                )}`}
-              >
-                <X className="w-5 h-5" />
-              </button>
-            )}
-          </div>
-        ) : isMobile && selectedMobileMessage ? (
-          /* MOBILE SELECTION HEADER (WhatsApp style - Screenshot 1) */
-          <MobileSelectionHeader
-            selectedMessage={selectedMobileMessage}
-            onClearSelection={() => selectMobileMsg(null)}
-            onReply={() => {
-              setReplyingTo(selectedMobileMessage);
-              selectMobileMsg(null);
-              setTimeout(() => inputRef.current?.focus(), 50);
-            }}
-            onDelete={() => {
-              setMobileDeleteMessage(selectedMobileMessage);
-            }}
-            onCopy={() => {
-              handleCopy(
-                selectedMobileMessage.id,
-                selectedMobileMessage.content || selectedMobileMessage.text || ""
-              );
-              toast({ title: "Copied", description: "Message copied to clipboard" });
-              selectMobileMsg(null);
-            }}
-            onOpenInfo={() => {
-              setSelectedInfoMessage(selectedMobileMessage);
-              selectMobileMsg(null);
-            }}
-            isDark={darkMode}
-          />
-        ) : isMobile ? (
-          /* MOBILE HEADER (<768px): Rebuilt as clean single row with zero overlapping elements */
-          <div className="flex items-center justify-between w-full min-w-0">
-            {/* LEFT: Back arrow -> Avatar (with anchored online/offline badge) -> Name + Status */}
-            <div className="flex items-center gap-2 flex-1 min-w-0 pr-1">
-              <button
-                type="button"
-                onClick={() => setCurrentScreen("main")}
-                className={`w-9 h-9 flex-shrink-0 flex items-center justify-center -ml-1 rounded-full transition-colors active:scale-95 ${c(
+                onClick={() => {
+                  setIsSearching(false);
+                  setSearchQuery("");
+                }}
+                className={`p-2 -ml-2 rounded-full transition-colors ${c(
                   "hover:bg-gray-200 text-gray-700",
                   "hover:bg-zinc-800 text-gray-200"
                 )}`}
-                title="Back to conversations"
               >
-                <ArrowLeft className="w-5 h-5" />
+                <ArrowLeft className="w-6 h-6" />
               </button>
-
-              {/* Avatar with anchored online/offline status dot badge */}
-              <div
-                onClick={() => setIsPartnerProfileSheetOpen(true)}
-                className="relative flex-shrink-0 cursor-pointer hover:opacity-90 active:scale-95 transition-all"
-              >
-                <img
-                  src={partnerAvatar}
-                  alt={finalPartnerName}
-                  className={`w-10 h-10 rounded-full object-cover border shadow-xs ${c(
-                    "border-gray-200 bg-black",
-                    "border-zinc-700 bg-black"
-                  )}`}
-                />
-                <span
-                  className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 transition-colors ${
-                    partnerPresence?.online ? "bg-emerald-500" : "bg-gray-400"
-                  } ${c("border-white", "border-[#18181A]")}`}
-                />
-              </div>
-
-              {/* Name & Status stacked vertically */}
-              <div
-                onClick={() => setIsPartnerProfileSheetOpen(true)}
-                className="flex flex-col cursor-pointer flex-1 min-w-0 justify-center leading-tight"
-              >
-                <h1 className={`text-[15px] font-semibold leading-tight flex items-center gap-1 min-w-0 ${c(
-                  "text-gray-900",
-                  "text-white"
-                )}`}>
-                  <span className="truncate min-w-0">{finalPartnerName}</span>
-                  <span className="text-red-500 text-xs flex-shrink-0">❤️</span>
-                </h1>
-                <span className={`text-[11px] font-medium truncate mt-0.5 ${
-                  otherIsTyping
-                    ? "text-emerald-500 font-semibold"
-                    : c("text-gray-500", "text-gray-400")
-                }`}>
-                  {otherIsTyping ? "typing..." : partnerPresence?.online ? "Online" : "Offline"}
-                </span>
-              </div>
-            </div>
-
-            {/* RIGHT: Reaction-count pill -> Video Call -> Phone Call -> Three-dot Menu */}
-            <div className="flex items-center gap-1 flex-shrink-0">
-              {/* Reaction-count / Streak Pill (hidden on ultra-narrow <360px screens to prevent collision) */}
-              <div
-                onClick={() => setIsStreakModalOpen(true)}
-                className={`hidden min-[360px]:flex items-center gap-1 px-2.5 h-8 rounded-full shadow-xs border flex-shrink-0 cursor-pointer hover:scale-105 active:scale-95 transition-all select-none ${chattedToday
-                  ? "bg-gradient-to-r from-orange-500 to-rose-500 border-orange-400/40 text-white shadow-orange-500/20"
-                  : c("bg-[#2A2726] border-[#1C1A19] text-white", "bg-zinc-800 border-zinc-700 text-amber-400")
-                  }`}
-                title="Love Streak"
-              >
-                <Flame className={`w-3.5 h-3.5 flex-shrink-0 ${chattedToday ? "text-white fill-white animate-pulse" : "text-amber-400 fill-amber-400"}`} />
-                <span className="text-[12px] font-bold tracking-tight">{streak}</span>
-              </div>
-
-              {/* Video Call */}
-              <button
-                type="button"
-                onClick={() => handleStartCall("video")}
-                className={`w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-full transition-colors active:scale-95 ${c(
-                  "hover:bg-gray-200 text-gray-600",
-                  "hover:bg-zinc-800 text-gray-300"
+              <input
+                autoFocus
+                type="text"
+                placeholder="Search in conversation..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className={`flex-1 bg-transparent border-none outline-none text-[16px] font-medium min-w-0 ${c(
+                  "text-gray-900 placeholder-gray-500",
+                  "text-gray-100 placeholder-gray-400"
                 )}`}
-                title="Video call"
-              >
-                <Video className="w-5 h-5 text-blue-500" />
-              </button>
-
-              {/* Audio Call */}
-              <button
-                type="button"
-                onClick={() => handleStartCall("audio")}
-                className={`w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-full transition-colors active:scale-95 ${c(
-                  "hover:bg-gray-200 text-gray-600",
-                  "hover:bg-zinc-800 text-gray-300"
-                )}`}
-                title="Phone call"
-              >
-                <Phone className="w-5 h-5 text-emerald-500" />
-              </button>
-
-              {/* Three Dot Menu using DropdownMenu for reliable outside click dismissal */}
-              <DropdownMenu open={showMenu} onOpenChange={setShowMenu}>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className={`w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-full transition-colors active:scale-95 cursor-pointer ${showMenu
-                      ? c("bg-gray-200 text-gray-800", "bg-zinc-800 text-gray-100")
-                      : c("hover:bg-gray-200 text-gray-600", "hover:bg-zinc-800 text-gray-300")
-                      }`}
-                    title="More options"
-                  >
-                    <MoreVertical className="w-5 h-5" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="end"
-                  className={`w-64 py-1.5 rounded-2xl shadow-2xl border z-50 animate-in fade-in zoom-in-95 duration-100 ${c(
-                    "bg-white border-gray-100 text-gray-800",
-                    "bg-[#233138] border-[#2a3942] text-white"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className={`p-1.5 rounded-full transition-colors ${c(
+                    "hover:bg-gray-200 text-gray-600",
+                    "hover:bg-zinc-700 text-gray-300"
                   )}`}
                 >
-                  <DropdownMenuItem
-                    onClick={() => {
-                      setIsSearching(true);
-                      setShowMenu(false);
-                    }}
-                    className="px-4 py-3 flex items-center gap-3 cursor-pointer rounded-xl mx-1"
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+          ) : isMobile && selectedMobileMessage ? (
+            /* MOBILE SELECTION HEADER (WhatsApp style - Screenshot 1) */
+            <MobileSelectionHeader
+              selectedMessage={selectedMobileMessage}
+              onClearSelection={() => selectMobileMsg(null)}
+              onReply={() => {
+                setReplyingTo(selectedMobileMessage);
+                selectMobileMsg(null);
+                setTimeout(() => inputRef.current?.focus(), 50);
+              }}
+              onDelete={() => {
+                setMobileDeleteMessage(selectedMobileMessage);
+              }}
+              onCopy={() => {
+                handleCopy(
+                  selectedMobileMessage.id,
+                  selectedMobileMessage.content || selectedMobileMessage.text || ""
+                );
+                toast({ title: "Copied", description: "Message copied to clipboard" });
+                selectMobileMsg(null);
+              }}
+              onOpenInfo={() => {
+                setSelectedInfoMessage(selectedMobileMessage);
+                selectMobileMsg(null);
+              }}
+              isDark={darkMode}
+            />
+          ) : isMobile ? (
+            /* MOBILE HEADER (<768px): Rebuilt as clean single row with zero overlapping elements */
+            <div className="flex items-center justify-between w-full min-w-0">
+              {/* LEFT: Back arrow -> Avatar (with anchored online/offline badge) -> Name + Status */}
+              <div className="flex items-center gap-2 flex-1 min-w-0 pr-1">
+                <button
+                  type="button"
+                  onClick={() => setCurrentScreen("main")}
+                  className={`w-9 h-9 flex-shrink-0 flex items-center justify-center -ml-1 rounded-full transition-colors active:scale-95 ${c(
+                    "hover:bg-gray-200 text-gray-700",
+                    "hover:bg-zinc-800 text-gray-200"
+                  )}`}
+                  title="Back to conversations"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+
+                {/* Avatar with anchored online/offline status dot badge */}
+                <div
+                  onClick={() => setIsPartnerProfileSheetOpen(true)}
+                  className="relative flex-shrink-0 cursor-pointer hover:opacity-90 active:scale-95 transition-all"
+                >
+                  <img
+                    src={partnerAvatar}
+                    alt={finalPartnerName}
+                    className={`w-10 h-10 rounded-full object-cover border shadow-xs ${c(
+                      "border-gray-200 bg-black",
+                      "border-zinc-700 bg-black"
+                    )}`}
+                  />
+                  <span
+                    className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 transition-colors ${partnerPresence?.online ? "bg-emerald-500" : "bg-gray-400"
+                      } ${c("border-white", "border-[#18181A]")}`}
+                  />
+                </div>
+
+                {/* Name & Status stacked vertically */}
+                <div
+                  onClick={() => setIsPartnerProfileSheetOpen(true)}
+                  className="flex flex-col cursor-pointer flex-1 min-w-0 justify-center leading-tight"
+                >
+                  <h1 className={`text-[15px] font-semibold leading-tight flex items-center gap-1 min-w-0 ${c(
+                    "text-gray-900",
+                    "text-white"
+                  )}`}>
+                    <span className="truncate min-w-0">{finalPartnerName}</span>
+                    <span className="text-red-500 text-xs flex-shrink-0">❤️</span>
+                  </h1>
+                  <span className={`text-[11px] font-medium truncate mt-0.5 ${otherIsTyping
+                      ? "text-emerald-500 font-semibold"
+                      : c("text-gray-500", "text-gray-400")
+                    }`}>
+                    {otherIsTyping ? "typing..." : partnerPresence?.online ? "Online" : "Offline"}
+                  </span>
+                </div>
+              </div>
+
+              {/* RIGHT: Reaction-count pill -> Video Call -> Phone Call -> Three-dot Menu */}
+              <div className="flex items-center gap-1 flex-shrink-0">
+                {/* Reaction-count / Streak Pill (hidden on ultra-narrow <360px screens to prevent collision) */}
+                <div
+                  onClick={() => setIsStreakModalOpen(true)}
+                  className={`hidden min-[360px]:flex items-center gap-1 px-2.5 h-8 rounded-full shadow-xs border flex-shrink-0 cursor-pointer hover:scale-105 active:scale-95 transition-all select-none ${chattedToday
+                    ? "bg-gradient-to-r from-orange-500 to-rose-500 border-orange-400/40 text-white shadow-orange-500/20"
+                    : c("bg-[#2A2726] border-[#1C1A19] text-white", "bg-zinc-800 border-zinc-700 text-amber-400")
+                    }`}
+                  title="Love Streak"
+                >
+                  <Flame className={`w-3.5 h-3.5 flex-shrink-0 ${chattedToday ? "text-white fill-white animate-pulse" : "text-amber-400 fill-amber-400"}`} />
+                  <span className="text-[12px] font-bold tracking-tight">{streak}</span>
+                </div>
+
+                {/* Video Call */}
+                <button
+                  type="button"
+                  onClick={() => handleStartCall("video")}
+                  className={`w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-full transition-colors active:scale-95 ${c(
+                    "hover:bg-gray-200 text-gray-600",
+                    "hover:bg-zinc-800 text-gray-300"
+                  )}`}
+                  title="Video call"
+                >
+                  <Video className="w-5 h-5 text-blue-500" />
+                </button>
+
+                {/* Audio Call */}
+                <button
+                  type="button"
+                  onClick={() => handleStartCall("audio")}
+                  className={`w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-full transition-colors active:scale-95 ${c(
+                    "hover:bg-gray-200 text-gray-600",
+                    "hover:bg-zinc-800 text-gray-300"
+                  )}`}
+                  title="Phone call"
+                >
+                  <Phone className="w-5 h-5 text-emerald-500" />
+                </button>
+
+                {/* Three Dot Menu using DropdownMenu for reliable outside click dismissal */}
+                <DropdownMenu open={showMenu} onOpenChange={setShowMenu}>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className={`w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-full transition-colors active:scale-95 cursor-pointer ${showMenu
+                        ? c("bg-gray-200 text-gray-800", "bg-zinc-800 text-gray-100")
+                        : c("hover:bg-gray-200 text-gray-600", "hover:bg-zinc-800 text-gray-300")
+                        }`}
+                      title="More options"
+                    >
+                      <MoreVertical className="w-5 h-5" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    className={`w-64 py-1.5 rounded-2xl shadow-2xl border z-50 animate-in fade-in zoom-in-95 duration-100 ${c(
+                      "bg-white border-gray-100 text-gray-800",
+                      "bg-[#233138] border-[#2a3942] text-white"
+                    )}`}
                   >
-                    <Search className="w-5 h-5 text-gray-400" />
-                    <span className="text-[15px] font-medium">Search in Conversation</span>
-                  </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setIsSearching(true);
+                        setShowMenu(false);
+                      }}
+                      className="px-4 py-3 flex items-center gap-3 cursor-pointer rounded-xl mx-1"
+                    >
+                      <Search className="w-5 h-5 text-gray-400" />
+                      <span className="text-[15px] font-medium">Search in Conversation</span>
+                    </DropdownMenuItem>
 
-                  <DropdownMenuItem
-                    onClick={() => {
-                      setIsWallpaperModalOpen(true);
-                      setShowMenu(false);
-                    }}
-                    className="px-4 py-3 flex items-center gap-3 cursor-pointer rounded-xl mx-1"
-                  >
-                    <Palette className="w-5 h-5 text-pink-500" />
-                    <span className="text-[15px] font-medium">Chat Wallpaper 💕</span>
-                  </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setIsWallpaperModalOpen(true);
+                        setShowMenu(false);
+                      }}
+                      className="px-4 py-3 flex items-center gap-3 cursor-pointer rounded-xl mx-1"
+                    >
+                      <Palette className="w-5 h-5 text-pink-500" />
+                      <span className="text-[15px] font-medium">Chat Wallpaper 💕</span>
+                    </DropdownMenuItem>
 
-                  <DropdownMenuItem
-                    onClick={() => {
-                      setTempQuickEmoji(quickReactionEmoji);
-                      setIsQuickEmojiModalOpen(true);
-                      setShowMenu(false);
-                    }}
-                    className="px-4 py-3 flex items-center justify-between gap-3 cursor-pointer rounded-xl mx-1"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Heart className="w-5 h-5 text-rose-500 fill-rose-500/20" />
-                      <span className="text-[15px] font-medium">Quick Reaction</span>
-                    </div>
-                    <span className="text-xl leading-none px-1.5 py-0.5 rounded-lg bg-black/5 dark:bg-white/10">{quickReactionEmoji}</span>
-                  </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setTempQuickEmoji(quickReactionEmoji);
+                        setIsQuickEmojiModalOpen(true);
+                        setShowMenu(false);
+                      }}
+                      className="px-4 py-3 flex items-center justify-between gap-3 cursor-pointer rounded-xl mx-1"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Heart className="w-5 h-5 text-rose-500 fill-rose-500/20" />
+                        <span className="text-[15px] font-medium">Quick Reaction</span>
+                      </div>
+                      <span className="text-xl leading-none px-1.5 py-0.5 rounded-lg bg-black/5 dark:bg-white/10">{quickReactionEmoji}</span>
+                    </DropdownMenuItem>
 
-                  <DropdownMenuItem
-                    onClick={() => {
-                      setIsMyProfileOpen(true);
-                      setShowMenu(false);
-                    }}
-                    className="px-4 py-3 flex items-center gap-3 cursor-pointer rounded-xl mx-1"
-                  >
-                    <UserIcon className="w-5 h-5 text-gray-400" />
-                    <span className="text-[15px] font-medium">My Profile</span>
-                  </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setIsMyProfileOpen(true);
+                        setShowMenu(false);
+                      }}
+                      className="px-4 py-3 flex items-center gap-3 cursor-pointer rounded-xl mx-1"
+                    >
+                      <UserIcon className="w-5 h-5 text-gray-400" />
+                      <span className="text-[15px] font-medium">My Profile</span>
+                    </DropdownMenuItem>
 
-                  {/* Real Notification Toggler */}
-                  <div
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      const next = !notificationsEnabled;
-                      setNotificationsEnabled(next);
-                      try {
-                        localStorage.setItem("duonexus_notifications", String(next));
-                      } catch { }
+                    {/* Real Notification Toggler */}
+                    <div
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        const next = !notificationsEnabled;
+                        setNotificationsEnabled(next);
+                        try {
+                          localStorage.setItem("duonexus_notifications", String(next));
+                        } catch { }
 
-                      if (next) {
-                        if (typeof window !== "undefined" && "Notification" in window) {
-                          if (Notification.permission === "default") {
-                            const perm = await Notification.requestPermission();
-                            if (perm === "granted") {
+                        if (next) {
+                          if (typeof window !== "undefined" && "Notification" in window) {
+                            if (Notification.permission === "default") {
+                              const perm = await Notification.requestPermission();
+                              if (perm === "granted") {
+                                toast({
+                                  title: "Notifications Active 🔔",
+                                  description: "You will receive alerts for new messages.",
+                                });
+                              } else {
+                                toast({
+                                  title: "Notification Permission Blocked",
+                                  description: "Please enable notifications in your browser settings.",
+                                  variant: "destructive",
+                                });
+                              }
+                            } else if (Notification.permission === "granted") {
                               toast({
                                 title: "Notifications Active 🔔",
-                                description: "You will receive alerts for new messages.",
-                              });
-                            } else {
-                              toast({
-                                title: "Notification Permission Blocked",
-                                description: "Please enable notifications in your browser settings.",
-                                variant: "destructive",
+                                description: "Alerts enabled for all new messages.",
                               });
                             }
-                          } else if (Notification.permission === "granted") {
+                          } else {
                             toast({
                               title: "Notifications Active 🔔",
-                              description: "Alerts enabled for all new messages.",
+                              description: "Chat sound & alerts are enabled.",
                             });
                           }
                         } else {
                           toast({
-                            title: "Notifications Active 🔔",
-                            description: "Chat sound & alerts are enabled.",
+                            title: "Notifications Muted 🔕",
+                            description: "Chat notifications are muted.",
                           });
                         }
-                      } else {
-                        toast({
-                          title: "Notifications Muted 🔕",
-                          description: "Chat notifications are muted.",
-                        });
-                      }
-                    }}
-                    className={`w-full px-4 py-3 flex items-center justify-between gap-3 cursor-pointer rounded-xl mx-1 transition-colors ${c(
-                      "hover:bg-gray-100",
-                      "hover:bg-white/10"
-                    )}`}
-                  >
-                    <div className="flex items-center gap-3">
-                      {notificationsEnabled ? (
-                        <Bell className="w-5 h-5 text-emerald-400 shrink-0" />
-                      ) : (
-                        <BellOff className="w-5 h-5 text-gray-400 shrink-0" />
-                      )}
-                      <div className="flex flex-col text-left">
-                        <span className="text-[15px] font-medium leading-tight">Notifications</span>
-                        <span className="text-[11px] opacity-60 leading-tight mt-0.5">
-                          {notificationsEnabled ? "Active" : "Muted"}
-                        </span>
-                      </div>
-                    </div>
-                    <Switch
-                      checked={notificationsEnabled}
-                      onCheckedChange={() => { }}
-                      className="data-[state=checked]:bg-emerald-500 pointer-events-none"
-                    />
-                  </div>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
-        ) : (
-          /* DESKTOP HEADER (≥768px): Completely untouched desktop layout */
-          <>
-            <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0 animate-in fade-in slide-in-from-left-4 duration-200">
-              <button
-                onClick={() => {
-                  setSelectedConversation(null);
-                }}
-                className="hidden w-10 h-10 flex-shrink-0 items-center justify-center -ml-2 rounded-full transition-colors hover:bg-gray-200 dark:hover:bg-zinc-800 text-gray-700 dark:text-gray-200"
-              >
-                <ArrowLeft className="w-6 h-6" />
-              </button>
-
-              <div
-                onClick={() => setIsPartnerProfileSheetOpen(true)}
-                className="relative flex-shrink-0 cursor-pointer hover:opacity-90 transition-opacity"
-              >
-                <img
-                  src={partnerAvatar}
-                  alt={finalPartnerName}
-                  className={`w-10 h-10 rounded-full object-cover border shadow-sm ${c(
-                    "border-gray-200 bg-black",
-                    "border-zinc-700 bg-black"
-                  )}`}
-                />
-              </div>
-
-              <div
-                onClick={() => setIsPartnerProfileSheetOpen(true)}
-                className="flex flex-col cursor-pointer hover:opacity-90 transition-opacity flex-1 min-w-0"
-              >
-                <h1 className={`text-[17px] font-semibold leading-tight flex items-center gap-1 min-w-0 ${c(
-                  "text-gray-900",
-                  "text-white"
-                )}`}>
-                  <span className="truncate min-w-0 flex-shrink">{finalPartnerName}</span>
-                  <span className="text-red-500 text-sm flex-shrink-0">❤️</span>
-                </h1>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  {otherIsTyping ? (
-                    <motion.span
-                      className="w-2 h-2 rounded-full flex-shrink-0 bg-emerald-400"
-                      animate={{ opacity: [1, 0.35, 1], scale: [1, 0.85, 1] }}
-                      transition={{ duration: 1, repeat: Infinity, ease: "easeInOut" }}
-                    />
-                  ) : (
-                    <span
-                      className={`w-2 h-2 rounded-full flex-shrink-0 ${partnerPresence?.online ? "bg-emerald-500" : "bg-gray-400"
-                        }`}
-                    />
-                  )}
-                  <AnimatePresence mode="wait">
-                    {otherIsTyping ? (
-                      <motion.span
-                        key="typing-label"
-                        initial={{ opacity: 0, y: 4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -4 }}
-                        transition={{ duration: 0.15 }}
-                        className="text-[13px] font-semibold truncate text-emerald-500"
-                      >
-                        typing...
-                      </motion.span>
-                    ) : (
-                      <motion.span
-                        key="online-label"
-                        initial={{ opacity: 0, y: 4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -4 }}
-                        transition={{ duration: 0.15 }}
-                        className={`text-[13px] font-medium truncate ${c("text-gray-500", "text-gray-400")}`}
-                      >
-                        {partnerPresence?.online ? "Online" : "Offline"}
-                      </motion.span>
-                    )}
-                  </AnimatePresence>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-0 sm:gap-1 flex-shrink-0">
-              {/* Streak Badge */}
-              <div
-                onClick={() => setIsStreakModalOpen(true)}
-                className={`flex items-center gap-1.5 px-3 h-8 sm:h-9 rounded-full mr-1 sm:mr-2 shadow-sm border flex-shrink-0 cursor-pointer hover:scale-105 active:scale-95 transition-all select-none ${chattedToday
-                  ? "bg-gradient-to-r from-orange-500 to-rose-500 border-orange-400/40 text-white shadow-orange-500/20 shadow-md"
-                  : c("bg-[#2A2726] border-[#1C1A19] text-white", "bg-zinc-800 border-zinc-700 text-amber-400")
-                  }`}
-                title="Love Streak — Click for details & goals"
-              >
-                <Flame className={`w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0 ${chattedToday ? "text-white fill-white animate-pulse" : "text-amber-400 fill-amber-400"}`} />
-                <span className="text-[12px] sm:text-[13px] font-bold tracking-wide">{streak}</span>
-              </div>
-
-              {/* Video Call */}
-              <button
-                onClick={() => handleStartCall("video")}
-                className={`w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-full transition-colors ${c(
-                  "hover:bg-gray-200 text-gray-600",
-                  "hover:bg-zinc-800 text-gray-300"
-                )}`}
-              >
-                <Video className="w-5 h-5 text-blue-500" />
-              </button>
-
-              {/* Audio Call */}
-              <button
-                onClick={() => handleStartCall("audio")}
-                className={`w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-full transition-colors ${c(
-                  "hover:bg-gray-200 text-gray-600",
-                  "hover:bg-zinc-800 text-gray-300"
-                )}`}
-              >
-                <Phone className="w-5 h-5 text-emerald-500" />
-              </button>
-
-              {/* Three Dot Menu */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowMenu(!showMenu)}
-                  className={`w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-full transition-colors ${showMenu
-                    ? c("bg-gray-200 text-gray-800", "bg-zinc-800 text-gray-100")
-                    : c("hover:bg-gray-200 text-gray-600", "hover:bg-zinc-800 text-gray-300")
-                    }`}
-                >
-                  <MoreVertical className="w-5 h-5" />
-                </button>
-
-                {showMenu && (
-                  <>
-                    <div className="fixed inset-0 z-30" onClick={() => setShowMenu(false)}></div>
-                    <div
-                      className={`absolute right-0 top-full mt-2 w-56 rounded-xl shadow-2xl border z-50 py-1.5 overflow-hidden origin-top-right animate-in fade-in zoom-in-95 duration-100 ${c(
-                        "bg-white border-gray-100",
-                        "bg-[#2A2726] border-zinc-700"
+                      }}
+                      className={`w-full px-4 py-3 flex items-center justify-between gap-3 cursor-pointer rounded-xl mx-1 transition-colors ${c(
+                        "hover:bg-gray-100",
+                        "hover:bg-white/10"
                       )}`}
                     >
-                      <button
-                        onClick={() => {
-                          setIsSearching(true);
-                          setShowMenu(false);
-                        }}
-                        className={`w-full px-4 py-3 flex items-center gap-3 text-left transition-colors ${c(
-                          "hover:bg-gray-50 text-gray-800",
-                          "hover:bg-zinc-800 text-gray-200"
-                        )}`}
-                      >
-                        <Search className={`w-5 h-5 ${c("text-gray-500", "text-gray-400")}`} />
-                        <span className="text-[15px] font-medium">Search in Conversation</span>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          setIsWallpaperModalOpen(true);
-                          setShowMenu(false);
-                        }}
-                        className={`w-full px-4 py-3 flex items-center gap-3 text-left transition-colors ${c(
-                          "hover:bg-gray-50 text-gray-800",
-                          "hover:bg-zinc-800 text-gray-200"
-                        )}`}
-                      >
-                        <Palette className="w-5 h-5 text-pink-500" />
-                        <span className="text-[15px] font-medium">Chat Wallpaper 💕</span>
-                      </button>
-
-                      {/* Quick Reaction Customizer Option */}
-                      <button
-                        onClick={() => {
-                          setTempQuickEmoji(quickReactionEmoji); // seed with current saved
-                          setIsQuickEmojiModalOpen(true);
-                          setShowMenu(false);
-                        }}
-                        className={`w-full px-4 py-3 flex items-center justify-between gap-3 text-left transition-colors ${c(
-                          "hover:bg-gray-50 text-gray-800",
-                          "hover:bg-zinc-800 text-gray-200"
-                        )}`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <Heart className="w-5 h-5 text-rose-500 fill-rose-500/20" />
-                          <span className="text-[15px] font-medium">Quick Reaction</span>
-                        </div>
-                        <span className="text-xl leading-none px-1 py-0.5 rounded-lg bg-black/5 dark:bg-white/5">{quickReactionEmoji}</span>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          setIsMyProfileOpen(true);
-                          setShowMenu(false);
-                        }}
-                        className={`w-full px-4 py-3 flex items-center gap-3 text-left transition-colors ${c(
-                          "hover:bg-gray-50 text-gray-800",
-                          "hover:bg-zinc-800 text-gray-200"
-                        )}`}
-                      >
-                        <UserIcon className={`w-5 h-5 ${c("text-gray-500", "text-gray-400")}`} />
-                        <span className="text-[15px] font-medium">My Profile</span>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          setNotificationsEnabled(!notificationsEnabled);
-                          setShowMenu(false);
-                        }}
-                        className={`w-full px-4 py-3 flex items-center gap-3 text-left transition-colors ${c(
-                          "hover:bg-gray-50 text-gray-800",
-                          "hover:bg-zinc-800 text-gray-200"
-                        )}`}
-                      >
+                      <div className="flex items-center gap-3">
                         {notificationsEnabled ? (
-                          <BellOff className={`w-5 h-5 ${c("text-gray-500", "text-gray-400")}`} />
+                          <Bell className="w-5 h-5 text-emerald-400 shrink-0" />
                         ) : (
-                          <Bell className={`w-5 h-5 ${c("text-gray-500", "text-gray-400")}`} />
+                          <BellOff className="w-5 h-5 text-gray-400 shrink-0" />
                         )}
-                        <span className="text-[15px] font-medium">
-                          {notificationsEnabled ? "Mute Notifications" : "Unmute Notifications"}
-                        </span>
-                      </button>
+                        <div className="flex flex-col text-left">
+                          <span className="text-[15px] font-medium leading-tight">Notifications</span>
+                          <span className="text-[11px] opacity-60 leading-tight mt-0.5">
+                            {notificationsEnabled ? "Active" : "Muted"}
+                          </span>
+                        </div>
+                      </div>
+                      <Switch
+                        checked={notificationsEnabled}
+                        onCheckedChange={() => { }}
+                        className="data-[state=checked]:bg-emerald-500 pointer-events-none"
+                      />
                     </div>
-                  </>
-                )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
-            </div>
-          </>
-        )}
-      </header>
-
-      {/* Messages Scroll Area */}
-      <div className="flex-1 relative overflow-hidden flex flex-col z-10 bg-transparent">
-        <div
-          ref={scrollContainerRef}
-          onScroll={handleMessagesScroll}
-          className="flex-1 overflow-y-auto px-3 sm:px-4 py-4 flex flex-col gap-2 relative z-10 scrollbar-hide bg-transparent smooth-momentum-scroll"
-          onClick={() => {
-            setActiveMessageMenu(null);
-            setActiveReactionMenu(null);
-            setActiveFullEmojiPicker(null);
-            setShowInputEmojiPicker(false);
-            setShowMobileGallery(false);
-            setTouchedMessageId(null);
-            selectMobileMsg(null);
-          }}
-        >
-          {/* Date Pill */}
-          <div className="flex justify-center mb-3">
-            <span
-              className={`text-xs font-semibold px-4 py-1.5 rounded-full shadow-sm border tracking-wide select-none ${c(
-                "bg-white text-gray-500 border-gray-200",
-                "bg-[#262322] text-gray-400 border-zinc-800"
-              )}`}
-            >
-              Today
-            </span>
-          </div>
-
-          {/* Empty state */}
-          {messages.length === 0 && !messagesLoading && (
-            <div className="flex-1 flex flex-col items-center justify-center text-center p-8 select-none">
-              <div className="w-16 h-16 rounded-full bg-pink-500/10 flex items-center justify-center mb-3 animate-pulse">
-                <Heart className="w-8 h-8 text-pink-500 fill-pink-500" />
-              </div>
-              <h3 className={`font-bold text-lg ${c("text-gray-900", "text-white")}`}>Your private space is ready</h3>
-              <p className="text-sm text-gray-400 mt-1">Send a message to start chatting 💕</p>
-            </div>
-          )}
-
-          {/* Search empty state */}
-          {debouncedSearchQuery.trim() &&
-            messages.filter((m) => (m.content || m.text || "").toLowerCase().includes(debouncedSearchQuery.toLowerCase())).length === 0 ? (
-            <div className="flex flex-col items-center justify-center flex-1 text-center px-4 animate-in fade-in duration-300">
-              <Search className={`w-12 h-12 mb-4 opacity-20 ${c("text-gray-900", "text-white")}`} />
-              <p className={`text-[16px] font-semibold ${c("text-gray-900", "text-white")}`}>No messages found</p>
-              <p className={`text-[14px] mt-1 ${c("text-gray-500", "text-gray-400")}`}>Try searching for another word.</p>
             </div>
           ) : (
-            (debouncedSearchQuery.trim()
-              ? messages.filter((m) => (m.content || m.text || "").toLowerCase().includes(debouncedSearchQuery.toLowerCase()))
-              : messages
-            ).map((msg, index, filteredMessages) => {
-              const isMe = msg.senderRole ? msg.senderRole === myId : msg.senderUid === user?.uid;
-              const nextMsg = index < filteredMessages.length - 1 ? filteredMessages[index + 1] : null;
-              const isLastInGroup = !nextMsg || (nextMsg.senderRole ? nextMsg.senderRole !== msg.senderRole : nextMsg.senderUid !== msg.senderUid);
-              const msgContent = msg.content || msg.text || "";
+            /* DESKTOP HEADER (≥768px): Completely untouched desktop layout */
+            <>
+              <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0 animate-in fade-in slide-in-from-left-4 duration-200">
+                <button
+                  onClick={() => {
+                    setSelectedConversation(null);
+                  }}
+                  className="hidden w-10 h-10 flex-shrink-0 items-center justify-center -ml-2 rounded-full transition-colors hover:bg-gray-200 dark:hover:bg-zinc-800 text-gray-700 dark:text-gray-200"
+                >
+                  <ArrowLeft className="w-6 h-6" />
+                </button>
 
-              // Format message time
-              const msgTs = msg.timestamp?.seconds ? msg.timestamp.seconds * 1000 : Date.now();
-              const timeStr = format(new Date(msgTs), "h:mm a");
-
-              // Helper: parse URLs in text and render them as real clickable links
-              const renderWithLinks = (text: string, query?: string) => {
-                const urlRegex = /(https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)])/g;
-                const parts: (string | React.ReactNode)[] = [];
-                let lastIndex = 0;
-                let match: RegExpExecArray | null;
-                while ((match = urlRegex.exec(text)) !== null) {
-                  if (match.index > lastIndex) {
-                    const plain = text.slice(lastIndex, match.index);
-                    parts.push(query?.trim() ? highlightMatch(plain, query) : plain);
-                  }
-                  parts.push(
-                    <a
-                      key={match.index}
-                      href={match[0]}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="underline underline-offset-2 text-blue-400 hover:text-blue-300 transition-colors break-all"
-                    >
-                      {match[0]}
-                    </a>
-                  );
-                  lastIndex = match.index + match[0].length;
-                }
-                if (lastIndex < text.length) {
-                  const remaining = text.slice(lastIndex);
-                  parts.push(query?.trim() ? highlightMatch(remaining, query) : remaining);
-                }
-                return parts.length > 0 ? <>{parts}</> : <>{text}</>;
-              };
-
-              const isThisMsgMenuOpen = Boolean(
-                activeMessageMenu === msg.id ||
-                activeReactionMenu === msg.id ||
-                activeFullEmojiPicker === msg.id ||
-                touchedMessageId === msg.id
-              );
-
-              // True when ANY message has an open popover (suppress hover-buttons on OTHER messages)
-              const isAnyDesktopPopoverOpen = Boolean(
-                activeMessageMenu || activeReactionMenu || activeFullEmojiPicker
-              );
-
-              // Desktop-only: action buttons (reaction/reply/more). Never show on mobile — mobile uses long-press.
-              // Suppress hover action buttons on desktop whenever any picker/popover is open.
-              const actionButtons = isMobile ? null : (
                 <div
-                  onClick={(e) => e.stopPropagation()}
-                  className={`absolute ${isMe ? "right-0 sm:right-full sm:mr-2 flex-row-reverse" : "left-0 sm:left-full sm:ml-2 flex-row"
-                    } sm:inset-y-0 sm:my-auto sm:h-9 flex items-center gap-1.5 transition-opacity duration-150 ${
+                  onClick={() => setIsPartnerProfileSheetOpen(true)}
+                  className="relative flex-shrink-0 cursor-pointer hover:opacity-90 transition-opacity"
+                >
+                  <img
+                    src={partnerAvatar}
+                    alt={finalPartnerName}
+                    className={`w-10 h-10 rounded-full object-cover border shadow-sm ${c(
+                      "border-gray-200 bg-black",
+                      "border-zinc-700 bg-black"
+                    )}`}
+                  />
+                </div>
+
+                <div
+                  onClick={() => setIsPartnerProfileSheetOpen(true)}
+                  className="flex flex-col cursor-pointer hover:opacity-90 transition-opacity flex-1 min-w-0"
+                >
+                  <h1 className={`text-[17px] font-semibold leading-tight flex items-center gap-1 min-w-0 ${c(
+                    "text-gray-900",
+                    "text-white"
+                  )}`}>
+                    <span className="truncate min-w-0 flex-shrink">{finalPartnerName}</span>
+                    <span className="text-red-500 text-sm flex-shrink-0">❤️</span>
+                  </h1>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    {otherIsTyping ? (
+                      <motion.span
+                        className="w-2 h-2 rounded-full flex-shrink-0 bg-emerald-400"
+                        animate={{ opacity: [1, 0.35, 1], scale: [1, 0.85, 1] }}
+                        transition={{ duration: 1, repeat: Infinity, ease: "easeInOut" }}
+                      />
+                    ) : (
+                      <span
+                        className={`w-2 h-2 rounded-full flex-shrink-0 ${partnerPresence?.online ? "bg-emerald-500" : "bg-gray-400"
+                          }`}
+                      />
+                    )}
+                    <AnimatePresence mode="wait">
+                      {otherIsTyping ? (
+                        <motion.span
+                          key="typing-label"
+                          initial={{ opacity: 0, y: 4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -4 }}
+                          transition={{ duration: 0.15 }}
+                          className="text-[13px] font-semibold truncate text-emerald-500"
+                        >
+                          typing...
+                        </motion.span>
+                      ) : (
+                        <motion.span
+                          key="online-label"
+                          initial={{ opacity: 0, y: 4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -4 }}
+                          transition={{ duration: 0.15 }}
+                          className={`text-[13px] font-medium truncate ${c("text-gray-500", "text-gray-400")}`}
+                        >
+                          {partnerPresence?.online ? "Online" : "Offline"}
+                        </motion.span>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-0 sm:gap-1 flex-shrink-0">
+                {/* Streak Badge */}
+                <div
+                  onClick={() => setIsStreakModalOpen(true)}
+                  className={`flex items-center gap-1.5 px-3 h-8 sm:h-9 rounded-full mr-1 sm:mr-2 shadow-sm border flex-shrink-0 cursor-pointer hover:scale-105 active:scale-95 transition-all select-none ${chattedToday
+                    ? "bg-gradient-to-r from-orange-500 to-rose-500 border-orange-400/40 text-white shadow-orange-500/20 shadow-md"
+                    : c("bg-[#2A2726] border-[#1C1A19] text-white", "bg-zinc-800 border-zinc-700 text-amber-400")
+                    }`}
+                  title="Love Streak — Click for details & goals"
+                >
+                  <Flame className={`w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0 ${chattedToday ? "text-white fill-white animate-pulse" : "text-amber-400 fill-amber-400"}`} />
+                  <span className="text-[12px] sm:text-[13px] font-bold tracking-wide">{streak}</span>
+                </div>
+
+                {/* Video Call */}
+                <button
+                  onClick={() => handleStartCall("video")}
+                  className={`w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-full transition-colors ${c(
+                    "hover:bg-gray-200 text-gray-600",
+                    "hover:bg-zinc-800 text-gray-300"
+                  )}`}
+                >
+                  <Video className="w-5 h-5 text-blue-500" />
+                </button>
+
+                {/* Audio Call */}
+                <button
+                  onClick={() => handleStartCall("audio")}
+                  className={`w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-full transition-colors ${c(
+                    "hover:bg-gray-200 text-gray-600",
+                    "hover:bg-zinc-800 text-gray-300"
+                  )}`}
+                >
+                  <Phone className="w-5 h-5 text-emerald-500" />
+                </button>
+
+                {/* Three Dot Menu */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowMenu(!showMenu)}
+                    className={`w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-full transition-colors ${showMenu
+                      ? c("bg-gray-200 text-gray-800", "bg-zinc-800 text-gray-100")
+                      : c("hover:bg-gray-200 text-gray-600", "hover:bg-zinc-800 text-gray-300")
+                      }`}
+                  >
+                    <MoreVertical className="w-5 h-5" />
+                  </button>
+
+                  {showMenu && (
+                    <>
+                      <div className="fixed inset-0 z-30" onClick={() => setShowMenu(false)}></div>
+                      <div
+                        className={`absolute right-0 top-full mt-2 w-56 rounded-xl shadow-2xl border z-50 py-1.5 overflow-hidden origin-top-right animate-in fade-in zoom-in-95 duration-100 ${c(
+                          "bg-white border-gray-100",
+                          "bg-[#2A2726] border-zinc-700"
+                        )}`}
+                      >
+                        <button
+                          onClick={() => {
+                            setIsSearching(true);
+                            setShowMenu(false);
+                          }}
+                          className={`w-full px-4 py-3 flex items-center gap-3 text-left transition-colors ${c(
+                            "hover:bg-gray-50 text-gray-800",
+                            "hover:bg-zinc-800 text-gray-200"
+                          )}`}
+                        >
+                          <Search className={`w-5 h-5 ${c("text-gray-500", "text-gray-400")}`} />
+                          <span className="text-[15px] font-medium">Search in Conversation</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setIsWallpaperModalOpen(true);
+                            setShowMenu(false);
+                          }}
+                          className={`w-full px-4 py-3 flex items-center gap-3 text-left transition-colors ${c(
+                            "hover:bg-gray-50 text-gray-800",
+                            "hover:bg-zinc-800 text-gray-200"
+                          )}`}
+                        >
+                          <Palette className="w-5 h-5 text-pink-500" />
+                          <span className="text-[15px] font-medium">Chat Wallpaper 💕</span>
+                        </button>
+
+                        {/* Quick Reaction Customizer Option */}
+                        <button
+                          onClick={() => {
+                            setTempQuickEmoji(quickReactionEmoji); // seed with current saved
+                            setIsQuickEmojiModalOpen(true);
+                            setShowMenu(false);
+                          }}
+                          className={`w-full px-4 py-3 flex items-center justify-between gap-3 text-left transition-colors ${c(
+                            "hover:bg-gray-50 text-gray-800",
+                            "hover:bg-zinc-800 text-gray-200"
+                          )}`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Heart className="w-5 h-5 text-rose-500 fill-rose-500/20" />
+                            <span className="text-[15px] font-medium">Quick Reaction</span>
+                          </div>
+                          <span className="text-xl leading-none px-1 py-0.5 rounded-lg bg-black/5 dark:bg-white/5">{quickReactionEmoji}</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setIsMyProfileOpen(true);
+                            setShowMenu(false);
+                          }}
+                          className={`w-full px-4 py-3 flex items-center gap-3 text-left transition-colors ${c(
+                            "hover:bg-gray-50 text-gray-800",
+                            "hover:bg-zinc-800 text-gray-200"
+                          )}`}
+                        >
+                          <UserIcon className={`w-5 h-5 ${c("text-gray-500", "text-gray-400")}`} />
+                          <span className="text-[15px] font-medium">My Profile</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setNotificationsEnabled(!notificationsEnabled);
+                            setShowMenu(false);
+                          }}
+                          className={`w-full px-4 py-3 flex items-center gap-3 text-left transition-colors ${c(
+                            "hover:bg-gray-50 text-gray-800",
+                            "hover:bg-zinc-800 text-gray-200"
+                          )}`}
+                        >
+                          {notificationsEnabled ? (
+                            <BellOff className={`w-5 h-5 ${c("text-gray-500", "text-gray-400")}`} />
+                          ) : (
+                            <Bell className={`w-5 h-5 ${c("text-gray-500", "text-gray-400")}`} />
+                          )}
+                          <span className="text-[15px] font-medium">
+                            {notificationsEnabled ? "Mute Notifications" : "Unmute Notifications"}
+                          </span>
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </header>
+
+        {/* Messages Scroll Area */}
+        <div className="flex-1 relative overflow-hidden flex flex-col z-10 bg-transparent">
+          <div
+            ref={scrollContainerRef}
+            onScroll={handleMessagesScroll}
+            className="flex-1 overflow-y-auto px-3 sm:px-4 py-4 flex flex-col gap-2 relative z-10 scrollbar-hide bg-transparent smooth-momentum-scroll"
+            onClick={() => {
+              setActiveMessageMenu(null);
+              setActiveReactionMenu(null);
+              setActiveFullEmojiPicker(null);
+              setShowInputEmojiPicker(false);
+              setShowMobileGallery(false);
+              setTouchedMessageId(null);
+              selectMobileMsg(null);
+            }}
+          >
+            {/* Date Pill */}
+            <div className="flex justify-center mb-3">
+              <span
+                className={`text-xs font-semibold px-4 py-1.5 rounded-full shadow-sm border tracking-wide select-none ${c(
+                  "bg-white text-gray-500 border-gray-200",
+                  "bg-[#262322] text-gray-400 border-zinc-800"
+                )}`}
+              >
+                Today
+              </span>
+            </div>
+
+            {/* Empty state */}
+            {messages.length === 0 && !messagesLoading && (
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-8 select-none">
+                <div className="w-16 h-16 rounded-full bg-pink-500/10 flex items-center justify-center mb-3 animate-pulse">
+                  <Heart className="w-8 h-8 text-pink-500 fill-pink-500" />
+                </div>
+                <h3 className={`font-bold text-lg ${c("text-gray-900", "text-white")}`}>Your private space is ready</h3>
+                <p className="text-sm text-gray-400 mt-1">Send a message to start chatting 💕</p>
+              </div>
+            )}
+
+            {/* Search empty state */}
+            {debouncedSearchQuery.trim() &&
+              messages.filter((m) => (m.content || m.text || "").toLowerCase().includes(debouncedSearchQuery.toLowerCase())).length === 0 ? (
+              <div className="flex flex-col items-center justify-center flex-1 text-center px-4 animate-in fade-in duration-300">
+                <Search className={`w-12 h-12 mb-4 opacity-20 ${c("text-gray-900", "text-white")}`} />
+                <p className={`text-[16px] font-semibold ${c("text-gray-900", "text-white")}`}>No messages found</p>
+                <p className={`text-[14px] mt-1 ${c("text-gray-500", "text-gray-400")}`}>Try searching for another word.</p>
+              </div>
+            ) : (
+              (debouncedSearchQuery.trim()
+                ? messages.filter((m) => (m.content || m.text || "").toLowerCase().includes(debouncedSearchQuery.toLowerCase()))
+                : messages
+              ).map((msg, index, filteredMessages) => {
+                const isMe = msg.senderRole ? msg.senderRole === myId : msg.senderUid === user?.uid;
+                const nextMsg = index < filteredMessages.length - 1 ? filteredMessages[index + 1] : null;
+                const isLastInGroup = !nextMsg || (nextMsg.senderRole ? nextMsg.senderRole !== msg.senderRole : nextMsg.senderUid !== msg.senderUid);
+                const msgContent = msg.content || msg.text || "";
+
+                // Format message time
+                const msgTs = msg.timestamp?.seconds ? msg.timestamp.seconds * 1000 : Date.now();
+                const timeStr = format(new Date(msgTs), "h:mm a");
+
+                // Helper: parse URLs in text and render them as real clickable links
+                const renderWithLinks = (text: string, query?: string) => {
+                  const urlRegex = /(https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)])/g;
+                  const parts: (string | React.ReactNode)[] = [];
+                  let lastIndex = 0;
+                  let match: RegExpExecArray | null;
+                  while ((match = urlRegex.exec(text)) !== null) {
+                    if (match.index > lastIndex) {
+                      const plain = text.slice(lastIndex, match.index);
+                      parts.push(query?.trim() ? highlightMatch(plain, query) : plain);
+                    }
+                    parts.push(
+                      <a
+                        key={match.index}
+                        href={match[0]}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="underline underline-offset-2 text-blue-400 hover:text-blue-300 transition-colors break-all"
+                      >
+                        {match[0]}
+                      </a>
+                    );
+                    lastIndex = match.index + match[0].length;
+                  }
+                  if (lastIndex < text.length) {
+                    const remaining = text.slice(lastIndex);
+                    parts.push(query?.trim() ? highlightMatch(remaining, query) : remaining);
+                  }
+                  return parts.length > 0 ? <>{parts}</> : <>{text}</>;
+                };
+
+                const isThisMsgMenuOpen = Boolean(
+                  activeMessageMenu === msg.id ||
+                  activeReactionMenu === msg.id ||
+                  activeFullEmojiPicker === msg.id ||
+                  touchedMessageId === msg.id
+                );
+
+                // True when ANY message has an open popover (suppress hover-buttons on OTHER messages)
+                const isAnyDesktopPopoverOpen = Boolean(
+                  activeMessageMenu || activeReactionMenu || activeFullEmojiPicker
+                );
+
+                // Desktop-only: action buttons (reaction/reply/more). Never show on mobile — mobile uses long-press.
+                // Suppress hover action buttons on desktop whenever any picker/popover is open.
+                const actionButtons = isMobile ? null : (
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className={`absolute ${isMe ? "right-0 sm:right-full sm:mr-2 flex-row-reverse" : "left-0 sm:left-full sm:ml-2 flex-row"
+                      } sm:inset-y-0 sm:my-auto sm:h-9 flex items-center gap-1.5 transition-opacity duration-150 ${
                       // Keep buttons visible when any menu, reaction, or picker is open for this message
                       (activeReactionMenu === msg.id || activeFullEmojiPicker === msg.id || activeMessageMenu === msg.id)
                         ? "z-50 opacity-100 pointer-events-auto overflow-visible"
                         : `z-20 opacity-0 ${!isAnyDesktopPopoverOpen ? "sm:group-hover:opacity-100 sm:group-hover:pointer-events-auto" : "pointer-events-none"}`
-                    }`}
-                >
-                  {/* Reaction button — step 1: shows 6-emoji quick pill */}
-                  {!msg.isDeleted && (
+                      }`}
+                  >
+                    {/* Reaction button — step 1: shows 6-emoji quick pill */}
+                    {!msg.isDeleted && (
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (activeReactionMenu === msg.id) {
+                              setActiveReactionMenu(null);
+                              setDesktopQuickReactionCoords(null);
+                              return;
+                            }
+                            const btnRect = e.currentTarget.getBoundingClientRect();
+                            const pillWidth = 290;
+                            const pillHeight = 52;
+                            const spaceAbove = btnRect.top - 12;
+                            const showAbove = spaceAbove >= pillHeight + 8;
+                            const top = showAbove ? btnRect.top - pillHeight - 8 : btnRect.bottom + 8;
+                            let left = isMe ? btnRect.right - pillWidth : btnRect.left;
+                            left = Math.max(8, Math.min(window.innerWidth - pillWidth - 8, left));
+                            setDesktopQuickReactionCoords({ top, left });
+                            setActiveReactionMenu(msg.id);
+                            setActiveFullEmojiPicker(null);
+                            setDesktopPickerCoords(null);
+                            setActiveMessageMenu(null);
+                            setDesktopMenuCoords(null);
+                          }}
+                          className={`w-9 h-9 flex items-center justify-center rounded-full transition-all hover:scale-110 active:scale-95 shadow-md ${activeReactionMenu === msg.id
+                              ? c("bg-[#d9fdd3] text-gray-800 shadow-sm", "bg-[#005c4b] text-white shadow-sm")
+                              : c("bg-white text-gray-700 hover:text-gray-900 hover:bg-gray-50 shadow-gray-400/30", "bg-zinc-700 text-gray-100 hover:text-white hover:bg-zinc-600 shadow-black/40")
+                            }`}
+                          title="React"
+                        >
+                          <Smile className="w-[18px] h-[18px]" strokeWidth={1.75} />
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Reply */}
+                    {!msg.isDeleted && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setReplyingTo(msg);
+                          setTouchedMessageId(null);
+                          setActiveMessageMenu(null);
+                          setActiveReactionMenu(null);
+                          setActiveFullEmojiPicker(null);
+                          inputRef.current?.focus();
+                        }}
+                        className={`w-8 h-8 flex items-center justify-center rounded-full transition-all hover:scale-110 active:scale-95 flex-shrink-0 ${c(
+                          "bg-[#E8F0ED] hover:bg-[#D1E0DA] text-gray-700",
+                          "bg-zinc-800 hover:bg-zinc-700 text-gray-300"
+                        )}`}
+                        title="Reply"
+                      >
+                        <CornerUpLeft className="w-[16px] h-[16px]" />
+                      </button>
+                    )}
+
+                    {/* More Menu — opens fixed-position dropdown at root level to avoid clipping */}
                     <div className="relative">
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (activeReactionMenu === msg.id) {
-                            setActiveReactionMenu(null);
-                            setDesktopQuickReactionCoords(null);
+                          if (activeMessageMenu === msg.id) {
+                            setActiveMessageMenu(null);
+                            setDesktopMenuCoords(null);
                             return;
                           }
-                          const btnRect = e.currentTarget.getBoundingClientRect();
-                          const pillWidth = 290;
-                          const pillHeight = 52;
-                          const spaceAbove = btnRect.top - 12;
-                          const showAbove = spaceAbove >= pillHeight + 8;
-                          const top = showAbove ? btnRect.top - pillHeight - 8 : btnRect.bottom + 8;
-                          let left = isMe ? btnRect.right - pillWidth : btnRect.left;
-                          left = Math.max(8, Math.min(window.innerWidth - pillWidth - 8, left));
-                          setDesktopQuickReactionCoords({ top, left });
-                          setActiveReactionMenu(msg.id);
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const menuHeight = 160;
+                          const spaceBelow = window.innerHeight - rect.bottom - 8;
+                          const spaceAbove = rect.top - 8;
+                          const openDown = spaceBelow >= menuHeight || spaceBelow >= spaceAbove;
+                          const top = openDown ? rect.bottom + 6 : rect.top - menuHeight - 6;
+                          // align right edge of menu to right edge of button for isMe, else left edge
+                          const menuWidth = 192;
+                          const left = isMe
+                            ? Math.max(8, Math.min(window.innerWidth - menuWidth - 8, rect.right - menuWidth))
+                            : Math.max(8, Math.min(window.innerWidth - menuWidth - 8, rect.left));
+                          setDesktopMenuCoords({ top: Math.max(8, top), left });
+                          // store the msg id for the menu along with the delete options meta
+                          setActiveMessageMenu(msg.id);
+                          setActiveReactionMenu(null);
+                          setDesktopQuickReactionCoords(null);
                           setActiveFullEmojiPicker(null);
                           setDesktopPickerCoords(null);
-                          setActiveMessageMenu(null);
-                          setDesktopMenuCoords(null);
                         }}
-                        className={`w-9 h-9 flex items-center justify-center rounded-full transition-all hover:scale-110 active:scale-95 shadow-md ${
-                          activeReactionMenu === msg.id
-                            ? c("bg-[#d9fdd3] text-gray-800 shadow-sm", "bg-[#005c4b] text-white shadow-sm")
-                            : c("bg-white text-gray-700 hover:text-gray-900 hover:bg-gray-50 shadow-gray-400/30", "bg-zinc-700 text-gray-100 hover:text-white hover:bg-zinc-600 shadow-black/40")
-                        }`}
-                        title="React"
+                        className={`w-8 h-8 flex items-center justify-center rounded-full transition-all hover:scale-110 active:scale-95 flex-shrink-0 ${activeMessageMenu === msg.id
+                          ? c("bg-[#D1E0DA] text-gray-900 shadow-sm", "bg-zinc-700 text-white shadow-sm")
+                          : c("bg-[#E8F0ED] hover:bg-[#D1E0DA] text-gray-700", "bg-zinc-800 hover:bg-zinc-700 text-gray-300")
+                          }`}
+                        title="More options"
                       >
-                        <Smile className="w-[18px] h-[18px]" strokeWidth={1.75} />
+                        <MoreVertical className="w-[16px] h-[16px]" />
                       </button>
                     </div>
-                  )}
-
-                  {/* Reply */}
-                  {!msg.isDeleted && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setReplyingTo(msg);
-                        setTouchedMessageId(null);
-                        setActiveMessageMenu(null);
-                        setActiveReactionMenu(null);
-                        setActiveFullEmojiPicker(null);
-                        inputRef.current?.focus();
-                      }}
-                      className={`w-8 h-8 flex items-center justify-center rounded-full transition-all hover:scale-110 active:scale-95 flex-shrink-0 ${c(
-                        "bg-[#E8F0ED] hover:bg-[#D1E0DA] text-gray-700",
-                        "bg-zinc-800 hover:bg-zinc-700 text-gray-300"
-                      )}`}
-                      title="Reply"
-                    >
-                      <CornerUpLeft className="w-[16px] h-[16px]" />
-                    </button>
-                  )}
-
-                  {/* More Menu — opens fixed-position dropdown at root level to avoid clipping */}
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (activeMessageMenu === msg.id) {
-                          setActiveMessageMenu(null);
-                          setDesktopMenuCoords(null);
-                          return;
-                        }
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        const menuHeight = 160;
-                        const spaceBelow = window.innerHeight - rect.bottom - 8;
-                        const spaceAbove = rect.top - 8;
-                        const openDown = spaceBelow >= menuHeight || spaceBelow >= spaceAbove;
-                        const top = openDown ? rect.bottom + 6 : rect.top - menuHeight - 6;
-                        // align right edge of menu to right edge of button for isMe, else left edge
-                        const menuWidth = 192;
-                        const left = isMe
-                          ? Math.max(8, Math.min(window.innerWidth - menuWidth - 8, rect.right - menuWidth))
-                          : Math.max(8, Math.min(window.innerWidth - menuWidth - 8, rect.left));
-                        setDesktopMenuCoords({ top: Math.max(8, top), left });
-                        // store the msg id for the menu along with the delete options meta
-                        setActiveMessageMenu(msg.id);
-                        setActiveReactionMenu(null);
-                        setDesktopQuickReactionCoords(null);
-                        setActiveFullEmojiPicker(null);
-                        setDesktopPickerCoords(null);
-                      }}
-                      className={`w-8 h-8 flex items-center justify-center rounded-full transition-all hover:scale-110 active:scale-95 flex-shrink-0 ${activeMessageMenu === msg.id
-                        ? c("bg-[#D1E0DA] text-gray-900 shadow-sm", "bg-zinc-700 text-white shadow-sm")
-                        : c("bg-[#E8F0ED] hover:bg-[#D1E0DA] text-gray-700", "bg-zinc-800 hover:bg-zinc-700 text-gray-300")
-                        }`}
-                      title="More options"
-                    >
-                      <MoreVertical className="w-[16px] h-[16px]" />
-                    </button>
                   </div>
-                </div>
-              );
+                );
 
-              const isSticker =
-                !msg.isDeleted &&
-                (msg.type === "sticker" ||
-                  (typeof msgContent === "string" &&
-                    (msgContent.includes("notoemoji") ||
-                      msgContent.includes("fonts.gstatic.com/s/e/notoemoji"))));
+                const isSticker =
+                  !msg.isDeleted &&
+                  (msg.type === "sticker" ||
+                    (typeof msgContent === "string" &&
+                      (msgContent.includes("notoemoji") ||
+                        msgContent.includes("fonts.gstatic.com/s/e/notoemoji"))));
 
-              const isMsgSelectedOnMobile = isMobile && selectedMobileMessage?.id === msg.id;
-              const hasReactions = Boolean(msg.reactions && msg.reactions.length > 0);
+                const isMsgSelectedOnMobile = isMobile && selectedMobileMessage?.id === msg.id;
+                const hasReactions = Boolean(msg.reactions && msg.reactions.length > 0);
 
-              return (
-                <div
-                  key={msg.id}
-                  id={`msg-${msg.id}`}
-                  className={`chat-message-item flex ${isMe ? "justify-end" : "justify-start"} relative group items-center ${
-                    hasReactions ? "mb-4" : "mb-1"
-                  } overflow-visible transition-colors ${
-                    isMsgSelectedOnMobile || isThisMsgMenuOpen
-                      ? "z-[60] overflow-visible bg-[#005c4b]/20 dark:bg-[#005c4b]/30 -mx-3 px-3 py-1 rounded-none"
-                      : "z-10"
-                  } ${debouncedSearchQuery.trim() ? "cursor-pointer hover:bg-white/5 p-1 rounded-xl transition-colors" : ""
-                    }`}
-                  onClick={() => {
-                    if (debouncedSearchQuery.trim()) scrollToMessage(msg.id);
-                  }}
-                >
-                  {/* Partner Avatar for incoming messages */}
-                  {!isMe && (
-                    <div className="w-8 flex-shrink-0 mr-2 flex flex-col justify-end pb-1 self-end">
-                      {isLastInGroup ? (
-                        <img
-                          src={partnerAvatar}
-                          alt={finalPartnerName}
-                          className="w-8 h-8 rounded-full object-cover shadow-sm border border-white/10 bg-black"
-                        />
-                      ) : (
-                        <div className="w-8 h-8" />
-                      )}
-                    </div>
-                  )}
-
-                  <div className={`relative flex items-center overflow-visible max-w-[85%] sm:max-w-[75%] md:max-w-[65%] lg:max-w-[55%] xl:max-w-[520px] ${
-                      isMsgSelectedOnMobile ? "overflow-visible z-[61]" : ""
-                    }`}>
-                    {isMe && actionButtons}
-
-                    <div
-                      onTouchStart={(e) => {
-                        if (!isMobile) return;
-                        touchStartPosRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-                        didLongPressRef.current = false;
-                        if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-                        longPressTimerRef.current = setTimeout(() => {
-                          didLongPressRef.current = true;
-                          if (typeof window !== "undefined" && window.navigator?.vibrate) {
-                            try { window.navigator.vibrate(45); } catch {}
-                          }
-                          selectMobileMsg(msg);
-                          setActiveReactionMenu(null);
-                          setActiveMessageMenu(null);
-                          setActiveFullEmojiPicker(null);
-                        }, 350);
-                      }}
-                      onTouchMove={(e) => {
-                        if (!touchStartPosRef.current) return;
-                        const deltaX = Math.abs(e.touches[0].clientX - touchStartPosRef.current.x);
-                        const deltaY = Math.abs(e.touches[0].clientY - touchStartPosRef.current.y);
-                        if (deltaX > 20 || deltaY > 20) {
-                          if (longPressTimerRef.current) {
-                            clearTimeout(longPressTimerRef.current);
-                            longPressTimerRef.current = null;
-                          }
-                        }
-                      }}
-                      onTouchEnd={() => {
-                        if (longPressTimerRef.current) {
-                          clearTimeout(longPressTimerRef.current);
-                          longPressTimerRef.current = null;
-                        }
-                      }}
-                      onTouchCancel={() => {
-                        if (longPressTimerRef.current) {
-                          clearTimeout(longPressTimerRef.current);
-                          longPressTimerRef.current = null;
-                        }
-                      }}
-                      onMouseDown={(e) => {
-                        if (!isMobile) return;
-                        touchStartPosRef.current = { x: e.clientX, y: e.clientY };
-                        didLongPressRef.current = false;
-                        if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-                        longPressTimerRef.current = setTimeout(() => {
-                          didLongPressRef.current = true;
-                          selectMobileMsg(msg);
-                          setActiveReactionMenu(null);
-                          setActiveMessageMenu(null);
-                          setActiveFullEmojiPicker(null);
-                        }, 350);
-                      }}
-                      onMouseMove={(e) => {
-                        if (!isMobile || !touchStartPosRef.current) return;
-                        const deltaX = Math.abs(e.clientX - touchStartPosRef.current.x);
-                        const deltaY = Math.abs(e.clientY - touchStartPosRef.current.y);
-                        if (deltaX > 20 || deltaY > 20) {
-                          if (longPressTimerRef.current) {
-                            clearTimeout(longPressTimerRef.current);
-                            longPressTimerRef.current = null;
-                          }
-                        }
-                      }}
-                      onMouseUp={() => {
-                        if (longPressTimerRef.current) {
-                          clearTimeout(longPressTimerRef.current);
-                          longPressTimerRef.current = null;
-                        }
-                      }}
-                      onContextMenu={(e) => {
-                        if (isMobile) {
-                          e.preventDefault();
-                        }
-                      }}
-                      onClick={(e) => {
-                        if (didLongPressRef.current) {
-                          didLongPressRef.current = false;
-                          return;
-                        }
-                        if (isMobile) {
-                          if (selectedMobileMessage) {
-                            e.stopPropagation();
-                            if (selectedMobileMessage.id === msg.id) {
-                              selectMobileMsg(null);
-                            } else {
-                              selectMobileMsg(msg);
-                            }
-                          }
-                        } else if (!debouncedSearchQuery.trim()) {
-                          setTouchedMessageId(touchedMessageId === msg.id ? null : msg.id);
-                        }
-                      }}
-                      style={{
-                        WebkitTouchCallout: "none",
-                        touchAction: "pan-y",
-                      }}
-                      className={cn(
-                        "chat-bubble-content relative w-full transition-all select-none overflow-visible",
-                        isSticker
-                          ? "bg-transparent border-none shadow-none px-0 py-0 flex flex-col items-end"
-                          : cn(
-                            "px-4 py-2.5 shadow-sm rounded-2xl",
-                            isMe ? "rounded-br-sm" : "rounded-bl-sm",
-                            isMe
-                              ? c("bg-[#D3F34B] text-[#1C1C1C]", "bg-[#c3e33e] text-[#1C1C1C]")
-                              : c("bg-white text-[#1C1C1C] border border-gray-100", "bg-[#242424] text-gray-100 border border-zinc-800")
-                          ),
-                        msg.isDeleted
-                          ? c("bg-transparent border border-gray-300 text-gray-500", "bg-transparent border border-zinc-700 text-gray-400")
-                          : ""
-                      )}
-                    >
-                      {/* Reply quote banner */}
-                      {(msg.replyTo || msg.replyToContent) && (
-                        <div
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const targetId = msg.replyToId || (msg.replyTo as any)?.id;
-                            if (targetId) {
-                              scrollToMessage(targetId);
-                            }
-                          }}
-                          className={`mb-1.5 p-2 rounded-lg text-[13px] border-l-4 cursor-pointer hover:opacity-85 transition-opacity ${isMe
-                            ? "bg-black/10 border-[#1C1C1C]"
-                            : c("bg-gray-100 border-blue-500", "bg-zinc-800 border-gray-400")
-                            }`}
-                          title="Click to view original message"
-                        >
-                          <p className={`font-bold mb-0.5 text-xs flex items-center gap-1 ${isMe ? "text-[#1C1C1C]" : "text-blue-500"}`}>
-                            <CornerUpLeft className="w-3 h-3" />
-                            {msg.replyTo?.sender === "me" || msg.replyToSender === myName ? "You" : finalPartnerName}
-                          </p>
-                          <p className="opacity-90 line-clamp-2">{msg.replyTo?.text || msg.replyToContent}</p>
-                        </div>
-                      )}
-
-                      {/* Sticker / Image / Video / Audio / Text */}
-                      {msg.isDeleted ? (
-                        <p className={`text-[14px] leading-relaxed italic flex items-center gap-1.5 py-0.5 select-none ${
-                          isMe ? "text-black/60" : "text-gray-400"
-                        }`}>
-                          <Ban className="w-3.5 h-3.5 opacity-70 shrink-0" />
-                          <span>{isMe ? "You unsent a message" : "This message was unsent"}</span>
-                        </p>
-                      ) : isSticker ? (
-                        <div className="relative py-1 flex items-center justify-center select-none">
+                return (
+                  <div
+                    key={msg.id}
+                    id={`msg-${msg.id}`}
+                    className={`chat-message-item flex ${isMe ? "justify-end" : "justify-start"} relative group items-center ${hasReactions ? "mb-4" : "mb-1"
+                      } overflow-visible transition-colors ${isMsgSelectedOnMobile || isThisMsgMenuOpen
+                        ? "z-[60] overflow-visible bg-[#005c4b]/20 dark:bg-[#005c4b]/30 -mx-3 px-3 py-1 rounded-none"
+                        : "z-10"
+                      } ${debouncedSearchQuery.trim() ? "cursor-pointer hover:bg-white/5 p-1 rounded-xl transition-colors" : ""
+                      }`}
+                    onClick={() => {
+                      if (debouncedSearchQuery.trim()) scrollToMessage(msg.id);
+                    }}
+                  >
+                    {/* Partner Avatar for incoming messages */}
+                    {!isMe && (
+                      <div className="w-8 flex-shrink-0 mr-2 flex flex-col justify-end pb-1 self-end">
+                        {isLastInGroup ? (
                           <img
-                            src={msgContent}
-                            alt="Sticker"
-                            className="w-32 h-32 sm:w-40 sm:h-40 object-contain drop-shadow-xl hover:scale-105 active:scale-95 transition-transform"
-                            loading="lazy"
+                            src={partnerAvatar}
+                            alt={finalPartnerName}
+                            className="w-8 h-8 rounded-full object-cover shadow-sm border border-white/10 bg-black"
                           />
-                        </div>
-                      ) : msg.type === "image" && msgContent ? (
-                        <div
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (isMobile && selectedMobileMessage) {
-                              selectMobileMsg(selectedMobileMessage.id === msg.id ? null : msg);
-                            } else {
-                              setActiveMediaViewerSrc(msgContent);
+                        ) : (
+                          <div className="w-8 h-8" />
+                        )}
+                      </div>
+                    )}
+
+                    <div className={`relative flex items-center overflow-visible max-w-[85%] sm:max-w-[75%] md:max-w-[65%] lg:max-w-[55%] xl:max-w-[520px] ${isMsgSelectedOnMobile ? "overflow-visible z-[61]" : ""
+                      }`}>
+                      {isMe && actionButtons}
+
+                      <div
+                        onTouchStart={(e) => {
+                          if (!isMobile) return;
+                          touchStartPosRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                          didLongPressRef.current = false;
+                          if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+                          longPressTimerRef.current = setTimeout(() => {
+                            didLongPressRef.current = true;
+                            if (typeof window !== "undefined" && window.navigator?.vibrate) {
+                              try { window.navigator.vibrate(45); } catch { }
                             }
-                          }}
-                          className="mb-1 rounded-xl overflow-hidden max-w-sm cursor-pointer hover:opacity-95 active:scale-[0.99] transition-all"
-                          title="Click to view image"
-                        >
-                          <img src={msgContent} alt="Uploaded" className="w-full h-auto max-h-72 object-cover" />
-                        </div>
-                      ) : msg.type === "video" && msgContent ? (
-                        <div className="mb-1 rounded-xl overflow-hidden max-w-sm">
-                          <video src={msgContent} controls className="w-full h-auto max-h-72" />
-                        </div>
-                      ) : (msg.type === "location" || (typeof msgContent === "string" && (msgContent.includes("Shared Location") || msgContent.includes("maps.google.com")))) ? (
-                        // ── Location Card ──────────────────────────────────────
-                        (() => {
-                          // Prefer structured lat/lng; fall back to parsing old text-format messages
-                          let lat: number | undefined = msg.latitude;
-                          let lng: number | undefined = msg.longitude;
-                          if (lat == null || lng == null) {
-                            const m = msgContent.match(/q=([-\d.]+),([-\d.]+)/) || msgContent.match(/([-\d.]+),([-\d.]+)/);
-                            if (m) { lat = parseFloat(m[1]); lng = parseFloat(m[2]); }
+                            selectMobileMsg(msg);
+                            setActiveReactionMenu(null);
+                            setActiveMessageMenu(null);
+                            setActiveFullEmojiPicker(null);
+                          }, 350);
+                        }}
+                        onTouchMove={(e) => {
+                          if (!touchStartPosRef.current) return;
+                          const deltaX = Math.abs(e.touches[0].clientX - touchStartPosRef.current.x);
+                          const deltaY = Math.abs(e.touches[0].clientY - touchStartPosRef.current.y);
+                          if (deltaX > 20 || deltaY > 20) {
+                            if (longPressTimerRef.current) {
+                              clearTimeout(longPressTimerRef.current);
+                              longPressTimerRef.current = null;
+                            }
                           }
-                          const mapsUrl = lat != null && lng != null
-                            ? `https://maps.google.com/?q=${lat},${lng}`
-                            : "https://maps.google.com";
-                          // Official OpenStreetMap live raster tile
-                          const zoom = 15;
-                          let staticMapUrl: string | null = null;
-                          if (lat != null && lng != null) {
-                            const x = Math.floor(((lng + 180) / 360) * Math.pow(2, zoom));
-                            const y = Math.floor(
-                              ((1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2) *
-                                Math.pow(2, zoom)
-                            );
-                            staticMapUrl = `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
+                        }}
+                        onTouchEnd={() => {
+                          if (longPressTimerRef.current) {
+                            clearTimeout(longPressTimerRef.current);
+                            longPressTimerRef.current = null;
                           }
-                          return (
-                            <a
-                              href={mapsUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              className="block -mx-4 -mt-2.5 rounded-xl overflow-hidden cursor-pointer hover:opacity-90 active:opacity-80 transition-opacity select-none"
-                            >
-                              {/* Map tile preview */}
-                              <div className="relative w-full overflow-hidden bg-[#e5e3df] dark:bg-[#2b3543]" style={{ aspectRatio: "16/9", minHeight: 130 }}>
-                                {staticMapUrl ? (
-                                  <img
-                                    src={staticMapUrl}
-                                    alt="Map preview"
-                                    className="w-full h-full object-cover scale-125 transition-transform"
-                                    loading="lazy"
-                                    onError={(e) => {
-                                      // Hide broken image icon if offline
-                                      (e.currentTarget as HTMLElement).style.display = "none";
-                                    }}
-                                  />
-                                ) : null}
-                                {/* Subtle map grid pattern (fallback / background) */}
-                                <div className="absolute inset-0 pointer-events-none opacity-20 bg-[radial-gradient(#4b5563_1px,transparent_1px)] [background-size:14px_14px]" />
-                                {/* Red pin overlay centered */}
-                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-                                  <div className="flex flex-col items-center -mt-4 drop-shadow-md">
-                                    <div className="w-9 h-9 rounded-full border-[3px] border-white shadow-xl flex items-center justify-center bg-red-500">
-                                      <MapPin className="w-4 h-4 text-white fill-white" />
-                                    </div>
-                                    <div className="w-2 h-2 rounded-full bg-red-500/40 mt-0.5" />
-                                  </div>
-                                </div>
-                                {/* Gradient fade at bottom */}
-                                <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-black/20 to-transparent pointer-events-none z-10" />
-                              </div>
-                              {/* Label bar */}
-                              <div className={`px-3 py-2 flex items-center gap-2 ${
-                                isMe
-                                  ? "bg-[#c3de38]/40"
-                                  : c("bg-gray-50 border-t border-gray-100", "bg-zinc-800/90 border-t border-zinc-700/50")
-                              }`}>
-                                <MapPin className="w-4 h-4 text-red-500 shrink-0" />
-                                <div className="flex flex-col min-w-0 flex-1">
-                                  <span className="text-[13px] font-bold leading-tight">Shared Location</span>
-                                  {lat != null && lng != null && (
-                                    <span className="text-[11px] opacity-60 font-mono tabular-nums">{lat.toFixed(4)}, {lng.toFixed(4)}</span>
-                                  )}
-                                </div>
-                                <ExternalLink className="w-3.5 h-3.5 opacity-40 shrink-0" />
-                              </div>
-                            </a>
-                          );
-                        })()
-                      ) : (msg.type === "audio" && msgContent) || (msg.type !== "image" && msg.type !== "video" && msg.type !== "sticker" && typeof msgContent === "string" && msgContent.startsWith("data:audio/")) ? (
-                        // Voice note player — custom styled, no raw browser widget
-                        <ChatAudioMessage
-                          src={msgContent}
-                          isMe={isMe}
-                          waveform={msg.waveform}
-                        />
-                      ) : (
-                        <p className="text-[15px] leading-[1.4] whitespace-pre-wrap font-medium break-words">
-                          {renderWithLinks(msgContent, debouncedSearchQuery)}
-                        </p>
-                      )}
-
-                      {/* Link Preview (never show on stickers, deleted messages, or location messages) */}
-                      {!isSticker && !msg.isDeleted && msg.linkPreview && msg.type !== "location" && !(typeof msgContent === "string" && (msgContent.includes("Shared Location") || msgContent.includes("maps.google.com"))) && (
-                        <a
-                          href={msg.linkPreview.url.startsWith("http") ? msg.linkPreview.url : `https://${msg.linkPreview.url}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          className={`mt-1.5 mb-1.5 rounded-xl border overflow-hidden cursor-pointer block hover:opacity-90 transition-opacity ${c(
-                            "bg-gray-50 border-gray-200",
-                            "bg-[#1E1E1E] border-zinc-700"
-                          )}`}
-                        >
-                          <div className="p-2.5">
-                            <h4 className={`text-[13px] font-semibold leading-snug ${c("text-gray-900", "text-gray-100")}`}>
-                              {msg.linkPreview.title}
-                            </h4>
-                            <p className="text-[11px] font-semibold uppercase text-blue-500">{msg.linkPreview.url}</p>
-                          </div>
-                        </a>
-                      )}
-
-                      {/* Time & Read Status */}
-                      {(() => {
-                        const computedStatus = isMe && !msg.isDeleted ? getMessageStatus(msg) : null;
-                        return (
-                          <div
-                            className={`flex items-center justify-end gap-1 mt-1 -mb-0.5 select-none ${isSticker
-                              ? "bg-black/50 backdrop-blur-md px-2 py-0.5 rounded-full text-white/90 text-[10px] ml-auto w-fit shadow-sm"
-                              : msg.isDeleted
-                                ? "text-gray-400"
-                                : isMe
-                                  ? "text-emerald-950/60"
-                                  : "text-gray-400"
-                              }`}
-                          >
-                            <span className="text-[10px] font-semibold tracking-wide">{timeStr}</span>
-                            {isMe && !msg.isDeleted && (
-                              <span className="flex items-center">
-                                {computedStatus === "seen" ? (
-                                  <CheckCheck className="w-3.5 h-3.5 text-blue-500" strokeWidth={2.5} />
-                                ) : computedStatus === "delivered" ? (
-                                  <CheckCheck className={`w-3.5 h-3.5 ${isSticker ? "text-emerald-400" : "text-emerald-950/50"}`} strokeWidth={2.5} />
-                                ) : (
-                                  <svg className={`w-3.5 h-3.5 ${isSticker ? "text-white/70" : "text-emerald-950/50"}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                    <polyline points="20 6 9 17 4 12" />
-                                  </svg>
-                                )}
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })()}
-
-                      {/* Reactions Badge — Clicking opens Messenger-style details */}
-                      {hasReactions && msg.reactions && (() => {
-                        const uniqueReactions = Array.from(new Set(msg.reactions));
-                        const isSingle = msg.reactions.length === 1;
-                        return (
+                        }}
+                        onTouchCancel={() => {
+                          if (longPressTimerRef.current) {
+                            clearTimeout(longPressTimerRef.current);
+                            longPressTimerRef.current = null;
+                          }
+                        }}
+                        onMouseDown={(e) => {
+                          if (!isMobile) return;
+                          touchStartPosRef.current = { x: e.clientX, y: e.clientY };
+                          didLongPressRef.current = false;
+                          if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+                          longPressTimerRef.current = setTimeout(() => {
+                            didLongPressRef.current = true;
+                            selectMobileMsg(msg);
+                            setActiveReactionMenu(null);
+                            setActiveMessageMenu(null);
+                            setActiveFullEmojiPicker(null);
+                          }, 350);
+                        }}
+                        onMouseMove={(e) => {
+                          if (!isMobile || !touchStartPosRef.current) return;
+                          const deltaX = Math.abs(e.clientX - touchStartPosRef.current.x);
+                          const deltaY = Math.abs(e.clientY - touchStartPosRef.current.y);
+                          if (deltaX > 20 || deltaY > 20) {
+                            if (longPressTimerRef.current) {
+                              clearTimeout(longPressTimerRef.current);
+                              longPressTimerRef.current = null;
+                            }
+                          }
+                        }}
+                        onMouseUp={() => {
+                          if (longPressTimerRef.current) {
+                            clearTimeout(longPressTimerRef.current);
+                            longPressTimerRef.current = null;
+                          }
+                        }}
+                        onContextMenu={(e) => {
+                          if (isMobile) {
+                            e.preventDefault();
+                          }
+                        }}
+                        onClick={(e) => {
+                          if (didLongPressRef.current) {
+                            didLongPressRef.current = false;
+                            return;
+                          }
+                          if (isMobile) {
+                            if (selectedMobileMessage) {
+                              e.stopPropagation();
+                              if (selectedMobileMessage.id === msg.id) {
+                                selectMobileMsg(null);
+                              } else {
+                                selectMobileMsg(msg);
+                              }
+                            }
+                          } else if (!debouncedSearchQuery.trim()) {
+                            setTouchedMessageId(touchedMessageId === msg.id ? null : msg.id);
+                          }
+                        }}
+                        style={{
+                          WebkitTouchCallout: "none",
+                          touchAction: "pan-y",
+                        }}
+                        className={cn(
+                          "chat-bubble-content relative w-full transition-all select-none overflow-visible",
+                          isSticker
+                            ? "bg-transparent border-none shadow-none px-0 py-0 flex flex-col items-end"
+                            : cn(
+                              "px-4 py-2.5 shadow-sm rounded-2xl",
+                              isMe ? "rounded-br-sm" : "rounded-bl-sm",
+                              isMe
+                                ? c("bg-[#D3F34B] text-[#1C1C1C]", "bg-[#c3e33e] text-[#1C1C1C]")
+                                : c("bg-white text-[#1C1C1C] border border-gray-100", "bg-[#242424] text-gray-100 border border-zinc-800")
+                            ),
+                          msg.isDeleted
+                            ? c("bg-transparent border border-gray-300 text-gray-500", "bg-transparent border border-zinc-700 text-gray-400")
+                            : ""
+                        )}
+                      >
+                        {/* Reply quote banner */}
+                        {(msg.replyTo || msg.replyToContent) && (
                           <div
                             onClick={(e) => {
                               e.stopPropagation();
-                              setViewingReactionsMsg(msg);
-                              setReactionDetailFilter("all");
+                              const targetId = msg.replyToId || (msg.replyTo as any)?.id;
+                              if (targetId) {
+                                scrollToMessage(targetId);
+                              }
                             }}
-                            className={`absolute -bottom-2.5 -right-1 flex items-center justify-center rounded-full cursor-pointer z-20 transition-all hover:scale-110 active:scale-95 select-none ${
-                              isSingle ? "w-[24px] h-[24px]" : "h-[24px] px-1.5 gap-1"
-                            } ${c(
-                              "bg-white border-2 border-white text-gray-800 shadow-[0_2px_6px_rgba(0,0,0,0.18)]",
-                              "bg-[#202c33] border-2 border-[#18181A] text-white shadow-[0_2px_6px_rgba(0,0,0,0.35)]"
-                            )}`}
-                            title="View reactions"
+                            className={`mb-1.5 p-2 rounded-lg text-[13px] border-l-4 cursor-pointer hover:opacity-85 transition-opacity ${isMe
+                              ? "bg-black/10 border-[#1C1C1C]"
+                              : c("bg-gray-100 border-blue-500", "bg-zinc-800 border-gray-400")
+                              }`}
+                            title="Click to view original message"
                           >
-                            <div className="flex items-center justify-center -space-x-1">
-                              {uniqueReactions.map((r, i) => (
-                                <span key={i} className="text-[13px] leading-none flex items-center justify-center">
-                                  {r}
-                                </span>
-                              ))}
-                            </div>
-                            {!isSingle && (
-                              <span className="text-[10px] font-bold opacity-80 tabular-nums">
-                                {msg.reactions.length}
-                              </span>
-                            )}
+                            <p className={`font-bold mb-0.5 text-xs flex items-center gap-1 ${isMe ? "text-[#1C1C1C]" : "text-blue-500"}`}>
+                              <CornerUpLeft className="w-3 h-3" />
+                              {msg.replyTo?.sender === "me" || msg.replyToSender === myName ? "You" : finalPartnerName}
+                            </p>
+                            <p className="opacity-90 line-clamp-2">{msg.replyTo?.text || msg.replyToContent}</p>
                           </div>
-                        );
-                      })()}
+                        )}
+
+                        {/* Sticker / Image / Video / Audio / Text */}
+                        {msg.isDeleted ? (
+                          <p className={`text-[14px] leading-relaxed italic flex items-center gap-1.5 py-0.5 select-none ${isMe ? "text-black/60" : "text-gray-400"
+                            }`}>
+                            <Ban className="w-3.5 h-3.5 opacity-70 shrink-0" />
+                            <span>{isMe ? "You unsent a message" : "This message was unsent"}</span>
+                          </p>
+                        ) : isSticker ? (
+                          <div className="relative py-1 flex items-center justify-center select-none">
+                            <img
+                              src={msgContent}
+                              alt="Sticker"
+                              className="w-32 h-32 sm:w-40 sm:h-40 object-contain drop-shadow-xl hover:scale-105 active:scale-95 transition-transform"
+                              loading="lazy"
+                            />
+                          </div>
+                        ) : msg.type === "image" && msgContent ? (
+                          <div
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (isMobile && selectedMobileMessage) {
+                                selectMobileMsg(selectedMobileMessage.id === msg.id ? null : msg);
+                              } else {
+                                setActiveMediaViewerSrc(msgContent);
+                              }
+                            }}
+                            className="mb-1 rounded-xl overflow-hidden max-w-sm cursor-pointer hover:opacity-95 active:scale-[0.99] transition-all"
+                            title="Click to view image"
+                          >
+                            <img src={msgContent} alt="Uploaded" className="w-full h-auto max-h-72 object-cover" />
+                          </div>
+                        ) : msg.type === "video" && msgContent ? (
+                          <div className="mb-1 rounded-xl overflow-hidden max-w-sm">
+                            <video src={msgContent} controls className="w-full h-auto max-h-72" />
+                          </div>
+                        ) : (msg.type === "file" || (msg as any).fileName) && msgContent ? (
+                          (() => {
+                            const fileName = (msg as any).fileName || "Document";
+                            const fileSize = (msg as any).fileSize;
+                            const fileSizeStr = fileSize ? `${(fileSize / 1024).toFixed(1)} KB` : "";
+                            const isPdf = fileName.toLowerCase().endsWith(".pdf");
+                            const isZip = fileName.toLowerCase().endsWith(".zip") || fileName.toLowerCase().endsWith(".rar");
+                            const isDoc = fileName.toLowerCase().endsWith(".doc") || fileName.toLowerCase().endsWith(".docx") || fileName.toLowerCase().endsWith(".txt");
+
+                            return (
+                              <a
+                                href={msgContent}
+                                download={fileName}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className={`my-1 p-3 rounded-xl border flex items-center gap-3 transition-all hover:opacity-95 active:scale-[0.98] select-none ${
+                                  isMe
+                                    ? "bg-black/10 border-black/15 text-[#1C1C1C]"
+                                    : c("bg-gray-50 border-gray-200 text-gray-900", "bg-zinc-800/90 border-zinc-700 text-gray-100")
+                                }`}
+                                title={`Download ${fileName}`}
+                              >
+                                <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 shadow-xs ${
+                                  isPdf
+                                    ? "bg-red-500/20 text-red-600 dark:text-red-400"
+                                    : isZip
+                                    ? "bg-amber-500/20 text-amber-600 dark:text-amber-400"
+                                    : isDoc
+                                    ? "bg-blue-500/20 text-blue-600 dark:text-blue-400"
+                                    : isMe
+                                    ? "bg-black/15 text-[#1C1C1C]"
+                                    : "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+                                }`}>
+                                  {isPdf ? (
+                                    <FileText className="w-5 h-5 stroke-[2.2]" />
+                                  ) : isZip ? (
+                                    <FolderArchive className="w-5 h-5 stroke-[2.2]" />
+                                  ) : (
+                                    <File className="w-5 h-5 stroke-[2.2]" />
+                                  )}
+                                </div>
+
+                                <div className="flex flex-col min-w-0 flex-1 leading-tight">
+                                  <span className="text-[13.5px] font-bold truncate max-w-[180px] sm:max-w-[240px]">
+                                    {fileName}
+                                  </span>
+                                  <div className="flex items-center gap-1.5 mt-1 text-[11px] opacity-70 font-medium">
+                                    {fileSizeStr && <span>{fileSizeStr}</span>}
+                                    {fileSizeStr && <span>•</span>}
+                                    <span>Download</span>
+                                  </div>
+                                </div>
+
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-transform hover:scale-110 ${
+                                  isMe ? "bg-black/10 text-[#1C1C1C]" : c("bg-gray-200/80 text-gray-700", "bg-zinc-700/80 text-gray-200")
+                                }`}>
+                                  <Download className="w-4 h-4" />
+                                </div>
+                              </a>
+                            );
+                          })()
+                        ) : (msg.type === "location" || (typeof msgContent === "string" && (msgContent.includes("Shared Location") || msgContent.includes("maps.google.com")))) ? (
+                          // ── Location Card ──────────────────────────────────────
+                          (() => {
+                            // Prefer structured lat/lng; fall back to parsing old text-format messages
+                            let lat: number | undefined = msg.latitude;
+                            let lng: number | undefined = msg.longitude;
+                            if (lat == null || lng == null) {
+                              const m = msgContent.match(/q=([-\d.]+),([-\d.]+)/) || msgContent.match(/([-\d.]+),([-\d.]+)/);
+                              if (m) { lat = parseFloat(m[1]); lng = parseFloat(m[2]); }
+                            }
+                            const mapsUrl = lat != null && lng != null
+                              ? `https://maps.google.com/?q=${lat},${lng}`
+                              : "https://maps.google.com";
+                            // Official OpenStreetMap live raster tile
+                            const zoom = 15;
+                            let staticMapUrl: string | null = null;
+                            if (lat != null && lng != null) {
+                              const x = Math.floor(((lng + 180) / 360) * Math.pow(2, zoom));
+                              const y = Math.floor(
+                                ((1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2) *
+                                Math.pow(2, zoom)
+                              );
+                              staticMapUrl = `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
+                            }
+                            return (
+                              <a
+                                href={mapsUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="block -mx-4 -mt-2.5 rounded-xl overflow-hidden cursor-pointer hover:opacity-90 active:opacity-80 transition-opacity select-none"
+                              >
+                                {/* Map tile preview */}
+                                <div className="relative w-full overflow-hidden bg-[#e5e3df] dark:bg-[#2b3543]" style={{ aspectRatio: "16/9", minHeight: 130 }}>
+                                  {staticMapUrl ? (
+                                    <img
+                                      src={staticMapUrl}
+                                      alt="Map preview"
+                                      className="w-full h-full object-cover scale-125 transition-transform"
+                                      loading="lazy"
+                                      onError={(e) => {
+                                        // Hide broken image icon if offline
+                                        (e.currentTarget as HTMLElement).style.display = "none";
+                                      }}
+                                    />
+                                  ) : null}
+                                  {/* Subtle map grid pattern (fallback / background) */}
+                                  <div className="absolute inset-0 pointer-events-none opacity-20 bg-[radial-gradient(#4b5563_1px,transparent_1px)] [background-size:14px_14px]" />
+                                  {/* Red pin overlay centered */}
+                                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                                    <div className="flex flex-col items-center -mt-4 drop-shadow-md">
+                                      <div className="w-9 h-9 rounded-full border-[3px] border-white shadow-xl flex items-center justify-center bg-red-500">
+                                        <MapPin className="w-4 h-4 text-white fill-white" />
+                                      </div>
+                                      <div className="w-2 h-2 rounded-full bg-red-500/40 mt-0.5" />
+                                    </div>
+                                  </div>
+                                  {/* Gradient fade at bottom */}
+                                  <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-black/20 to-transparent pointer-events-none z-10" />
+                                </div>
+                                {/* Label bar */}
+                                <div className={`px-3 py-2 flex items-center gap-2 ${isMe
+                                    ? "bg-[#c3de38]/40"
+                                    : c("bg-gray-50 border-t border-gray-100", "bg-zinc-800/90 border-t border-zinc-700/50")
+                                  }`}>
+                                  <MapPin className="w-4 h-4 text-red-500 shrink-0" />
+                                  <div className="flex flex-col min-w-0 flex-1">
+                                    <span className="text-[13px] font-bold leading-tight">Shared Location</span>
+                                    {lat != null && lng != null && (
+                                      <span className="text-[11px] opacity-60 font-mono tabular-nums">{lat.toFixed(4)}, {lng.toFixed(4)}</span>
+                                    )}
+                                  </div>
+                                  <ExternalLink className="w-3.5 h-3.5 opacity-40 shrink-0" />
+                                </div>
+                              </a>
+                            );
+                          })()
+                        ) : (msg.type === "audio" && msgContent) || (msg.type !== "image" && msg.type !== "video" && msg.type !== "sticker" && typeof msgContent === "string" && msgContent.startsWith("data:audio/")) ? (
+                          // Voice note player — custom styled, no raw browser widget
+                          <ChatAudioMessage
+                            src={msgContent}
+                            isMe={isMe}
+                            waveform={msg.waveform}
+                          />
+                        ) : (
+                          <p className="text-[15px] leading-[1.4] whitespace-pre-wrap font-medium break-words">
+                            {renderWithLinks(msgContent, debouncedSearchQuery)}
+                          </p>
+                        )}
+
+                        {/* Link Preview (never show on stickers, deleted messages, or location messages) */}
+                        {!isSticker && !msg.isDeleted && msg.linkPreview && msg.type !== "location" && !(typeof msgContent === "string" && (msgContent.includes("Shared Location") || msgContent.includes("maps.google.com"))) && (
+                          <a
+                            href={msg.linkPreview.url.startsWith("http") ? msg.linkPreview.url : `https://${msg.linkPreview.url}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className={`mt-1.5 mb-1.5 rounded-xl border overflow-hidden cursor-pointer block hover:opacity-90 transition-opacity ${c(
+                              "bg-gray-50 border-gray-200",
+                              "bg-[#1E1E1E] border-zinc-700"
+                            )}`}
+                          >
+                            <div className="p-2.5">
+                              <h4 className={`text-[13px] font-semibold leading-snug ${c("text-gray-900", "text-gray-100")}`}>
+                                {msg.linkPreview.title}
+                              </h4>
+                              <p className="text-[11px] font-semibold uppercase text-blue-500">{msg.linkPreview.url}</p>
+                            </div>
+                          </a>
+                        )}
+
+                        {/* Time & Read Status */}
+                        {(() => {
+                          const computedStatus = isMe && !msg.isDeleted ? getMessageStatus(msg) : null;
+                          return (
+                            <div
+                              className={`flex items-center justify-end gap-1 mt-1 -mb-0.5 select-none ${isSticker
+                                ? "bg-black/50 backdrop-blur-md px-2 py-0.5 rounded-full text-white/90 text-[10px] ml-auto w-fit shadow-sm"
+                                : msg.isDeleted
+                                  ? "text-gray-400"
+                                  : isMe
+                                    ? "text-emerald-950/60"
+                                    : "text-gray-400"
+                                }`}
+                            >
+                              <span className="text-[10px] font-semibold tracking-wide">{timeStr}</span>
+                              {isMe && !msg.isDeleted && (
+                                <span className="flex items-center">
+                                  {computedStatus === "seen" ? (
+                                    <CheckCheck className="w-3.5 h-3.5 text-blue-500" strokeWidth={2.5} />
+                                  ) : computedStatus === "delivered" ? (
+                                    <CheckCheck className={`w-3.5 h-3.5 ${isSticker ? "text-emerald-400" : "text-emerald-950/50"}`} strokeWidth={2.5} />
+                                  ) : (
+                                    <svg className={`w-3.5 h-3.5 ${isSticker ? "text-white/70" : "text-emerald-950/50"}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                      <polyline points="20 6 9 17 4 12" />
+                                    </svg>
+                                  )}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
+
+                        {/* Reactions Badge — Clicking opens Messenger-style details */}
+                        {hasReactions && msg.reactions && (() => {
+                          const uniqueReactions = Array.from(new Set(msg.reactions));
+                          const isSingle = msg.reactions.length === 1;
+                          return (
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setViewingReactionsMsg(msg);
+                                setReactionDetailFilter("all");
+                              }}
+                              className={`absolute -bottom-2.5 -right-1 flex items-center justify-center rounded-full cursor-pointer z-20 transition-all hover:scale-110 active:scale-95 select-none ${isSingle ? "w-[24px] h-[24px]" : "h-[24px] px-1.5 gap-1"
+                                } ${c(
+                                  "bg-white border-2 border-white text-gray-800 shadow-[0_2px_6px_rgba(0,0,0,0.18)]",
+                                  "bg-[#202c33] border-2 border-[#18181A] text-white shadow-[0_2px_6px_rgba(0,0,0,0.35)]"
+                                )}`}
+                              title="View reactions"
+                            >
+                              <div className="flex items-center justify-center -space-x-1">
+                                {uniqueReactions.map((r, i) => (
+                                  <span key={i} className="text-[13px] leading-none flex items-center justify-center">
+                                    {r}
+                                  </span>
+                                ))}
+                              </div>
+                              {!isSingle && (
+                                <span className="text-[10px] font-bold opacity-80 tabular-nums">
+                                  {msg.reactions.length}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      {!isMe && actionButtons}
                     </div>
-
-                    {!isMe && actionButtons}
                   </div>
-                </div>
-              );
-            })
-          )}
-          {/* Typing Indicator — animated in/out with AnimatePresence */}
-          <AnimatePresence>
-            {otherIsTyping && (
-              <motion.div
-                key="typing-indicator"
-                initial={{ opacity: 0, y: 8, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                transition={{ duration: 0.2, ease: "easeOut" }}
-                className="flex justify-start items-end gap-2 mb-1 max-w-[85%] sm:max-w-[75%] md:max-w-[65%] lg:max-w-[55%] xl:max-w-[520px]"
-              >
-                {/* Partner avatar */}
-                <div className="shrink-0 w-8 self-end">
-                  <img
-                    src={partnerAvatar}
-                    alt={finalPartnerName}
-                    className={`w-8 h-8 rounded-full object-cover border shadow-sm ${c("border-white bg-black", "border-zinc-800 bg-black")}`}
-                  />
-                </div>
-
-                {/* Bubble */}
-                <div
-                  className={`px-4 py-3 rounded-2xl rounded-bl-sm shadow-sm border flex items-center gap-1.5 ${c(
-                    "bg-white border-gray-100/50 shadow-black/5",
-                    "bg-[#242424] border-zinc-800 shadow-black/20"
-                  )}`}
-                >
-                  {[0, 0.15, 0.3].map((delay, i) => (
-                    <motion.div
-                      key={i}
-                      className={`w-[7px] h-[7px] rounded-full ${c("bg-gray-400", "bg-gray-500")}`}
-                      animate={{ y: [0, -5, 0] }}
-                      transition={{
-                        duration: 0.9,
-                        repeat: Infinity,
-                        ease: "easeInOut",
-                        delay,
-                      }}
-                    />
-                  ))}
-                </div>
-              </motion.div>
+                );
+              })
             )}
-          </AnimatePresence>
+            {/* Typing Indicator — animated in/out with AnimatePresence */}
+            <AnimatePresence>
+              {otherIsTyping && (
+                <motion.div
+                  key="typing-indicator"
+                  initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ duration: 0.2, ease: "easeOut" }}
+                  className="flex justify-start items-end gap-2 mb-1 max-w-[85%] sm:max-w-[75%] md:max-w-[65%] lg:max-w-[55%] xl:max-w-[520px]"
+                >
+                  {/* Partner avatar */}
+                  <div className="shrink-0 w-8 self-end">
+                    <img
+                      src={partnerAvatar}
+                      alt={finalPartnerName}
+                      className={`w-8 h-8 rounded-full object-cover border shadow-sm ${c("border-white bg-black", "border-zinc-800 bg-black")}`}
+                    />
+                  </div>
 
-          <div ref={messagesEndRef} className="h-6 sm:h-8 shrink-0 select-none pointer-events-none" />
-        </div>
+                  {/* Bubble */}
+                  <div
+                    className={`px-4 py-3 rounded-2xl rounded-bl-sm shadow-sm border flex items-center gap-1.5 ${c(
+                      "bg-white border-gray-100/50 shadow-black/5",
+                      "bg-[#242424] border-zinc-800 shadow-black/20"
+                    )}`}
+                  >
+                    {[0, 0.15, 0.3].map((delay, i) => (
+                      <motion.div
+                        key={i}
+                        className={`w-[7px] h-[7px] rounded-full ${c("bg-gray-400", "bg-gray-500")}`}
+                        animate={{ y: [0, -5, 0] }}
+                        transition={{
+                          duration: 0.9,
+                          repeat: Infinity,
+                          ease: "easeInOut",
+                          delay,
+                        }}
+                      />
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-        {/* Floating Scroll to Bottom Button (Messenger style) */}
-        {showScrollToBottom && (
-          <button
-            type="button"
-            onClick={() => scrollToBottom("smooth")}
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 w-10 h-10 rounded-full shadow-2xl flex items-center justify-center transition-all duration-200 hover:scale-110 active:scale-95 border backdrop-blur-md bg-white/95 dark:bg-zinc-800/95 text-gray-800 dark:text-gray-100 border-gray-200/80 dark:border-zinc-700/80 animate-in fade-in zoom-in-95 group"
-            title="Scroll to bottom"
-          >
-            <ChevronDown className="w-5 h-5 group-hover:translate-y-0.5 transition-transform text-pink-500 dark:text-pink-400 stroke-[2.5]" />
-          </button>
-        )}
-      </div>
+            <div ref={messagesEndRef} className="h-6 sm:h-8 shrink-0 select-none pointer-events-none" />
+          </div>
 
-      {/* Bottom Input Area */}
-      <div
-        className={`px-3 sm:px-4 pt-2.5 bg-transparent mt-auto flex flex-col relative shrink-0 ${
-          activeDesktopPopup ? "z-50" : "z-10"
-        }`}
-        style={{ paddingBottom: isMobile ? ((showInputEmojiPicker || showMobileGallery) ? "0.5rem" : "max(1.5rem, env(safe-area-inset-bottom))") : "0.75rem" }}
-      >
-        {/* Replying banner */}
-        {replyingTo && (
-          <div
-            className={`mb-2 px-4 py-2.5 rounded-2xl flex items-center justify-between shadow-sm border animate-in fade-in slide-in-from-bottom-2 ${c(
-              "bg-white border-gray-200",
-              "bg-[#242424] border-zinc-800"
-            )}`}
-          >
-            <div
-              onClick={() => {
-                if (replyingTo.id) scrollToMessage(replyingTo.id);
-              }}
-              className="flex flex-col overflow-hidden border-l-4 border-blue-500 pl-3 flex-1 cursor-pointer hover:opacity-80 transition-opacity"
-              title="Click to view message"
-            >
-              <span className="text-xs font-bold text-blue-500 flex items-center gap-1">
-                <CornerUpLeft className="w-3 h-3" />
-                Replying to {replyingTo.senderRole === myId ? "Yourself" : finalPartnerName}
-              </span>
-              <span className="text-[13px] truncate font-medium text-gray-400">
-                {getCleanMessagePreview(replyingTo, finalPartnerName).text}
-              </span>
-            </div>
+          {/* Floating Scroll to Bottom Button (Messenger style) */}
+          {showScrollToBottom && (
             <button
               type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setReplyingTo(null);
-              }}
-              className="p-1.5 rounded-full hover:bg-zinc-700 text-gray-400 transition-colors"
-              title="Cancel reply"
+              onClick={() => scrollToBottom("smooth")}
+              className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 w-10 h-10 rounded-full shadow-2xl flex items-center justify-center transition-all duration-200 hover:scale-110 active:scale-95 border backdrop-blur-md bg-white/95 dark:bg-zinc-800/95 text-gray-800 dark:text-gray-100 border-gray-200/80 dark:border-zinc-700/80 animate-in fade-in zoom-in-95 group"
+              title="Scroll to bottom"
             >
-              <X className="w-5 h-5" />
+              <ChevronDown className="w-5 h-5 group-hover:translate-y-0.5 transition-transform text-pink-500 dark:text-pink-400 stroke-[2.5]" />
             </button>
-          </div>
-        )}
+          )}
+        </div>
 
-        <form onSubmit={handleSendForm} className="flex items-center gap-1 sm:gap-2 relative">
-          {/* Left Action Buttons */}
-          {!isRecordingAudio && (
-            isMobile ? (
-              /* MOBILE-ONLY (<768px): Matches real Messenger style */
-              inputText.trim() && !showMobileLeftIcons ? (
-                /* Mobile Typing Collapsed: [ > ] button */
-                <button
-                  type="button"
-                  onClick={() => setShowMobileLeftIcons(true)}
-                  className="w-7 h-7 flex items-center justify-center text-[#00d2ff] hover:bg-[#00d2ff]/10 active:scale-90 transition-all shrink-0 cursor-pointer"
-                  title="Show actions"
-                >
-                  <ChevronRight className="w-6 h-6 stroke-[2.8]" />
-                </button>
-              ) : (
-                /* Mobile Action Buttons: (+) [Camera] [Gallery] [Mic] */
-                <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-                  {/* Plus button with Popup Menu */}
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setShowPlusMenu(!showPlusMenu)}
-                      className={`w-7 h-7 rounded-full bg-[#00d2ff] text-slate-950 flex items-center justify-center transition-all shadow-sm active:scale-95 cursor-pointer shrink-0 ${
-                        showPlusMenu ? "rotate-45" : ""
-                      }`}
-                      title="More actions"
-                    >
-                      <Plus className="w-4 h-4 stroke-[3]" />
-                    </button>
+        {/* Bottom Input Area */}
+        <div
+          className={`px-3 sm:px-4 pt-2.5 bg-transparent mt-auto flex flex-col relative shrink-0 ${activeDesktopPopup ? "z-50" : "z-10"
+            }`}
+          style={{ paddingBottom: isMobile ? ((showInputEmojiPicker || showMobileGallery) ? "0.5rem" : "max(1.5rem, env(safe-area-inset-bottom))") : "0.75rem" }}
+        >
+          {/* Replying banner */}
+          {replyingTo && (
+            <div
+              className={`mb-2 px-4 py-2.5 rounded-2xl flex items-center justify-between shadow-sm border animate-in fade-in slide-in-from-bottom-2 ${c(
+                "bg-white border-gray-200",
+                "bg-[#242424] border-zinc-800"
+              )}`}
+            >
+              <div
+                onClick={() => {
+                  if (replyingTo.id) scrollToMessage(replyingTo.id);
+                }}
+                className="flex flex-col overflow-hidden border-l-4 border-blue-500 pl-3 flex-1 cursor-pointer hover:opacity-80 transition-opacity"
+                title="Click to view message"
+              >
+                <span className="text-xs font-bold text-blue-500 flex items-center gap-1">
+                  <CornerUpLeft className="w-3 h-3" />
+                  Replying to {replyingTo.senderRole === myId ? "Yourself" : finalPartnerName}
+                </span>
+                <span className="text-[13px] truncate font-medium text-gray-400">
+                  {getCleanMessagePreview(replyingTo, finalPartnerName).text}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setReplyingTo(null);
+                }}
+                className="p-1.5 rounded-full hover:bg-zinc-700 text-gray-400 transition-colors"
+                title="Cancel reply"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          )}
 
-                    {/* Popup Menu: Files, Location */}
-                    {showPlusMenu && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-40"
-                          onClick={() => setShowPlusMenu(false)}
-                        />
-                        <div
-                          className={`absolute bottom-full left-0 mb-3 w-48 rounded-2xl shadow-2xl border p-2 z-50 animate-in fade-in zoom-in-95 duration-150 ${c(
-                            "bg-white border-gray-200 text-gray-800 shadow-xl",
-                            "bg-[#242424] border-zinc-800 text-gray-100 shadow-2xl"
-                          )}`}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowPlusMenu(false);
-                              galleryInputRef.current?.click();
-                            }}
-                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${c(
-                              "hover:bg-gray-100",
-                              "hover:bg-zinc-800"
-                            )}`}
-                          >
-                            <Paperclip className="w-5 h-5 text-[#00d2ff]" />
-                            <span>Files</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowPlusMenu(false);
-                              handleSendLocation();
-                            }}
-                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${c(
-                              "hover:bg-gray-100",
-                              "hover:bg-zinc-800"
-                            )}`}
-                          >
-                            <Navigation className="w-5 h-5 text-[#00d2ff]" />
-                            <span>Location</span>
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  {/* Camera button — opens full-screen live camera */}
+          <form onSubmit={handleSendForm} className="flex items-center gap-1 sm:gap-2 relative">
+            {/* Left Action Buttons */}
+            {!isRecordingAudio && (
+              isMobile ? (
+                /* MOBILE-ONLY (<768px): Matches real Messenger style */
+                inputText.trim() && !showMobileLeftIcons ? (
+                  /* Mobile Typing Collapsed: [ > ] button */
                   <button
                     type="button"
-                    onClick={() => {
-                      if (showInputEmojiPicker) setShowInputEmojiPicker(false);
-                      if (showMobileGallery) setShowMobileGallery(false);
-                      setIsCameraModalOpen(true);
-                    }}
-                    className="w-7 h-7 flex items-center justify-center text-[#00d2ff] hover:bg-[#00d2ff]/10 active:scale-95 transition-all shrink-0 cursor-pointer"
-                    title="Live Camera"
+                    onClick={() => setShowMobileLeftIcons(true)}
+                    className="w-7 h-7 flex items-center justify-center text-[#00d2ff] hover:bg-[#00d2ff]/10 active:scale-90 transition-all shrink-0 cursor-pointer"
+                    title="Show actions"
                   >
-                    <Camera className="w-[22px] h-[22px] stroke-[2.2]" />
+                    <ChevronRight className="w-6 h-6 stroke-[2.8]" />
                   </button>
-
-                  {/* Gallery button - Opens real device photo & video library */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (showInputEmojiPicker) setShowInputEmojiPicker(false);
-                      setShowMobileGallery(false);
-                      galleryInputRef.current?.click();
-                    }}
-                    className="w-7 h-7 flex items-center justify-center text-[#00d2ff] hover:bg-[#00d2ff]/10 active:scale-95 transition-all shrink-0 cursor-pointer rounded-full"
-                    title="Open device gallery"
-                  >
-                    <MessengerGalleryIcon className="w-[22px] h-[22px]" />
-                  </button>
-
-                  {/* Mic button */}
-                  <button
-                    type="button"
-                    onClick={startAudioRecording}
-                    className="w-7 h-7 flex items-center justify-center text-[#00d2ff] hover:bg-[#00d2ff]/10 active:scale-95 transition-all shrink-0 cursor-pointer"
-                    title="Record voice note"
-                  >
-                    <Mic className="w-[22px] h-[22px] stroke-[2.2]" />
-                  </button>
-                </div>
-              )
-            ) : (
-              /* DESKTOP (≥768px): Untouched desktop layout */
-              <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
-                {inputText.trim() ? (
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setShowPlusMenu(!showPlusMenu)}
-                      className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all shadow-sm cursor-pointer ${showPlusMenu
-                        ? "bg-[#6952d7] text-white rotate-45"
-                        : c("bg-gray-100 text-[#6952d7] hover:bg-gray-200", "bg-zinc-800 text-[#9f8dff] hover:bg-zinc-700")
-                        }`}
-                      title="Open actions"
-                    >
-                      <Plus className="w-5 h-5 transition-transform duration-200" />
-                    </button>
-
-                    {showPlusMenu && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-40"
-                          onClick={() => setShowPlusMenu(false)}
-                        />
-                        <div
-                          className={`absolute bottom-full left-0 mb-3 w-60 rounded-2xl shadow-2xl border p-1.5 z-50 animate-in fade-in zoom-in-95 duration-150 ${c(
-                            "bg-white border-gray-200 text-gray-800 shadow-xl",
-                            "bg-[#242424] border-zinc-800 text-gray-100 shadow-2xl"
-                          )}`}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowPlusMenu(false);
-                              startAudioRecording();
-                            }}
-                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${c(
-                              "hover:bg-gray-100",
-                              "hover:bg-zinc-800"
-                            )}`}
-                          >
-                            <Mic className="w-5 h-5 text-[#6952d7] dark:text-[#9f8dff]" />
-                            <span>Send a voice clip</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowPlusMenu(false);
-                              galleryInputRef.current?.click();
-                            }}
-                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${c(
-                              "hover:bg-gray-100",
-                              "hover:bg-zinc-800"
-                            )}`}
-                          >
-                            <ImageIcon className="w-5 h-5 text-[#6952d7] dark:text-[#9f8dff]" />
-                            <span>Attach a file up to 100 MB</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowPlusMenu(false);
-                              setActiveDesktopPopup("stickers");
-                            }}
-                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${c(
-                              "hover:bg-gray-100",
-                              "hover:bg-zinc-800"
-                            )}`}
-                          >
-                            <MessengerStickerIcon className="w-5 h-5 text-[#6952d7] dark:text-[#9f8dff]" />
-                            <span>Choose a sticker</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowPlusMenu(false);
-                              setActiveDesktopPopup("gifs");
-                            }}
-                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${c(
-                              "hover:bg-gray-100",
-                              "hover:bg-zinc-800"
-                            )}`}
-                          >
-                            <MessengerGifIcon className="w-5 h-5 text-[#6952d7] dark:text-[#9f8dff]" />
-                            <span>Choose a GIF</span>
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </div>
                 ) : (
-                  <div className="flex items-center gap-1 sm:gap-1.5">
+                  /* Mobile Action Buttons: (+) [Camera] [Gallery] [Mic] */
+                  <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+                    {/* Plus button with Popup Menu */}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setShowPlusMenu(!showPlusMenu)}
+                        className={`w-7 h-7 rounded-full bg-[#00d2ff] text-slate-950 flex items-center justify-center transition-all shadow-sm active:scale-95 cursor-pointer shrink-0 ${showPlusMenu ? "rotate-45" : ""
+                          }`}
+                        title="More actions"
+                      >
+                        <Plus className="w-4 h-4 stroke-[3]" />
+                      </button>
+
+                      {/* Popup Menu: Files, Location */}
+                      {showPlusMenu && (
+                        <>
+                          <div
+                            className="fixed inset-0 z-40"
+                            onClick={() => setShowPlusMenu(false)}
+                          />
+                          <div
+                            className={`absolute bottom-full left-0 mb-3 w-48 rounded-2xl shadow-2xl border p-2 z-50 animate-in fade-in zoom-in-95 duration-150 ${c(
+                              "bg-white border-gray-200 text-gray-800 shadow-xl",
+                              "bg-[#242424] border-zinc-800 text-gray-100 shadow-2xl"
+                            )}`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowPlusMenu(false);
+                                documentFileInputRef.current?.click();
+                              }}
+                              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${c(
+                                "hover:bg-gray-100",
+                                "hover:bg-zinc-800"
+                              )}`}
+                            >
+                              <Paperclip className="w-5 h-5 text-[#00d2ff]" />
+                              <span>Files</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowPlusMenu(false);
+                                handleSendLocation();
+                              }}
+                              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${c(
+                                "hover:bg-gray-100",
+                                "hover:bg-zinc-800"
+                              )}`}
+                            >
+                              <Navigation className="w-5 h-5 text-[#00d2ff]" />
+                              <span>Location</span>
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Camera button — opens full-screen live camera */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (showInputEmojiPicker) setShowInputEmojiPicker(false);
+                        if (showMobileGallery) setShowMobileGallery(false);
+                        setIsCameraModalOpen(true);
+                      }}
+                      className="w-7 h-7 flex items-center justify-center text-[#00d2ff] hover:bg-[#00d2ff]/10 active:scale-95 transition-all shrink-0 cursor-pointer"
+                      title="Live Camera"
+                    >
+                      <Camera className="w-[22px] h-[22px] stroke-[2.2]" />
+                    </button>
+
+                    {/* Gallery button - Opens real device photo & video library */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (showInputEmojiPicker) setShowInputEmojiPicker(false);
+                        setShowMobileGallery(false);
+                        galleryInputRef.current?.click();
+                      }}
+                      className="w-7 h-7 flex items-center justify-center text-[#00d2ff] hover:bg-[#00d2ff]/10 active:scale-95 transition-all shrink-0 cursor-pointer rounded-full"
+                      title="Open device gallery"
+                    >
+                      <MessengerGalleryIcon className="w-[22px] h-[22px]" />
+                    </button>
+
+                    {/* Mic button */}
                     <button
                       type="button"
                       onClick={startAudioRecording}
-                      className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-[#6952d7] dark:text-[#9f8dff] hover:bg-[#6952d7]/10 dark:hover:bg-[#9f8dff]/10 active:scale-95 transition-all shrink-0 cursor-pointer"
-                      title="Send a voice clip"
+                      className="w-7 h-7 flex items-center justify-center text-[#00d2ff] hover:bg-[#00d2ff]/10 active:scale-95 transition-all shrink-0 cursor-pointer"
+                      title="Record voice note"
                     >
-                      <Mic className="w-5 h-5" />
+                      <Mic className="w-[22px] h-[22px] stroke-[2.2]" />
                     </button>
-
-                    <button
-                      type="button"
-                      onClick={() => galleryInputRef.current?.click()}
-                      className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-[#6952d7] dark:text-[#9f8dff] hover:bg-[#6952d7]/10 dark:hover:bg-[#9f8dff]/10 active:scale-95 transition-all shrink-0 cursor-pointer"
-                      title="Attach a file up to 100 MB"
-                    >
-                      <ImageIcon className="w-5 h-5" />
-                    </button>
-
-                    <div className="relative shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveDesktopPopup(activeDesktopPopup === "stickers" ? null : "stickers");
-                          setShowInputEmojiPicker(false);
-                        }}
-                        className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer ${
-                          activeDesktopPopup === "stickers"
-                            ? "text-[#6952d7] dark:text-[#9f8dff] bg-[#6952d7]/15 dark:bg-[#9f8dff]/20 scale-105"
-                            : "text-[#6952d7] dark:text-[#9f8dff] hover:bg-[#6952d7]/10 dark:hover:bg-[#9f8dff]/10 active:scale-95"
-                        }`}
-                        title="Choose a sticker"
-                      >
-                        <MessengerStickerIcon className="w-5 h-5" />
-                      </button>
-
-                      {activeDesktopPopup === "stickers" && (
-                        <DesktopStickerPicker
-                          open={true}
-                          onClose={() => setActiveDesktopPopup(null)}
-                          onSelectSticker={(url) => {
-                            handleSendMessage(url, "sticker");
-                            setActiveDesktopPopup(null);
-                          }}
-                          darkMode={darkMode}
-                        />
-                      )}
-                    </div>
-
-                    <div className="relative shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveDesktopPopup(activeDesktopPopup === "gifs" ? null : "gifs");
-                          setShowInputEmojiPicker(false);
-                        }}
-                        className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer ${
-                          activeDesktopPopup === "gifs"
-                            ? "text-[#6952d7] dark:text-[#9f8dff] bg-[#6952d7]/15 dark:bg-[#9f8dff]/20 scale-105"
-                            : "text-[#6952d7] dark:text-[#9f8dff] hover:bg-[#6952d7]/10 dark:hover:bg-[#9f8dff]/10 active:scale-95"
-                        }`}
-                        title="Choose a GIF"
-                      >
-                        <MessengerGifIcon className="w-5 h-5" />
-                      </button>
-
-                      {activeDesktopPopup === "gifs" && (
-                        <DesktopGifPicker
-                          open={true}
-                          onClose={() => setActiveDesktopPopup(null)}
-                          onSelectGif={(url) => {
-                            handleSendMessage(url, "gif");
-                            setActiveDesktopPopup(null);
-                          }}
-                          darkMode={darkMode}
-                        />
-                      )}
-                    </div>
                   </div>
-                )}
-              </div>
-            )
-          )}
-
-          {/* Central Message Input Pill OR Voice Recording Capsule */}
-          <div
-            className={`flex-1 rounded-full flex items-center pl-3 pr-1 py-1.5 sm:px-4 sm:py-2.5 shadow-sm border transition-colors relative min-w-0 ${c(
-              "bg-white border-gray-200",
-              "bg-[#242424] border-zinc-800"
-            )}`}
-          >
-            {isRecordingAudio ? (
-              <div className="flex-1 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
-                  <span className="text-xs font-mono font-bold text-red-500">
-                    {Math.floor(recordingSeconds / 60)}:{(recordingSeconds % 60).toString().padStart(2, "0")}
-                  </span>
-                </div>
-
-                {/* Real-time fluctuating dynamic waveform */}
-                <div className="flex items-center gap-[2px] h-6 px-1 flex-1 justify-center max-w-[170px] mx-1">
-                  {liveWaveform.map((amp, i) => (
-                    <div
-                      key={i}
-                      className="w-[3px] bg-red-500 rounded-full transition-all duration-100"
-                      style={{ height: `${Math.max(4, Math.min(22, amp))}px` }}
-                    />
-                  ))}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    cancelAudioRecording();
-                  }}
-                  className="p-1 rounded-full text-muted-foreground hover:text-destructive hover:bg-red-500/10 transition-colors shrink-0"
-                  title="Cancel recording"
-                >
-                  <Trash2 className="w-4 h-4 text-red-400" />
-                </button>
-              </div>
-            ) : (
-              <>
-                <input
-                  type="text"
-                  ref={inputRef}
-                  value={inputText}
-                  onClick={() => {
-                    if (isMobile && showInputEmojiPicker) {
-                      setShowInputEmojiPicker(false);
-                    }
-                    if (isMobile && showMobileLeftIcons) {
-                      setShowMobileLeftIcons(false);
-                    }
-                  }}
-                  onFocus={() => {
-                    if (isMobile && showInputEmojiPicker) {
-                      setShowInputEmojiPicker(false);
-                    }
-                    if (isMobile && showMobileLeftIcons) {
-                      setShowMobileLeftIcons(false);
-                    }
-                  }}
-                  onChange={(e) => {
-                    setInputText(e.target.value);
-                    if (isMobile && showMobileLeftIcons) {
-                      setShowMobileLeftIcons(false);
-                    }
-                    if (e.target.value.trim()) {
-                      notifyMyTyping();
-                    } else {
-                      stopMyTyping();
-                    }
-                  }}
-                  onBlur={() => stopMyTyping()}
-                  onPaste={(e) => {
-                    const clipboardData = e.clipboardData;
-                    if (!clipboardData) return;
-
-                    // Check for pasted image/gif/video files from keyboard clipboard or desktop
-                    const items = clipboardData.items;
-                    const files: File[] = [];
-                    if (items) {
-                      for (let i = 0; i < items.length; i++) {
-                        const item = items[i];
-                        if (item.type.startsWith("image/") || item.type.startsWith("video/")) {
-                          const file = item.getAsFile();
-                          if (file) files.push(file);
-                        }
-                      }
-                    }
-                    if (files.length === 0 && clipboardData.files?.length) {
-                      for (let i = 0; i < clipboardData.files.length; i++) {
-                        const f = clipboardData.files[i];
-                        if (f.type.startsWith("image/") || f.type.startsWith("video/")) {
-                          files.push(f);
-                        }
-                      }
-                    }
-
-                    if (files.length > 0) {
-                      e.preventDefault();
-                      files.forEach((file) => {
-                        const reader = new FileReader();
-                        reader.onload = async () => {
-                          const dataUrl = reader.result as string;
-                          const isVideo = file.type.startsWith("video/");
-                          const isGif = file.type === "image/gif" || file.name.toLowerCase().endsWith(".gif");
-                          const isImage = file.type.startsWith("image/");
-                          const msgType = isVideo ? "video" : isGif ? "gif" : isImage ? "image" : "text";
-                          await handleSendMessage(dataUrl, msgType);
-                        };
-                        reader.readAsDataURL(file);
-                      });
-                      return;
-                    }
-
-                    // Check if pasted text is an image or GIF direct URL
-                    const text = clipboardData.getData("text")?.trim();
-                    if (text && text.match(/^https?:\/\/.+\.(gif|webp|png|jpg|jpeg)(\?.*)?$/i)) {
-                      e.preventDefault();
-                      const isGif = Boolean(text.match(/\.gif(\?.*)?$/i));
-                      handleSendMessage(text, isGif ? "gif" : "image");
-                    }
-                  }}
-                  placeholder={isMobile ? "Message" : "Aa"}
-                  className={`flex-1 bg-transparent outline-none font-medium min-w-0 text-[14px] sm:text-[15px] ${c(
-                    "text-gray-900 placeholder-gray-400",
-                    "text-gray-100 placeholder-gray-500"
-                  )}`}
-                />
-
-                {/* Right Icon Inside Message Capsule */}
-                <div className="relative shrink-0 ml-0.5 sm:ml-1.5">
-                  {isMobile ? (
-                    inputText.trim() ? (
-                      /* Mobile Typing: Search Icon inside capsule (Image 2) */
+                )
+              ) : (
+                /* DESKTOP (≥768px): Untouched desktop layout */
+                <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
+                  {inputText.trim() ? (
+                    <div className="relative">
                       <button
                         type="button"
-                        onClick={() => {
-                          inputRef.current?.blur();
-                          if (showMobileGallery) setShowMobileGallery(false);
-                          setMediaPickerInitialTab("emojis");
-                          setShowInputEmojiPicker(true);
-                        }}
-                        className="w-6 h-6 rounded-full flex items-center justify-center text-[#00d2ff] hover:bg-black/5 dark:hover:bg-white/10 active:scale-90 transition-all cursor-pointer"
-                        title="Search / Emojis"
+                        onClick={() => setShowPlusMenu(!showPlusMenu)}
+                        className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all shadow-sm cursor-pointer ${showPlusMenu
+                          ? "bg-[#6952d7] text-white rotate-45"
+                          : c("bg-gray-100 text-[#6952d7] hover:bg-gray-200", "bg-zinc-800 text-[#9f8dff] hover:bg-zinc-700")
+                          }`}
+                        title="Open actions"
                       >
-                        <Search className="w-3.5 h-3.5 stroke-[2.5]" />
+                        <Plus className="w-5 h-5 transition-transform duration-200" />
                       </button>
-                    ) : (
-                      /* Mobile Empty: Smiley Icon inside capsule (Image 1) */
+
+                      {showPlusMenu && (
+                        <>
+                          <div
+                            className="fixed inset-0 z-40"
+                            onClick={() => setShowPlusMenu(false)}
+                          />
+                          <div
+                            className={`absolute bottom-full left-0 mb-3 w-60 rounded-2xl shadow-2xl border p-1.5 z-50 animate-in fade-in zoom-in-95 duration-150 ${c(
+                              "bg-white border-gray-200 text-gray-800 shadow-xl",
+                              "bg-[#242424] border-zinc-800 text-gray-100 shadow-2xl"
+                            )}`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowPlusMenu(false);
+                                startAudioRecording();
+                              }}
+                              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${c(
+                                "hover:bg-gray-100",
+                                "hover:bg-zinc-800"
+                              )}`}
+                            >
+                              <Mic className="w-5 h-5 text-[#6952d7] dark:text-[#9f8dff]" />
+                              <span>Send a voice clip</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowPlusMenu(false);
+                                galleryInputRef.current?.click();
+                              }}
+                              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${c(
+                                "hover:bg-gray-100",
+                                "hover:bg-zinc-800"
+                              )}`}
+                            >
+                              <ImageIcon className="w-5 h-5 text-[#5841cb] dark:text-[#9f8dff]" />
+                              <span>Photos & Videos</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowPlusMenu(false);
+                                documentFileInputRef.current?.click();
+                              }}
+                              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${c(
+                                "hover:bg-gray-100",
+                                "hover:bg-zinc-800"
+                              )}`}
+                            >
+                              <Paperclip className="w-5 h-5 text-[#5841cb] dark:text-[#9f8dff]" />
+                              <span>Attach a file / Document</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowPlusMenu(false);
+                                setActiveDesktopPopup("stickers");
+                              }}
+                              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${c(
+                                "hover:bg-gray-100",
+                                "hover:bg-zinc-800"
+                              )}`}
+                            >
+                              <MessengerStickerIcon className="w-5 h-5 text-[#5841cb] dark:text-[#9f8dff]" />
+                              <span>Choose a sticker</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowPlusMenu(false);
+                                setActiveDesktopPopup("gifs");
+                              }}
+                              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${c(
+                                "hover:bg-gray-100",
+                                "hover:bg-zinc-800"
+                              )}`}
+                            >
+                              <MessengerGifIcon className="w-5 h-5 text-[#5841cb] dark:text-[#9f8dff]" />
+                              <span>Choose a GIF</span>
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                      {/* Mic Button */}
                       <button
                         type="button"
-                        onClick={() => {
-                          if (showInputEmojiPicker) {
+                        onClick={startAudioRecording}
+                        className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer shadow-xs active:scale-95 ${c(
+                          "bg-white/95 hover:bg-white text-[#523cc0] border border-gray-200/90 shadow-[0_1px_3px_rgba(0,0,0,0.08)] backdrop-blur-md hover:scale-105",
+                          "bg-[#242424]/90 hover:bg-[#2c2c2c] text-[#b5a7ff] border border-zinc-800 shadow-xs backdrop-blur-md hover:scale-105"
+                        )}`}
+                        title="Send a voice clip"
+                      >
+                        <Mic className="w-5 h-5 stroke-[2.2]" />
+                      </button>
+
+                      {/* Gallery / Photos Button */}
+                      <button
+                        type="button"
+                        onClick={() => galleryInputRef.current?.click()}
+                        className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer shadow-xs active:scale-95 ${c(
+                          "bg-white/95 hover:bg-white text-[#523cc0] border border-gray-200/90 shadow-[0_1px_3px_rgba(0,0,0,0.08)] backdrop-blur-md hover:scale-105",
+                          "bg-[#242424]/90 hover:bg-[#2c2c2c] text-[#b5a7ff] border border-zinc-800 shadow-xs backdrop-blur-md hover:scale-105"
+                        )}`}
+                        title="Attach photos or videos"
+                      >
+                        <ImageIcon className="w-5 h-5 stroke-[2.2]" />
+                      </button>
+
+                      {/* Stickers Button */}
+                      <div className="relative shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveDesktopPopup(activeDesktopPopup === "stickers" ? null : "stickers");
                             setShowInputEmojiPicker(false);
-                          } else {
+                          }}
+                          className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer shadow-xs active:scale-95 ${
+                            activeDesktopPopup === "stickers"
+                              ? c(
+                                  "bg-[#523cc0] text-white shadow-md ring-2 ring-[#523cc0]/30 scale-105",
+                                  "bg-[#9f8dff] text-zinc-950 shadow-md ring-2 ring-[#9f8dff]/40 scale-105"
+                                )
+                              : c(
+                                  "bg-white/95 hover:bg-white text-[#523cc0] border border-gray-200/90 shadow-[0_1px_3px_rgba(0,0,0,0.08)] backdrop-blur-md hover:scale-105",
+                                  "bg-[#242424]/90 hover:bg-[#2c2c2c] text-[#b5a7ff] border border-zinc-800 shadow-xs backdrop-blur-md hover:scale-105"
+                                )
+                          }`}
+                          title="Choose a sticker"
+                        >
+                          <MessengerStickerIcon className="w-5 h-5" />
+                        </button>
+
+                        {activeDesktopPopup === "stickers" && (
+                          <DesktopStickerPicker
+                            open={true}
+                            onClose={() => setActiveDesktopPopup(null)}
+                            onSelectSticker={(url) => {
+                              handleSendMessage(url, "sticker");
+                              setActiveDesktopPopup(null);
+                            }}
+                            darkMode={darkMode}
+                          />
+                        )}
+                      </div>
+
+                      {/* GIFs Button */}
+                      <div className="relative shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveDesktopPopup(activeDesktopPopup === "gifs" ? null : "gifs");
+                            setShowInputEmojiPicker(false);
+                          }}
+                          className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer shadow-xs active:scale-95 ${
+                            activeDesktopPopup === "gifs"
+                              ? c(
+                                  "bg-[#523cc0] text-white shadow-md ring-2 ring-[#523cc0]/30 scale-105",
+                                  "bg-[#9f8dff] text-zinc-950 shadow-md ring-2 ring-[#9f8dff]/40 scale-105"
+                                )
+                              : c(
+                                  "bg-white/95 hover:bg-white text-[#523cc0] border border-gray-200/90 shadow-[0_1px_3px_rgba(0,0,0,0.08)] backdrop-blur-md hover:scale-105",
+                                  "bg-[#242424]/90 hover:bg-[#2c2c2c] text-[#b5a7ff] border border-zinc-800 shadow-xs backdrop-blur-md hover:scale-105"
+                                )
+                          }`}
+                          title="Choose a GIF"
+                        >
+                          <MessengerGifIcon className="w-5 h-5" />
+                        </button>
+
+                        {activeDesktopPopup === "gifs" && (
+                          <DesktopGifPicker
+                            open={true}
+                            onClose={() => setActiveDesktopPopup(null)}
+                            onSelectGif={(url) => {
+                              handleSendMessage(url, "gif");
+                              setActiveDesktopPopup(null);
+                            }}
+                            darkMode={darkMode}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            )}
+
+            {/* Central Message Input Pill OR Voice Recording Capsule */}
+            <div
+              className={`flex-1 rounded-full flex items-center pl-3 pr-1 py-1.5 sm:px-4 sm:py-2.5 shadow-sm border transition-colors relative min-w-0 ${c(
+                "bg-white border-gray-200",
+                "bg-[#242424] border-zinc-800"
+              )}`}
+            >
+              {isRecordingAudio ? (
+                <div className="flex-1 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+                    <span className="text-xs font-mono font-bold text-red-500">
+                      {Math.floor(recordingSeconds / 60)}:{(recordingSeconds % 60).toString().padStart(2, "0")}
+                    </span>
+                  </div>
+
+                  {/* Real-time fluctuating dynamic waveform */}
+                  <div className="flex items-center gap-[2px] h-6 px-1 flex-1 justify-center max-w-[170px] mx-1">
+                    {liveWaveform.map((amp, i) => (
+                      <div
+                        key={i}
+                        className="w-[3px] bg-red-500 rounded-full transition-all duration-100"
+                        style={{ height: `${Math.max(4, Math.min(22, amp))}px` }}
+                      />
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      cancelAudioRecording();
+                    }}
+                    className="p-1 rounded-full text-muted-foreground hover:text-destructive hover:bg-red-500/10 transition-colors shrink-0"
+                    title="Cancel recording"
+                  >
+                    <Trash2 className="w-4 h-4 text-red-400" />
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    ref={inputRef}
+                    value={inputText}
+                    onClick={() => {
+                      if (isMobile && showInputEmojiPicker) {
+                        setShowInputEmojiPicker(false);
+                      }
+                      if (isMobile && showMobileLeftIcons) {
+                        setShowMobileLeftIcons(false);
+                      }
+                    }}
+                    onFocus={() => {
+                      if (isMobile && showInputEmojiPicker) {
+                        setShowInputEmojiPicker(false);
+                      }
+                      if (isMobile && showMobileLeftIcons) {
+                        setShowMobileLeftIcons(false);
+                      }
+                    }}
+                    onChange={(e) => {
+                      setInputText(e.target.value);
+                      if (isMobile && showMobileLeftIcons) {
+                        setShowMobileLeftIcons(false);
+                      }
+                      if (e.target.value.trim()) {
+                        notifyMyTyping();
+                      } else {
+                        stopMyTyping();
+                      }
+                    }}
+                    onBlur={() => stopMyTyping()}
+                    placeholder={isMobile ? "Message" : "Aa"}
+                    className={`flex-1 bg-transparent outline-none font-medium min-w-0 text-[14px] sm:text-[15px] ${c(
+                      "text-gray-900 placeholder-gray-400",
+                      "text-gray-100 placeholder-gray-500"
+                    )}`}
+                  />
+
+                  {/* Right Icon Inside Message Capsule */}
+                  <div className="relative shrink-0 ml-0.5 sm:ml-1.5">
+                    {isMobile ? (
+                      inputText.trim() ? (
+                        /* Mobile Typing: Search Icon inside capsule (Image 2) */
+                        <button
+                          type="button"
+                          onClick={() => {
                             inputRef.current?.blur();
                             if (showMobileGallery) setShowMobileGallery(false);
                             setMediaPickerInitialTab("emojis");
                             setShowInputEmojiPicker(true);
-                          }
-                        }}
-                        className={`w-6 h-6 rounded-full flex items-center justify-center transition-all cursor-pointer ${
-                          showInputEmojiPicker
-                            ? "text-[#00d2ff] scale-110"
-                            : "text-[#00d2ff] hover:scale-110 active:scale-90"
-                        }`}
-                        title="Choose an emoji"
-                      >
-                        <Smile className="w-4.5 h-4.5 stroke-[2.2]" />
-                      </button>
-                    )
-                  ) : (
-                    /* Desktop: Original Smile Button with Dedicated Desktop Emoji Picker Popup */
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveDesktopPopup(activeDesktopPopup === "emojis" ? null : "emojis");
-                          setShowInputEmojiPicker(false);
-                        }}
-                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer ${
-                          activeDesktopPopup === "emojis"
-                            ? "text-[#6952d7] dark:text-[#9f8dff] bg-[#6952d7]/15 dark:bg-[#9f8dff]/20 scale-105"
-                            : "text-[#6952d7] dark:text-[#9f8dff] hover:bg-black/5 dark:hover:bg-white/10 active:scale-95"
-                        }`}
-                        title="Choose an emoji"
-                      >
-                        <Smile className="w-5 h-5" />
-                      </button>
+                          }}
+                          className="w-6 h-6 rounded-full flex items-center justify-center text-[#00d2ff] hover:bg-black/5 dark:hover:bg-white/10 active:scale-90 transition-all cursor-pointer"
+                          title="Search / Emojis"
+                        >
+                          <Search className="w-3.5 h-3.5 stroke-[2.5]" />
+                        </button>
+                      ) : (
+                        /* Mobile Empty: Smiley Icon inside capsule (Image 1) */
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (showInputEmojiPicker) {
+                              setShowInputEmojiPicker(false);
+                            } else {
+                              inputRef.current?.blur();
+                              if (showMobileGallery) setShowMobileGallery(false);
+                              setMediaPickerInitialTab("emojis");
+                              setShowInputEmojiPicker(true);
+                            }
+                          }}
+                          className={`w-6 h-6 rounded-full flex items-center justify-center transition-all cursor-pointer ${showInputEmojiPicker
+                              ? "text-[#00d2ff] scale-110"
+                              : "text-[#00d2ff] hover:scale-110 active:scale-90"
+                            }`}
+                          title="Choose an emoji"
+                        >
+                          <Smile className="w-4.5 h-4.5 stroke-[2.2]" />
+                        </button>
+                      )
+                    ) : (
+                      /* Desktop: Original Smile Button with Dedicated Desktop Emoji Picker Popup */
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveDesktopPopup(activeDesktopPopup === "emojis" ? null : "emojis");
+                            setShowInputEmojiPicker(false);
+                          }}
+                          className={`w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer ${activeDesktopPopup === "emojis"
+                              ? c("text-white bg-[#523cc0] shadow-sm scale-105", "text-zinc-950 bg-[#9f8dff] shadow-sm scale-105")
+                              : c("text-[#523cc0] hover:text-[#412da7] hover:bg-black/5 active:scale-95", "text-[#9f8dff] hover:text-white hover:bg-white/10 active:scale-95")
+                            }`}
+                          title="Choose an emoji"
+                        >
+                          <Smile className="w-5 h-5 stroke-[2.2]" />
+                        </button>
 
-                      {activeDesktopPopup === "emojis" && (
-                        <DesktopEmojiPicker
-                          open={true}
-                          onClose={() => setActiveDesktopPopup(null)}
-                          onSelectEmoji={handleInsertEmoji}
-                          darkMode={darkMode}
-                          fullEmojiCategories={fullEmojiCategories}
-                          emojiTabIcons={emojiTabIcons}
-                        />
-                      )}
-                    </>
-                  )}
-                </div>
-              </>
+                        {activeDesktopPopup === "emojis" && (
+                          <DesktopEmojiPicker
+                            open={true}
+                            onClose={() => setActiveDesktopPopup(null)}
+                            onSelectEmoji={handleInsertEmoji}
+                            darkMode={darkMode}
+                            fullEmojiCategories={fullEmojiCategories}
+                            emojiTabIcons={emojiTabIcons}
+                          />
+                        )}
+                      </>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Right Outside Button */}
+            {isRecordingAudio ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  stopAndSendAudioRecording();
+                }}
+                className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[#0084ff] hover:bg-[#0073e6] active:scale-95 text-white flex items-center justify-center shrink-0 shadow-md transition-all"
+                title="Send voice note"
+              >
+                <Send className="w-5 h-5 ml-0.5" />
+              </button>
+            ) : inputText.trim() ? (
+              /* Send Button (when typing) */
+              <button
+                type="submit"
+                className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 transition-all ${isMobile
+                    ? "text-[#00d2ff] hover:scale-110 active:scale-90"
+                    : "bg-[#0084ff] hover:bg-[#0073e6] active:scale-95 text-white shadow-md"
+                  }`}
+                title="Send message"
+              >
+                <Send className="w-5 h-5 ml-0.5 stroke-[2.2]" />
+              </button>
+            ) : isMobile ? (
+              /* Mobile empty: Quick reaction emoji (😘) on right */
+              <button
+                type="button"
+                onClick={() => handleSendMessage(quickReactionEmoji, "text")}
+                className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 hover:scale-110 active:scale-90 transition-transform cursor-pointer select-none text-[22px] leading-none"
+                title={`Send quick reaction (${quickReactionEmoji})`}
+              >
+                <span className="leading-none select-none">{quickReactionEmoji}</span>
+              </button>
+            ) : (
+              /* Desktop empty: Quick reaction emoji */
+              <button
+                type="button"
+                onClick={handleSendQuickLike}
+                className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 hover:scale-115 active:scale-90 transition-transform cursor-pointer select-none text-2xl leading-none"
+                title={`Send quick reaction (${quickReactionEmoji})`}
+              >
+                <span className="leading-none select-none">{quickReactionEmoji}</span>
+              </button>
             )}
-          </div>
 
-          {/* Right Outside Button */}
-          {isRecordingAudio ? (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                stopAndSendAudioRecording();
-              }}
-              className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[#0084ff] hover:bg-[#0073e6] active:scale-95 text-white flex items-center justify-center shrink-0 shadow-md transition-all"
-              title="Send voice note"
-            >
-              <Send className="w-5 h-5 ml-0.5" />
-            </button>
-          ) : inputText.trim() ? (
-            /* Send Button (when typing) */
-            <button
-              type="submit"
-              className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 transition-all ${
-                isMobile
-                  ? "text-[#00d2ff] hover:scale-110 active:scale-90"
-                  : "bg-[#0084ff] hover:bg-[#0073e6] active:scale-95 text-white shadow-md"
-              }`}
-              title="Send message"
-            >
-              <Send className="w-5 h-5 ml-0.5 stroke-[2.2]" />
-            </button>
-          ) : isMobile ? (
-            /* Mobile empty: Quick reaction emoji (😘) on right */
-            <button
-              type="button"
-              onClick={() => handleSendMessage(quickReactionEmoji, "text")}
-              className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 hover:scale-110 active:scale-90 transition-transform cursor-pointer select-none text-[22px] leading-none"
-              title={`Send quick reaction (${quickReactionEmoji})`}
-            >
-              <span className="leading-none select-none">{quickReactionEmoji}</span>
-            </button>
-          ) : (
-            /* Desktop empty: Quick reaction emoji */
-            <button
-              type="button"
-              onClick={handleSendQuickLike}
-              className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 hover:scale-115 active:scale-90 transition-transform cursor-pointer select-none text-2xl leading-none"
-              title={`Send quick reaction (${quickReactionEmoji})`}
-            >
-              <span className="leading-none select-none">{quickReactionEmoji}</span>
-            </button>
-          )}
+            {/* Camera: photo-only, direct camera open on mobile */}
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              ref={cameraInputRef}
+              className="hidden"
+              onChange={handleFileUpload}
+            />
+            {/* Gallery: native device photo and video input */}
+            <input
+              type="file"
+              accept="image/*,video/*"
+              multiple
+              ref={galleryInputRef}
+              className="hidden"
+              onChange={handleFileUpload}
+            />
+            {/* Real Documents & Files: all formats (PDF, DOCX, ZIP, TXT, etc.) */}
+            <input
+              type="file"
+              accept="*/*"
+              multiple
+              ref={documentFileInputRef}
+              className="hidden"
+              onChange={handleDocumentUpload}
+            />
+          </form>
+        </div>
 
-          {/* Camera: photo-only, direct camera open on mobile */}
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            ref={cameraInputRef}
-            className="hidden"
-            onChange={handleFileUpload}
-          />
-          {/* Gallery: native device photo and video input */}
-          <input
-            type="file"
-            accept="image/*,video/*"
-            multiple
-            ref={galleryInputRef}
-            className="hidden"
-            onChange={handleFileUpload}
-          />
-        </form>
+        {/* Mobile Slide-Up Keyboard Replacement Media Picker Panel (<768px) */}
+        {!isDesktop && (
+          <AnimatePresence>
+            {showInputEmojiPicker && (
+              <MessengerMediaPicker
+                open={showInputEmojiPicker}
+                onClose={() => setShowInputEmojiPicker(false)}
+                initialTab={mediaPickerInitialTab}
+                onSelectEmoji={handleInsertEmoji}
+                onSelectSticker={(url) => {
+                  handleSendMessage(url, "sticker");
+                  setShowInputEmojiPicker(false);
+                }}
+                onSelectGif={(url) => {
+                  handleSendMessage(url, "gif");
+                  setShowInputEmojiPicker(false);
+                }}
+                onBackspace={handleBackspace}
+                darkMode={darkMode}
+                fullEmojiCategories={fullEmojiCategories}
+                emojiTabIcons={emojiTabIcons}
+              />
+            )}
+          </AnimatePresence>
+        )}
+
+        {/* Mobile Gallery Picker — Messenger-style bottom sheet (<768px) */}
+        {!isDesktop && (
+          <AnimatePresence>
+            {showMobileGallery && (
+              <MessengerGalleryPicker
+                open={showMobileGallery}
+                onClose={() => setShowMobileGallery(false)}
+                onSelectImage={(url, opts) => {
+                  handleSendMessage(url, "image");
+                  setShowMobileGallery(false);
+                }}
+                onOpenNativePicker={() => {
+                  setShowMobileGallery(false);
+                  galleryInputRef.current?.click();
+                }}
+                onOpenCamera={() => {
+                  setShowMobileGallery(false);
+                  setIsCameraModalOpen(true);
+                }}
+                chatPhotos={chatPhotos}
+                memoryPhotos={memoryPhotosList}
+                darkMode={darkMode}
+              />
+            )}
+          </AnimatePresence>
+        )}
       </div>
-
-      {/* Mobile Slide-Up Keyboard Replacement Media Picker Panel (<768px) */}
-      {!isDesktop && (
-        <AnimatePresence>
-          {showInputEmojiPicker && (
-            <MessengerMediaPicker
-              open={showInputEmojiPicker}
-              onClose={() => setShowInputEmojiPicker(false)}
-              initialTab={mediaPickerInitialTab}
-              onSelectEmoji={handleInsertEmoji}
-              onSelectSticker={(url) => {
-                handleSendMessage(url, "sticker");
-                setShowInputEmojiPicker(false);
-              }}
-              onSelectGif={(url) => {
-                handleSendMessage(url, "gif");
-                setShowInputEmojiPicker(false);
-              }}
-              onBackspace={handleBackspace}
-              darkMode={darkMode}
-              fullEmojiCategories={fullEmojiCategories}
-              emojiTabIcons={emojiTabIcons}
-            />
-          )}
-        </AnimatePresence>
-      )}
-
-      {/* Mobile Gallery Picker — Messenger-style bottom sheet (<768px) */}
-      {!isDesktop && (
-        <AnimatePresence>
-          {showMobileGallery && (
-            <MessengerGalleryPicker
-              open={showMobileGallery}
-              onClose={() => setShowMobileGallery(false)}
-              onSelectImage={(url, opts) => {
-                handleSendMessage(url, "image");
-                setShowMobileGallery(false);
-              }}
-              onOpenNativePicker={() => {
-                setShowMobileGallery(false);
-                galleryInputRef.current?.click();
-              }}
-              onOpenCamera={() => {
-                setShowMobileGallery(false);
-                setIsCameraModalOpen(true);
-              }}
-              chatPhotos={chatPhotos}
-              memoryPhotos={memoryPhotosList}
-              darkMode={darkMode}
-            />
-          )}
-        </AnimatePresence>
-      )}
-    </div>
     );
   };
 
@@ -5689,8 +5790,8 @@ export default function ChatPage() {
                   setSoundEffectsEnabled(checked);
                   try {
                     localStorage.setItem("duonexus_sound_effects", String(checked));
-                  } catch {}
-                  if (checked) sendAudioRef.current?.play().catch(() => {});
+                  } catch { }
+                  if (checked) sendAudioRef.current?.play().catch(() => { });
                 }}
                 className="data-[state=checked]:bg-primary"
               />
@@ -5713,7 +5814,7 @@ export default function ChatPage() {
                   setHdDefaultEnabled(checked);
                   try {
                     localStorage.setItem("duonexus_hd_default", String(checked));
-                  } catch {}
+                  } catch { }
                 }}
                 className="data-[state=checked]:bg-[#00d2ff]"
               />
@@ -6055,8 +6156,8 @@ export default function ChatPage() {
           isMe={
             mobileDeleteMessage
               ? (mobileDeleteMessage.senderRole && myId ? mobileDeleteMessage.senderRole === myId : false) ||
-                (mobileDeleteMessage.senderUid && user?.uid ? mobileDeleteMessage.senderUid === user?.uid : false) ||
-                mobileDeleteMessage.sender === "me"
+              (mobileDeleteMessage.senderUid && user?.uid ? mobileDeleteMessage.senderUid === user?.uid : false) ||
+              mobileDeleteMessage.sender === "me"
               : false
           }
           onClose={() => {
@@ -6101,11 +6202,10 @@ export default function ChatPage() {
                 left: `${desktopQuickReactionCoords.left}px`,
                 zIndex: 200,
               }}
-              className={`flex items-center gap-1 px-2.5 py-2 rounded-full shadow-2xl border animate-in fade-in zoom-in-95 duration-150 select-none ${
-                darkMode
+              className={`flex items-center gap-1 px-2.5 py-2 rounded-full shadow-2xl border animate-in fade-in zoom-in-95 duration-150 select-none ${darkMode
                   ? "bg-[#2A2726] border-zinc-700"
                   : "bg-white border-gray-200"
-              }`}
+                }`}
             >
               {quickReactions.slice(0, 6).map((emoji) => (
                 <button
@@ -6146,11 +6246,10 @@ export default function ChatPage() {
                   setActiveReactionMenu(null);
                   setDesktopQuickReactionCoords(null);
                 }}
-                className={`w-9 h-9 flex items-center justify-center rounded-full transition-all hover:scale-110 active:scale-95 ${
-                  darkMode
+                className={`w-9 h-9 flex items-center justify-center rounded-full transition-all hover:scale-110 active:scale-95 ${darkMode
                     ? "bg-zinc-700 text-gray-200 hover:bg-zinc-600"
                     : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                }`}
+                  }`}
                 title="More emoji"
               >
                 <Plus className="w-4 h-4" />
@@ -6184,11 +6283,10 @@ export default function ChatPage() {
                 left: `${desktopMenuCoords.left}px`,
                 zIndex: 200,
               }}
-              className={`w-48 rounded-xl shadow-2xl border py-1.5 animate-in fade-in zoom-in-95 duration-100 ${
-                darkMode
+              className={`w-48 rounded-xl shadow-2xl border py-1.5 animate-in fade-in zoom-in-95 duration-100 ${darkMode
                   ? "bg-[#2A2726] border-zinc-700 text-gray-100"
                   : "bg-white border-gray-200 text-gray-900"
-              }`}
+                }`}
             >
               {/* Reply */}
               {!menuMsg.isDeleted && (
@@ -6201,9 +6299,8 @@ export default function ChatPage() {
                     setDesktopMenuCoords(null);
                     inputRef.current?.focus();
                   }}
-                  className={`w-full px-4 py-2 flex items-center gap-3 text-left transition-colors ${
-                    darkMode ? "hover:bg-zinc-800 text-gray-200" : "hover:bg-gray-50 text-gray-800"
-                  }`}
+                  className={`w-full px-4 py-2 flex items-center gap-3 text-left transition-colors ${darkMode ? "hover:bg-zinc-800 text-gray-200" : "hover:bg-gray-50 text-gray-800"
+                    }`}
                 >
                   <CornerUpLeft className="w-4 h-4 text-blue-500" />
                   <span className="text-[14px] font-medium">Reply</span>
@@ -6217,9 +6314,8 @@ export default function ChatPage() {
                     e.stopPropagation();
                     handleCopy(menuMsg.id, menuMsgContent);
                   }}
-                  className={`w-full px-4 py-2 flex items-center gap-3 text-left transition-colors ${
-                    darkMode ? "hover:bg-zinc-800 text-gray-200" : "hover:bg-gray-50 text-gray-800"
-                  }`}
+                  className={`w-full px-4 py-2 flex items-center gap-3 text-left transition-colors ${darkMode ? "hover:bg-zinc-800 text-gray-200" : "hover:bg-gray-50 text-gray-800"
+                    }`}
                 >
                   {copiedMessageId === menuMsg.id ? (
                     <>
@@ -6244,9 +6340,8 @@ export default function ChatPage() {
                     setActiveMessageMenu(null);
                     setDesktopMenuCoords(null);
                   }}
-                  className={`w-full px-4 py-2 flex items-center gap-3 text-left transition-colors ${
-                    darkMode ? "hover:bg-zinc-800 text-red-400" : "hover:bg-gray-50 text-red-600"
-                  }`}
+                  className={`w-full px-4 py-2 flex items-center gap-3 text-left transition-colors ${darkMode ? "hover:bg-zinc-800 text-red-400" : "hover:bg-gray-50 text-red-600"
+                    }`}
                 >
                   <Trash2 className="w-4 h-4" />
                   <span className="text-[14px] font-medium">Unsend for everyone</span>
@@ -6261,9 +6356,8 @@ export default function ChatPage() {
                   setActiveMessageMenu(null);
                   setDesktopMenuCoords(null);
                 }}
-                className={`w-full px-4 py-2 flex items-center gap-3 text-left transition-colors ${
-                  darkMode ? "hover:bg-zinc-800 text-red-400" : "hover:bg-gray-50 text-red-600"
-                }`}
+                className={`w-full px-4 py-2 flex items-center gap-3 text-left transition-colors ${darkMode ? "hover:bg-zinc-800 text-red-400" : "hover:bg-gray-50 text-red-600"
+                  }`}
               >
                 <Trash2 className="w-4 h-4" />
                 <span className="text-[14px] font-medium">Remove for you</span>
@@ -6301,170 +6395,169 @@ export default function ChatPage() {
                 "bg-[#202c33] border-[#313d45] text-gray-100"
               )}`}
             >
-            {/* Tooltip caret pointing toward the Smile button */}
-            <div
-              style={{ left: `${desktopPickerCoords.caretLeft}px` }}
-              className={`absolute w-0 h-0 border-x-[8px] border-x-transparent pointer-events-none -translate-x-1/2 ${
-                desktopPickerCoords.placement === "up"
-                  ? `-bottom-2 border-t-[8px] border-b-0 ${c("border-t-white", "border-t-[#202c33]")}`
-                  : `-top-2 border-b-[8px] border-t-0 ${c("border-b-white", "border-b-[#202c33]")}`
-              }`}
-            />
+              {/* Tooltip caret pointing toward the Smile button */}
+              <div
+                style={{ left: `${desktopPickerCoords.caretLeft}px` }}
+                className={`absolute w-0 h-0 border-x-[8px] border-x-transparent pointer-events-none -translate-x-1/2 ${desktopPickerCoords.placement === "up"
+                    ? `-bottom-2 border-t-[8px] border-b-0 ${c("border-t-white", "border-t-[#202c33]")}`
+                    : `-top-2 border-b-[8px] border-t-0 ${c("border-b-white", "border-b-[#202c33]")}`
+                  }`}
+              />
 
-            {/* Search Header */}
-            <div className={`p-3 pb-2 shrink-0 border-b ${c("border-gray-100", "border-zinc-800/80")}`}>
-              <div className={`flex items-center px-3.5 py-1.5 rounded-xl ${c("bg-[#f0f2f5] text-gray-800", "bg-[#111b21] text-gray-200")}`}>
-                <Search className="w-4 h-4 mr-2.5 text-gray-400 shrink-0" />
-                <input
-                  type="text"
-                  placeholder="Search emoji"
-                  value={emojiSearchQuery}
-                  onChange={(e) => setEmojiSearchQuery(e.target.value)}
-                  className="bg-transparent outline-none text-[13.5px] w-full placeholder:text-gray-400"
-                  autoFocus
-                />
-                {emojiSearchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setEmojiSearchQuery("")}
-                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 ml-1"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
+              {/* Search Header */}
+              <div className={`p-3 pb-2 shrink-0 border-b ${c("border-gray-100", "border-zinc-800/80")}`}>
+                <div className={`flex items-center px-3.5 py-1.5 rounded-xl ${c("bg-[#f0f2f5] text-gray-800", "bg-[#111b21] text-gray-200")}`}>
+                  <Search className="w-4 h-4 mr-2.5 text-gray-400 shrink-0" />
+                  <input
+                    type="text"
+                    placeholder="Search emoji"
+                    value={emojiSearchQuery}
+                    onChange={(e) => setEmojiSearchQuery(e.target.value)}
+                    className="bg-transparent outline-none text-[13.5px] w-full placeholder:text-gray-400"
+                    autoFocus
+                  />
+                  {emojiSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setEmojiSearchQuery("")}
+                      className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 ml-1"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
 
-            {/* Your reactions / Customise Header */}
-            <div className="px-3.5 pt-2 pb-1 flex items-center justify-between shrink-0">
-              <span className="text-[13px] font-medium text-gray-500 dark:text-gray-400">
-                {isCustomizingReactions ? "Choose slot to customize:" : "Your reactions"}
-              </span>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsCustomizingReactions(!isCustomizingReactions);
-                }}
-                className="text-[13px] font-semibold text-gray-800 dark:text-gray-200 hover:text-emerald-600 dark:hover:text-emerald-400 cursor-pointer"
-              >
-                {isCustomizingReactions ? "Done" : "Customise"}
-              </button>
-            </div>
-
-            {/* 6 Quick Reaction Emojis */}
-            <div className="px-3 pb-2 flex items-center justify-between shrink-0">
-              {quickReactions.slice(0, 6).map((emoji, slotIdx) => (
+              {/* Your reactions / Customise Header */}
+              <div className="px-3.5 pt-2 pb-1 flex items-center justify-between shrink-0">
+                <span className="text-[13px] font-medium text-gray-500 dark:text-gray-400">
+                  {isCustomizingReactions ? "Choose slot to customize:" : "Your reactions"}
+                </span>
                 <button
-                  key={slotIdx}
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (isCustomizingReactions) {
-                      setSelectedCustomizeSlot(slotIdx);
-                    } else {
-                      handleReact(activeFullEmojiPicker, emoji);
-                      setActiveFullEmojiPicker(null);
-                      setDesktopPickerCoords(null);
-                    }
+                    setIsCustomizingReactions(!isCustomizingReactions);
                   }}
-                  className={cn(
-                    "w-10 h-10 flex items-center justify-center text-[26px] rounded-xl transition-all",
-                    isCustomizingReactions && selectedCustomizeSlot === slotIdx
-                      ? "ring-2 ring-emerald-500 bg-emerald-500/15 scale-110"
-                      : "hover:scale-125 hover:bg-black/5 dark:hover:bg-white/5 active:scale-95 cursor-pointer"
-                  )}
-                  title={isCustomizingReactions ? `Slot ${slotIdx + 1}` : emoji}
+                  className="text-[13px] font-semibold text-gray-800 dark:text-gray-200 hover:text-emerald-600 dark:hover:text-emerald-400 cursor-pointer"
                 >
-                  {emoji}
+                  {isCustomizingReactions ? "Done" : "Customise"}
                 </button>
-              ))}
-            </div>
+              </div>
 
-            {/* Category Title / Search Status */}
-            <div className="px-3.5 pt-1 pb-1 shrink-0">
-              <span className="text-[13px] font-medium text-gray-500 dark:text-gray-400">
-                {emojiSearchQuery ? "Search Results" : emojiActiveCategory}
-              </span>
-            </div>
-
-            {/* Emoji Grid (6 columns) — scrollable */}
-            <div
-              className="flex-1 overflow-y-auto px-3 pb-2 scrollbar-thin"
-              onWheel={(e) => e.stopPropagation()}
-            >
-              {(() => {
-                const displayEmojis = emojiSearchQuery.trim()
-                  ? searchEmojis(
-                    emojiSearchQuery,
-                    Object.values(fullEmojiCategories).flat()
-                  )
-                  : fullEmojiCategories[emojiActiveCategory] || [];
-
-                if (displayEmojis.length === 0) {
-                  return (
-                    <div className="flex flex-col items-center justify-center h-28 text-center text-xs text-muted-foreground">
-                      No emoji found
-                    </div>
-                  );
-                }
-
-                return (
-                  <div className="grid grid-cols-6 gap-1 justify-items-center">
-                    {displayEmojis.map((emoji) => (
-                      <button
-                        key={emoji}
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (isCustomizingReactions) {
-                            const updated = [...quickReactions];
-                            updated[selectedCustomizeSlot] = emoji;
-                            setQuickReactions(updated);
-                            try {
-                              localStorage.setItem("customReactions", JSON.stringify(updated));
-                            } catch { }
-                            setSelectedCustomizeSlot((prev) => (prev + 1) % 6);
-                          } else {
-                            handleReact(activeFullEmojiPicker, emoji);
-                            setActiveFullEmojiPicker(null);
-                            setDesktopPickerCoords(null);
-                          }
-                        }}
-                        className="w-10 h-10 flex items-center justify-center text-[24px] rounded-xl hover:scale-125 hover:bg-black/5 dark:hover:bg-white/5 active:scale-95 transition-transform cursor-pointer"
-                      >
-                        {emoji}
-                      </button>
-                    ))}
-                  </div>
-                );
-              })()}
-            </div>
-
-            {/* Bottom Category Icon Bar (WhatsApp style, hidden when searching) */}
-            {!emojiSearchQuery && (
-              <div className={`flex items-center justify-between px-2 py-1.5 border-t shrink-0 relative z-10 ${c("border-gray-100 bg-[#f9fafb]", "border-[#2a3942] bg-[#111b21]")}`}>
-                {emojiTabIcons.map((tab) => (
+              {/* 6 Quick Reaction Emojis */}
+              <div className="px-3 pb-2 flex items-center justify-between shrink-0">
+                {quickReactions.slice(0, 6).map((emoji, slotIdx) => (
                   <button
-                    key={tab.key}
+                    key={slotIdx}
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setEmojiActiveCategory(tab.key);
+                      if (isCustomizingReactions) {
+                        setSelectedCustomizeSlot(slotIdx);
+                      } else {
+                        handleReact(activeFullEmojiPicker, emoji);
+                        setActiveFullEmojiPicker(null);
+                        setDesktopPickerCoords(null);
+                      }
                     }}
                     className={cn(
-                      "w-8 h-8 flex items-center justify-center rounded-lg transition-colors text-xs cursor-pointer",
-                      emojiActiveCategory === tab.key
-                        ? c("text-emerald-600 bg-emerald-50 font-bold", "text-emerald-400 bg-emerald-950/40 font-bold")
-                        : "text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+                      "w-10 h-10 flex items-center justify-center text-[26px] rounded-xl transition-all",
+                      isCustomizingReactions && selectedCustomizeSlot === slotIdx
+                        ? "ring-2 ring-emerald-500 bg-emerald-500/15 scale-110"
+                        : "hover:scale-125 hover:bg-black/5 dark:hover:bg-white/5 active:scale-95 cursor-pointer"
                     )}
-                    title={tab.label}
+                    title={isCustomizingReactions ? `Slot ${slotIdx + 1}` : emoji}
                   >
-                    {tab.icon}
+                    {emoji}
                   </button>
                 ))}
               </div>
-            )}
+
+              {/* Category Title / Search Status */}
+              <div className="px-3.5 pt-1 pb-1 shrink-0">
+                <span className="text-[13px] font-medium text-gray-500 dark:text-gray-400">
+                  {emojiSearchQuery ? "Search Results" : emojiActiveCategory}
+                </span>
+              </div>
+
+              {/* Emoji Grid (6 columns) — scrollable */}
+              <div
+                className="flex-1 overflow-y-auto px-3 pb-2 scrollbar-thin"
+                onWheel={(e) => e.stopPropagation()}
+              >
+                {(() => {
+                  const displayEmojis = emojiSearchQuery.trim()
+                    ? searchEmojis(
+                      emojiSearchQuery,
+                      Object.values(fullEmojiCategories).flat()
+                    )
+                    : fullEmojiCategories[emojiActiveCategory] || [];
+
+                  if (displayEmojis.length === 0) {
+                    return (
+                      <div className="flex flex-col items-center justify-center h-28 text-center text-xs text-muted-foreground">
+                        No emoji found
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="grid grid-cols-6 gap-1 justify-items-center">
+                      {displayEmojis.map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isCustomizingReactions) {
+                              const updated = [...quickReactions];
+                              updated[selectedCustomizeSlot] = emoji;
+                              setQuickReactions(updated);
+                              try {
+                                localStorage.setItem("customReactions", JSON.stringify(updated));
+                              } catch { }
+                              setSelectedCustomizeSlot((prev) => (prev + 1) % 6);
+                            } else {
+                              handleReact(activeFullEmojiPicker, emoji);
+                              setActiveFullEmojiPicker(null);
+                              setDesktopPickerCoords(null);
+                            }
+                          }}
+                          className="w-10 h-10 flex items-center justify-center text-[24px] rounded-xl hover:scale-125 hover:bg-black/5 dark:hover:bg-white/5 active:scale-95 transition-transform cursor-pointer"
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Bottom Category Icon Bar (WhatsApp style, hidden when searching) */}
+              {!emojiSearchQuery && (
+                <div className={`flex items-center justify-between px-2 py-1.5 border-t shrink-0 relative z-10 ${c("border-gray-100 bg-[#f9fafb]", "border-[#2a3942] bg-[#111b21]")}`}>
+                  {emojiTabIcons.map((tab) => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEmojiActiveCategory(tab.key);
+                      }}
+                      className={cn(
+                        "w-8 h-8 flex items-center justify-center rounded-lg transition-colors text-xs cursor-pointer",
+                        emojiActiveCategory === tab.key
+                          ? c("text-emerald-600 bg-emerald-50 font-bold", "text-emerald-400 bg-emerald-950/40 font-bold")
+                          : "text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+                      )}
+                      title={tab.label}
+                    >
+                      {tab.icon}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>{/* end picker panel */}
           </div>{/* end backdrop wrapper */}
         </>
