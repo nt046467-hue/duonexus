@@ -88,23 +88,26 @@ export function MobileSelectionHeader({
 
   return (
     <div
-      className={cn(
-        "flex items-center justify-between w-full h-full px-2 animate-in fade-in duration-150 select-none transition-colors",
-        isDark
-          ? "text-white bg-[#1f2c34]"
-          : "text-gray-900 bg-white border-b border-gray-200 shadow-xs"
-      )}
+      onClick={(e) => e.stopPropagation()}
+      onTouchStart={(e) => e.stopPropagation()}
+      className="flex items-center justify-between w-full h-full px-1 animate-in fade-in duration-150 select-none"
     >
       {/* Left: Back / Deselect + Count */}
       <div className="flex items-center gap-3">
         <button
           type="button"
-          onClick={onClearSelection}
+          onClick={(e) => {
+            e.stopPropagation();
+            onClearSelection();
+          }}
+          onTouchEnd={(e) => {
+            e.stopPropagation();
+          }}
           className={cn(
             "w-9 h-9 flex items-center justify-center rounded-full active:scale-95 transition-colors cursor-pointer",
             isDark
-              ? "text-white hover:bg-white/10"
-              : "text-gray-700 hover:bg-gray-100"
+              ? "text-white hover:bg-white/10 active:bg-white/20"
+              : "text-gray-700 hover:bg-gray-100 active:bg-gray-200"
           )}
           title="Clear selection"
         >
@@ -112,7 +115,7 @@ export function MobileSelectionHeader({
         </button>
         <span
           className={cn(
-            "text-[19px] font-semibold tracking-wide",
+            "text-[19px] font-semibold tracking-wide select-none",
             isDark ? "text-white" : "text-gray-900"
           )}
         >
@@ -125,12 +128,18 @@ export function MobileSelectionHeader({
         {/* Reply */}
         <button
           type="button"
-          onClick={onReply}
+          onClick={(e) => {
+            e.stopPropagation();
+            onReply();
+          }}
+          onTouchEnd={(e) => {
+            e.stopPropagation();
+          }}
           className={cn(
             "w-9 h-9 flex items-center justify-center rounded-full active:scale-95 transition-colors cursor-pointer",
             isDark
-              ? "text-white hover:bg-white/10"
-              : "text-gray-700 hover:bg-gray-100"
+              ? "text-white hover:bg-white/10 active:bg-white/20"
+              : "text-gray-700 hover:bg-gray-100 active:bg-gray-200"
           )}
           title="Reply"
         >
@@ -140,12 +149,18 @@ export function MobileSelectionHeader({
         {/* Delete */}
         <button
           type="button"
-          onClick={onDelete}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          onTouchEnd={(e) => {
+            e.stopPropagation();
+          }}
           className={cn(
             "w-9 h-9 flex items-center justify-center rounded-full active:scale-95 transition-colors cursor-pointer",
             isDark
-              ? "text-white hover:bg-white/10"
-              : "text-gray-700 hover:bg-gray-100 hover:text-red-500"
+              ? "text-white hover:bg-white/10 active:bg-white/20"
+              : "text-gray-700 hover:bg-gray-100 active:bg-gray-200 hover:text-red-500"
           )}
           title="Delete"
         >
@@ -157,11 +172,13 @@ export function MobileSelectionHeader({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
+              onClick={(e) => e.stopPropagation()}
+              onTouchEnd={(e) => e.stopPropagation()}
               className={cn(
                 "w-9 h-9 flex items-center justify-center rounded-full active:scale-95 transition-colors cursor-pointer",
                 isDark
-                  ? "text-white hover:bg-white/10"
-                  : "text-gray-700 hover:bg-gray-100"
+                  ? "text-white hover:bg-white/10 active:bg-white/20"
+                  : "text-gray-700 hover:bg-gray-100 active:bg-gray-200"
               )}
               title="More options"
             >
@@ -171,14 +188,16 @@ export function MobileSelectionHeader({
           <DropdownMenuContent
             align="end"
             className={cn(
-              "w-48 py-1.5 rounded-2xl shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100 border",
+              "w-48 py-1.5 rounded-2xl shadow-2xl z-[150] animate-in fade-in zoom-in-95 duration-100 border",
               isDark
                 ? "bg-[#233138] border-[#2a3942] text-white"
                 : "bg-white border-gray-200 text-gray-800 shadow-xl"
             )}
+            onClick={(e) => e.stopPropagation()}
           >
             <DropdownMenuItem
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 setShowMenu(false);
                 onOpenInfo();
               }}
@@ -194,7 +213,8 @@ export function MobileSelectionHeader({
             </DropdownMenuItem>
 
             <DropdownMenuItem
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 setShowMenu(false);
                 onCopy();
               }}
@@ -828,6 +848,8 @@ export function MobileDeleteMessageModal({
   open,
   message,
   myId,
+  userUid,
+  isMe: isMeProp,
   onClose,
   onDeleteForEveryone,
   onDeleteForMe,
@@ -836,6 +858,8 @@ export function MobileDeleteMessageModal({
   open: boolean;
   message: MobileInteractionMessage | null;
   myId: string;
+  userUid?: string;
+  isMe?: boolean;
   onClose: () => void;
   onDeleteForEveryone: (id: string) => void;
   onDeleteForMe: (id: string) => void;
@@ -844,8 +868,11 @@ export function MobileDeleteMessageModal({
   if (!open || !message) return null;
 
   const isMe =
-    message.senderRole === myId ||
-    message.sender === "me";
+    isMeProp !== undefined
+      ? isMeProp
+      : (message.senderRole && myId ? message.senderRole === myId : false) ||
+        (message.senderUid && userUid ? message.senderUid === userUid : false) ||
+        message.sender === "me";
 
   return (
     <div
@@ -861,6 +888,7 @@ export function MobileDeleteMessageModal({
         )}
         style={{ paddingBottom: "max(1.25rem, env(safe-area-inset-bottom))" }}
         onClick={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
       >
         {/* Header Icon + Title */}
         <div className="flex items-center gap-3.5 mb-2">
@@ -894,7 +922,8 @@ export function MobileDeleteMessageModal({
           {isMe && !message.isDeleted && (
             <button
               type="button"
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 onDeleteForEveryone(message.id);
                 onClose();
               }}
@@ -907,7 +936,8 @@ export function MobileDeleteMessageModal({
 
           <button
             type="button"
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               onDeleteForMe(message.id);
               onClose();
             }}
@@ -923,7 +953,10 @@ export function MobileDeleteMessageModal({
 
           <button
             type="button"
-            onClick={onClose}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
             className={cn(
               "w-full py-2.5 px-4 rounded-xl font-medium text-[13px] active:scale-[0.98] transition-all flex items-center justify-center cursor-pointer mt-0.5",
               isDark ? "text-[#8696a0] hover:text-white" : "text-gray-500 hover:text-gray-800"

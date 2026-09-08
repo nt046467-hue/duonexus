@@ -3249,10 +3249,11 @@ export default function ChatPage() {
 
         {/* Top Header */}
         <header
-          className={`px-3 sm:px-4 pb-3 flex items-end justify-between border-b z-20 transition-colors duration-300 min-h-[65px] backdrop-blur-md ${c(
-            "bg-[#F6F5F0]/85 border-gray-200/80",
-            "bg-[#18181A]/85 border-zinc-800/80"
-          )}`}
+          className={`px-3 sm:px-4 pb-3 flex items-end justify-between border-b transition-colors duration-300 min-h-[65px] backdrop-blur-md ${
+            isMobile && selectedMobileMessage
+              ? `z-[80] ${c("bg-white border-gray-200", "bg-[#1f2c34] border-[#2a3942]")}`
+              : `z-20 ${c("bg-[#F6F5F0]/85 border-gray-200/80", "bg-[#18181A]/85 border-zinc-800/80")}`
+          }`}
           style={{ paddingTop: isMobile ? "max(0.75rem, env(safe-area-inset-top))" : "0.75rem" }}
         >
         {isSearching ? (
@@ -5910,7 +5911,7 @@ export default function ChatPage() {
       />
 
       {/* Mobile-Only WhatsApp Floating Quick Reaction Pill (Fixed Viewport, Never Clipped) */}
-      {isMobile && selectedMobileMessage && mobilePillCoords && !isMobileReactionSheetOpen && (
+      {isMobile && selectedMobileMessage && mobilePillCoords && !isMobileReactionSheetOpen && !mobileDeleteMessage && (
         <>
           {/* Backdrop to tap outside and dismiss selection */}
           <div
@@ -6000,6 +6001,14 @@ export default function ChatPage() {
           open={!!mobileDeleteMessage}
           message={mobileDeleteMessage}
           myId={myId}
+          userUid={user?.uid}
+          isMe={
+            mobileDeleteMessage
+              ? (mobileDeleteMessage.senderRole && myId ? mobileDeleteMessage.senderRole === myId : false) ||
+                (mobileDeleteMessage.senderUid && user?.uid ? mobileDeleteMessage.senderUid === user?.uid : false) ||
+                mobileDeleteMessage.sender === "me"
+              : false
+          }
           onClose={() => {
             setMobileDeleteMessage(null);
             selectMobileMsg(null);
