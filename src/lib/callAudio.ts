@@ -1,22 +1,41 @@
 /**
  * callAudio.ts — DuoNexus Calling Audio Engine
  *
- * Production Zero-Sound-Effects Policy:
- * - Only the incoming ringtone is allowed during the ringing phase.
- * - Zero artificial sounds, dial tones, connected chimes, or ended beeps.
- * - Stops immediately when accepted, declined, timed out, or cancelled.
+ * Production Lifecycle-Driven Audio Architecture:
+ * - Incoming Ringtone: Authentically plays /sounds/ringtone.mp3 tied directly to callId.
+ * - Outgoing Tone: Synthesizes standard PBX/VoIP ringback tone (440Hz + 480Hz pulses) using Web Audio API for caller.
+ * - Zero Artificial Sounds: No dial beeps, connected chimes, or ended sounds during active calls.
+ * - Autoplay Guard: Automatically unlocks on first touch/click if browser blocks autoplay.
+ * - Strictly Idempotent: Safe to invoke repeatedly or out of order.
  */
 
+// Track active audio sessions tied to call IDs
+let activeRingtoneCallId: string | null = null;
 let ringAudio: HTMLAudioElement | null = null;
+let autoplayUnlockListener: (() => void) | null = null;
+
+// Outgoing ringback oscillator context
+let activeOutgoingCallId: string | null = null;
+let outgoingAudioContext: AudioContext | null = null;
+let outgoingTimer: ReturnType<typeof setInterval> | null = null;
+let outgoingNodes: { osc1: OscillatorNode; osc2: OscillatorNode; gain: GainNode } | null = null;
 
 /**
- * Start the incoming call ringtone.
- * Uses the authentic /sounds/ringtone.mp3 asset with seamless looping.
+ * Start incoming call ringtone tied to a specific callId.
  */
-export function startRingtone(): void {
-  stopRingtone();
-
+export function startRingtone(callId: string = "default"): void {
   if (typeof window === "undefined") return;
+
+  // If already playing for this exact call, avoid recreating
+  if (activeRingtoneCallId === callId && ringAudio && !ringAudio.paused) {
+    return;
+  }
+
+  // Stop any previous ringtone or outgoing sound
+  stopRingtone();
+  stopOutgoingTone();
+
+  activeRingtoneCallId = callId;
 
   try {
     const audio = new Audio("/sounds/ringtone.mp3");
@@ -27,39 +46,187 @@ export function startRingtone(): void {
     const playPromise = audio.play();
     if (playPromise !== undefined) {
       playPromise.catch((err) => {
-        // Autoplay may be restricted until user interacts with the document
-        console.warn("[callAudio] Autoplay blocked ringtone until user interaction:", err);
+        console.warn("[callAudio] Autoplay blocked ringtone until user interaction:", err.name);
+
+        // Register one-time document unlock handler
+        if (!autoplayUnlockListener) {
+          autoplayUnlockListener = () => {
+            if (activeRingtoneCallId === callId && ringAudio) {
+              ringAudio.play().catch(() => {});
+            }
+            removeAutoplayUnlockListener();
+          };
+          window.addEventListener("pointerdown", autoplayUnlockListener, { once: true });
+          window.addEventListener("keydown", autoplayUnlockListener, { once: true });
+        }
       });
     }
   } catch (err) {
     console.warn("[callAudio] Failed to initialize ringtone audio:", err);
     ringAudio = null;
+    activeRingtoneCallId = null;
+  }
+}
+
+function removeAutoplayUnlockListener(): void {
+  if (autoplayUnlockListener && typeof window !== "undefined") {
+    window.removeEventListener("pointerdown", autoplayUnlockListener);
+    window.removeEventListener("keydown", autoplayUnlockListener);
+    autoplayUnlockListener = null;
   }
 }
 
 /**
- * Stop and release the incoming call ringtone.
- * Strictly idempotent — safe to call multiple times.
+ * Stop incoming ringtone. If callId is provided, only stops if matching.
  */
-export function stopRingtone(): void {
+export function stopRingtone(callId?: string): void {
+  if (callId && activeRingtoneCallId && activeRingtoneCallId !== callId) {
+    return;
+  }
+
+  removeAutoplayUnlockListener();
+
   if (ringAudio) {
     try {
       ringAudio.pause();
       ringAudio.currentTime = 0;
       ringAudio.src = "";
     } catch {
-      // Ignored: cleanup failure is non-fatal
+      // Non-fatal cleanup
     }
     ringAudio = null;
+  }
+
+  activeRingtoneCallId = null;
+}
+
+/**
+ * Start synthesized outgoing ringback tone for caller (440Hz + 480Hz, 1.5s on, 3.5s off).
+ */
+export function startOutgoingTone(callId: string = "default"): void {
+  if (typeof window === "undefined") return;
+
+  if (activeOutgoingCallId === callId && outgoingAudioContext) {
+    return;
+  }
+
+  stopOutgoingTone();
+  stopRingtone();
+
+  activeOutgoingCallId = callId;
+
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+
+    const ctx = new AudioCtx();
+    outgoingAudioContext = ctx;
+
+    const playTonePulse = () => {
+      if (!outgoingAudioContext || outgoingAudioContext.state === "closed" || activeOutgoingCallId !== callId) {
+        return;
+      }
+
+      if (outgoingAudioContext.state === "suspended") {
+        outgoingAudioContext.resume().catch(() => {});
+      }
+
+      const now = outgoingAudioContext.currentTime;
+      const gain = outgoingAudioContext.createGain();
+      gain.gain.setValueAtTime(0, now);
+      // Smooth attack and decay to prevent clicks
+      gain.gain.linearRampToValueAtTime(0.12, now + 0.05);
+      gain.gain.setValueAtTime(0.12, now + 1.45);
+      gain.gain.linearRampToValueAtTime(0, now + 1.5);
+      gain.connect(outgoingAudioContext.destination);
+
+      const osc1 = outgoingAudioContext.createOscillator();
+      osc1.type = "sine";
+      osc1.frequency.setValueAtTime(440, now);
+      osc1.connect(gain);
+
+      const osc2 = outgoingAudioContext.createOscillator();
+      osc2.type = "sine";
+      osc2.frequency.setValueAtTime(480, now);
+      osc2.connect(gain);
+
+      osc1.start(now);
+      osc2.start(now);
+
+      osc1.stop(now + 1.55);
+      osc2.stop(now + 1.55);
+
+      outgoingNodes = { osc1, osc2, gain };
+    };
+
+    // Play first pulse immediately
+    playTonePulse();
+
+    // Standard telephony cadence: 1.5s tone, 3.5s pause (5s period)
+    outgoingTimer = setInterval(() => {
+      playTonePulse();
+    }, 5000);
+  } catch (err) {
+    console.warn("[callAudio] Failed to initialize outgoing tone:", err);
+    stopOutgoingTone();
   }
 }
 
 /**
- * Legacy stubs for safe backward compatibility if invoked during transitions.
- * Guaranteed to produce zero sound.
+ * Stop outgoing ringback tone. If callId is provided, only stops if matching.
  */
-export function startDialTone(): void {}
-export function stopDialTone(): void {}
+export function stopOutgoingTone(callId?: string): void {
+  if (callId && activeOutgoingCallId && activeOutgoingCallId !== callId) {
+    return;
+  }
+
+  if (outgoingTimer) {
+    clearInterval(outgoingTimer);
+    outgoingTimer = null;
+  }
+
+  if (outgoingNodes) {
+    try {
+      outgoingNodes.osc1.stop();
+      outgoingNodes.osc2.stop();
+      outgoingNodes.gain.disconnect();
+    } catch {
+      // Ignored: already stopped
+    }
+    outgoingNodes = null;
+  }
+
+  if (outgoingAudioContext) {
+    try {
+      outgoingAudioContext.close().catch(() => {});
+    } catch {
+      // Non-fatal
+    }
+    outgoingAudioContext = null;
+  }
+
+  activeOutgoingCallId = null;
+}
+
+/**
+ * Silences all calling audio unconditionally.
+ * Safe to call at any time.
+ */
+export function stopAllCallSounds(): void {
+  stopRingtone();
+  stopOutgoingTone();
+}
+
+/**
+ * Backward compatibility stubs
+ */
+export function startDialTone(callId?: string): void {
+  startOutgoingTone(callId);
+}
+
+export function stopDialTone(callId?: string): void {
+  stopOutgoingTone(callId);
+}
+
 export function playConnectedChime(): void {}
 export function playEndedBeep(): void {}
-

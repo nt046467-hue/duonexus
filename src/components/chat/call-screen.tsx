@@ -23,11 +23,15 @@ interface CallScreenProps {
   partnerName: string;
   partnerAvatar: string;
   callType: "audio" | "video";
-  callState: "idle" | "ringing" | "connecting" | "active" | "ended" | "declined" | "missed";
+  /** Full authoritative call state from useWebRTC */
+  callState: "idle" | "ringing" | "connecting" | "active" | "ended" | "declined" | "missed" | "failed";
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
   connectionQuality?: ConnectionQuality;
+  /** End/hang-up during active call */
   onHangUp: () => void;
+  /** Cancel outgoing call while ringing (caller only) */
+  onCancel?: () => void;
   onGenerateSpark?: () => Promise<string | undefined>;
   onSwitchCamera?: () => void;
   onToggleVideo?: () => void;
@@ -52,6 +56,7 @@ export function CallScreen({
   remoteStream,
   connectionQuality = "excellent",
   onHangUp,
+  onCancel,
   onGenerateSpark,
   onSwitchCamera,
   onToggleVideo,
@@ -102,6 +107,12 @@ export function CallScreen({
   // Dedicated single audio output path to guarantee zero duplicate audio or acoustic echo feedback
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
 
+  // ── Outgoing call: Calling... state (ringing for caller) ─────────────────────
+  // During ringing state, the caller sees the Calling... screen
+  const isOutgoingRinging = callState === "ringing";
+  const isConnecting = callState === "connecting";
+  const isMissedOrFailed = callState === "missed" || callState === "failed";
+
   // Call duration timer (active call only)
   useEffect(() => {
     if (callState !== "active") return;
@@ -117,6 +128,7 @@ export function CallScreen({
       setDuration(0);
     }
   }, [callState]);
+
 
   // Dynamically check if remote peer has active/unmuted video track
   useEffect(() => {
@@ -282,6 +294,58 @@ export function CallScreen({
     }
   };
 
+  // ── Outgoing Ringing / No Answer screen ─────────────────────────────────
+  if (isOutgoingRinging || isConnecting || isMissedOrFailed) {
+    return (
+      <div className="fixed inset-0 z-[250] bg-zinc-950 flex flex-col items-center justify-between py-24 px-6 text-white safe-top safe-bottom select-none animate-fade-in">
+        <div className="flex flex-col items-center gap-6 mt-12">
+          <div className="relative">
+            {isOutgoingRinging && (
+              <span className="absolute -inset-3 rounded-full bg-primary/15 animate-ping opacity-30 scale-110 pointer-events-none" />
+            )}
+            <Avatar className="w-28 h-28 border-4 border-primary/20 shadow-2xl">
+              <AvatarImage src={partnerAvatar} className="object-cover" />
+              <AvatarFallback className="bg-primary/15 text-primary text-4xl font-headline font-bold">
+                {partnerName?.[0]?.toUpperCase() || "P"}
+              </AvatarFallback>
+            </Avatar>
+          </div>
+
+          <div className="text-center space-y-2">
+            <h2 className="text-2xl font-headline font-bold tracking-tight">{partnerName}</h2>
+            {isOutgoingRinging && (
+              <>
+                <p className="text-sm text-primary/80 uppercase tracking-widest font-headline animate-pulse">Calling…</p>
+                <p className="text-xs text-white/40 font-headline">{callType === "video" ? "Video call" : "Voice call"}</p>
+              </>
+            )}
+            {isConnecting && (
+              <p className="text-sm text-emerald-400/80 uppercase tracking-widest font-headline animate-pulse">Connecting…</p>
+            )}
+            {isMissedOrFailed && (
+              <p className="text-sm text-red-400/80 uppercase tracking-widest font-headline">No answer</p>
+            )}
+          </div>
+        </div>
+
+        <div className="mb-8 flex flex-col items-center gap-3">
+          {(isOutgoingRinging || isConnecting) && (
+            <>
+              <Button
+                onClick={onCancel || onHangUp}
+                className="w-16 h-16 rounded-full bg-red-600 hover:bg-red-700 text-white shadow-xl shadow-red-600/30 flex items-center justify-center transition-transform active:scale-95"
+                aria-label="Cancel Call"
+              >
+                <PhoneOff className="w-6 h-6" />
+              </Button>
+              <span className="text-[10px] font-headline uppercase tracking-widest text-muted-foreground font-medium">Cancel</span>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 z-[250] bg-zinc-950 flex flex-col justify-between text-white safe-top safe-bottom select-none">
       {/* Hidden audio element — dedicated single audio output path */}
@@ -313,11 +377,7 @@ export function CallScreen({
             <h2 className="text-2xl font-headline font-bold">{partnerName}</h2>
             <div className="flex items-center justify-center gap-2">
               <p className="text-sm text-primary/80 uppercase tracking-widest font-headline">
-                {callState === "active"
-                  ? formatDuration(duration)
-                  : callState === "ringing"
-                  ? "Ringing…"
-                  : "Connecting…"}
+                {callState === "active" ? formatDuration(duration) : "In Call"}
               </p>
               {callState === "active" && renderQualityIndicator()}
             </div>

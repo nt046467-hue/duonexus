@@ -35,14 +35,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, delivered: false, message: "No tokens registered for recipient" });
     }
 
-    const isCall = type === "incoming_call";
-    const title = isCall
-      ? `📞 Incoming ${callType === "video" ? "Video" : "Audio"} Call`
-      : `${senderName || "DuoNexus"} ❤️`;
-
-    const body = isCall
-      ? `${senderName || "Partner"} is calling you...`
-      : (text || "Sent you a message 💕");
+    const isIncomingCall = type === "incoming_call";
+    const isMissedCall = type === "missed_call";
+    const isCallCancelledOrEnded = type === "call_cancelled" || type === "call_ended";
+    const isVideo = callType === "video";
 
     const stringifiedData: Record<string, string> = {
       type,
@@ -52,10 +48,40 @@ export async function POST(req: NextRequest) {
 
     if (callId) stringifiedData.callId = String(callId);
     if (callType) stringifiedData.callType = String(callType);
-    if (isCall) {
+
+    if (isIncomingCall) {
       stringifiedData.url = `/chat?callId=${callId}`;
     } else {
       stringifiedData.url = "/chat";
+    }
+
+    // If it's a silent cancellation/ended notice to close notifications
+    if (isCallCancelledOrEnded) {
+      const response = await adminMessaging.sendEachForMulticast({
+        tokens,
+        data: stringifiedData,
+        webpush: {
+          headers: { Urgency: "high" },
+        },
+        android: { priority: "high" },
+      });
+      return NextResponse.json({
+        success: true,
+        delivered: response.successCount > 0,
+        successCount: response.successCount,
+        failureCount: response.failureCount,
+      });
+    }
+
+    let title = `${senderName || "DuoNexus"} ❤️`;
+    let body = text || "Sent you a message 💕";
+
+    if (isIncomingCall) {
+      title = isVideo ? "📹 Incoming Video Call" : "📞 Incoming Voice Call";
+      body = `${senderName || "Partner"} is calling you...`;
+    } else if (isMissedCall) {
+      title = isVideo ? "📹 Missed Video Call" : "📞 Missed Voice Call";
+      body = senderName ? `Missed call from ${senderName}` : "Missed call";
     }
 
     const response = await adminMessaging.sendEachForMulticast({
@@ -68,23 +94,24 @@ export async function POST(req: NextRequest) {
       data: stringifiedData,
       webpush: {
         headers: {
-          Urgency: isCall ? "high" : "normal",
+          Urgency: (isIncomingCall || isMissedCall) ? "high" : "normal",
         },
         notification: {
-          requireInteraction: isCall,
+          requireInteraction: isIncomingCall,
           badge: "/badge-72.png",
           icon: "/icon-192.png",
+          tag: isIncomingCall ? `call-${callId}` : isMissedCall ? `missed-call-${callId}` : undefined,
         },
         fcmOptions: {
           link: stringifiedData.url,
         },
       },
       android: {
-        priority: isCall ? "high" : "normal",
+        priority: (isIncomingCall || isMissedCall) ? "high" : "normal",
       },
     });
 
-    console.log(`[trigger-push] Sent push to ${recipientId}: ${response.successCount} success, ${response.failureCount} failed.`);
+    console.log(`[trigger-push] Sent push (${type}) to ${recipientId}: ${response.successCount} success, ${response.failureCount} failed.`);
 
     // Clean up expired or invalid tokens if any failures occurred
     if (response.failureCount > 0) {

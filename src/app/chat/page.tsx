@@ -1008,6 +1008,8 @@ export default function ChatPage() {
   };
 
   const lastMessageIdRef = useRef<string | null>(null);
+  // Ref used to suppress chat sounds during calls — populated by callState syncing below
+  const isInCallRef = useRef<boolean>(false);
 
   // Sound & Native notification
   useEffect(() => {
@@ -1016,8 +1018,9 @@ export default function ChatPage() {
     if (latest.id !== lastMessageIdRef.current) {
       const isLatestMe = latest.senderRole ? latest.senderRole === myId : latest.senderUid === user?.uid;
       if (!isLatestMe) {
-        // Play receive sound if notifications and sound effects are enabled
-        if (notificationsEnabled && soundEffectsEnabled) {
+        // Suppress chat message sounds during any active call to avoid audio interference
+        // isInCallRef is kept in sync by a useEffect that runs when callState changes
+        if (notificationsEnabled && soundEffectsEnabled && !isInCallRef.current) {
           receiveAudioRef.current?.play().catch(() => { });
         }
         // Vibrate mobile device if enabled
@@ -1030,6 +1033,7 @@ export default function ChatPage() {
       lastMessageIdRef.current = latest.id;
     }
   }, [messages, myId, user, notificationsEnabled, soundEffectsEnabled, vibrationEnabled]);
+
 
   // Input & Reply & Attachment State
   const [inputText, setInputText] = useState("");
@@ -2182,6 +2186,7 @@ export default function ChatPage() {
     startCall,
     answerCall,
     declineCall,
+    cancelCall,
     endCall,
     switchCamera,
     toggleVideo,
@@ -2190,8 +2195,10 @@ export default function ChatPage() {
     connectionQuality,
     callType,
     callState,
+    callId: activeCallId,
     localStream,
     remoteStream,
+    isCaller,
   } = useWebRTC({
     myId,
     partnerId,
@@ -2200,6 +2207,12 @@ export default function ChatPage() {
     onCameraError: handleCameraError,
     onCallMessage: writeCallMessage,
   });
+
+  // Sync isInCallRef so early-declared sound hooks can suppress audio during calls
+  // (isInCallRef is declared above useWebRTC to avoid forward-reference TS errors)
+  useEffect(() => {
+    isInCallRef.current = callState !== "idle" && callState !== "ended" && callState !== "declined" && callState !== "missed";
+  }, [callState]);
 
   // Automatically ensure this device's push token is registered in Firestore
   useNotificationSetup({
@@ -2231,9 +2244,20 @@ export default function ChatPage() {
     const handleSwMessage = (event: MessageEvent) => {
       if (!event.data) return;
       if (event.data.type === "ACCEPT_CALL" && event.data.callId) {
+        // Clear incoming call UI immediately before answering
+        setIncomingCallInfo(null);
         answerCall(event.data.callId);
       } else if (event.data.type === "DECLINE_CALL" && event.data.callId) {
+        setIncomingCallInfo(null);
         declineCall(event.data.callId);
+      } else if (
+        (event.data.type === "NOTIFICATION_CLICK" || event.data.type === "CALL_CANCELLED" || event.data.type === "CALL_ENDED") &&
+        event.data.callId
+      ) {
+        // Caller cancelled or call ended — dismiss incoming call UI
+        setIncomingCallInfo((prev) =>
+          prev?.id === event.data.callId ? null : prev
+        );
       }
     };
 
@@ -6129,17 +6153,30 @@ export default function ChatPage() {
       </Dialog>
 
       {/* WebRTC Calling Overlays */}
+      {/* Incoming call modal — shown when we're the callee and state is idle */}
       {incomingCallInfo && callState === "idle" && (
         <IncomingCall
+          callId={incomingCallInfo.id}
           partnerName={finalPartnerName}
           partnerAvatar={partnerAvatar}
           callType={incomingCallInfo.type}
-          onAccept={() => answerCall(incomingCallInfo.id)}
-          onDecline={() => declineCall(incomingCallInfo.id)}
+          onAccept={() => {
+            setIncomingCallInfo(null);
+            answerCall(incomingCallInfo.id);
+          }}
+          onDecline={() => {
+            setIncomingCallInfo(null);
+            declineCall(incomingCallInfo.id, incomingCallInfo.type);
+          }}
+          onTimeout={() => {
+            // Caller-side timeout handled by useWebRTC; callee just dismisses UI
+            setIncomingCallInfo(null);
+          }}
         />
       )}
 
-      {callState !== "idle" && callState !== "ended" && callState !== "declined" && callState !== "missed" && (
+      {/* Call screen — shown for outgoing (ringing/connecting) and active calls */}
+      {callState !== "idle" && callState !== "ended" && callState !== "declined" && (
         <CallScreen
           partnerName={finalPartnerName}
           partnerAvatar={partnerAvatar}
@@ -6149,6 +6186,7 @@ export default function ChatPage() {
           remoteStream={remoteStream}
           connectionQuality={connectionQuality}
           onHangUp={endCall}
+          onCancel={isCaller ? cancelCall : undefined}
           onGenerateSpark={handleGenerateSpark}
           onSwitchCamera={switchCamera}
           onToggleVideo={toggleVideo}

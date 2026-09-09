@@ -1,41 +1,66 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Phone, PhoneOff, Video } from "lucide-react";
 import { startRingtone, stopRingtone } from "@/lib/callAudio";
+import { CALL_RING_TIMEOUT_MS } from "@/hooks/use-webrtc";
 
 interface IncomingCallProps {
+  callId: string;
   partnerName: string;
   partnerAvatar: string;
   callType: "audio" | "video";
   onAccept: () => void;
   onDecline: () => void;
+  onTimeout?: () => void;
 }
 
 export function IncomingCall({
+  callId,
   partnerName,
   partnerAvatar,
   callType,
   onAccept,
   onDecline,
+  onTimeout,
 }: IncomingCallProps) {
-  // Start incoming ringtone on mount, stop unconditionally on unmount
+  const handledRef = useRef(false);
+
+  // ── Start incoming ringtone tied to this callId on mount ───────────────────
   useEffect(() => {
-    startRingtone();
+    startRingtone(callId);
     return () => {
-      stopRingtone();
+      stopRingtone(callId);
     };
-  }, []);
+  }, [callId]);
+
+  // ── Callee-side 30-second timeout ──────────────────────────────────────────
+  // If the caller doesn't cancel in time and the callee doesn't act, dismiss UI.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!handledRef.current) {
+        handledRef.current = true;
+        stopRingtone(callId);
+        onTimeout?.();
+      }
+    }, CALL_RING_TIMEOUT_MS);
+
+    return () => clearTimeout(timer);
+  }, [callId, onTimeout]);
 
   const handleDecline = () => {
-    stopRingtone();
+    if (handledRef.current) return;
+    handledRef.current = true;
+    stopRingtone(callId);
     onDecline();
   };
 
   const handleAccept = () => {
-    stopRingtone();
+    if (handledRef.current) return;
+    handledRef.current = true;
+    stopRingtone(callId);
     onAccept();
   };
 
@@ -44,7 +69,7 @@ export function IncomingCall({
       {/* Caller Info */}
       <div className="flex flex-col items-center gap-6 mt-12">
         <div className="relative">
-          {/* Subtle Elegance Ring (no obnoxious bouncing) */}
+          {/* Elegant pulsing ring */}
           <span className="absolute -inset-2 rounded-full bg-primary/20 animate-ping opacity-40 scale-110 pointer-events-none" />
           <Avatar className="w-28 h-28 border-4 border-primary/30 shadow-2xl">
             <AvatarImage src={partnerAvatar} className="object-cover" />
@@ -57,7 +82,7 @@ export function IncomingCall({
         <div className="text-center space-y-2">
           <h2 className="text-2xl font-headline font-bold tracking-tight">{partnerName}</h2>
           <p className="text-xs uppercase tracking-widest text-primary font-headline font-semibold">
-            Incoming {callType === "video" ? "Video Call" : "Audio Call"}
+            Incoming {callType === "video" ? "Video Call" : "Voice Call"}
           </p>
         </div>
       </div>
@@ -91,4 +116,3 @@ export function IncomingCall({
     </div>
   );
 }
-
