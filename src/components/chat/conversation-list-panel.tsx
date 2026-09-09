@@ -42,6 +42,7 @@ interface ConversationListPanelProps {
   isOnline: boolean;
   isTyping: boolean;
   streak: number;
+  isStreakLoaded?: boolean;
   partnerMood?: string | null;
   lastMessage?: Message | null;
   isActive: boolean;
@@ -61,6 +62,7 @@ export function ConversationListPanel({
   isOnline,
   isTyping,
   streak,
+  isStreakLoaded = true,
   partnerMood,
   lastMessage,
   isActive,
@@ -374,13 +376,13 @@ export function ConversationListPanel({
 
                   {/* Status Ticks or Streak flame */}
                   <div className="flex items-center gap-1 shrink-0">
-                    {streak > 0 && (
+                    {(!isStreakLoaded || streak > 0) && (
                       <Badge
                         variant="secondary"
                         className="bg-orange-500/10 text-orange-500 border-none px-1.5 py-0 h-4 text-[9px] font-bold font-headline flex items-center gap-0.5"
                       >
                         <Flame className="w-2.5 h-2.5 fill-orange-500" />
-                        <span>{streak}</span>
+                        <span>{isStreakLoaded ? streak : "—"}</span>
                       </Badge>
                     )}
 

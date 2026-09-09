@@ -1,6 +1,6 @@
-
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
+import { adminAuth } from "@/lib/firebase-admin";
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -30,12 +30,6 @@ export async function POST(req: NextRequest) {
       karuHash = sha256(karuHash.trim());
     }
     if (!nabinHash && !karuHash) {
-      // Fallback: if env vars aren't set yet, check legacy shared PIN hash
-      const legacyHash = process.env.SHARED_PIN_HASH;
-      if (legacyHash && pinHash === legacyHash) {
-        return NextResponse.json({ valid: true, identity: null });
-      }
-
       if (process.env.NODE_ENV !== "production") {
         // Local dev fallbacks (Nabin = '1234', Karu = '5678')
         console.warn("[verify-pin] PIN hashes not configured in env. Using local dev fallbacks: Nabin='1234', Karu='5678'");
@@ -47,15 +41,29 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    let identity: "nabin" | "karu" | null = null;
     if (pinHash === nabinHash) {
-      return NextResponse.json({ valid: true, identity: "nabin" });
-    }
-    if (pinHash === karuHash) {
-      return NextResponse.json({ valid: true, identity: "karu" });
+      identity = "nabin";
+    } else if (pinHash === karuHash) {
+      identity = "karu";
     }
 
-    return NextResponse.json({ valid: false });
-  } catch (e) {
-    return NextResponse.json({ valid: false }, { status: 500 });
+    if (!identity) {
+      return NextResponse.json({ valid: false });
+    }
+
+    // Mint Firebase custom token with role claims: role: "nabin" | "karu"
+    const customToken = await adminAuth.createCustomToken(identity, {
+      role: identity,
+    });
+
+    return NextResponse.json({
+      valid: true,
+      identity,
+      customToken,
+    });
+  } catch (e: any) {
+    console.error("[verify-pin] Token minting error:", e);
+    return NextResponse.json({ valid: false, error: e?.message || "Internal server error" }, { status: 500 });
   }
 }

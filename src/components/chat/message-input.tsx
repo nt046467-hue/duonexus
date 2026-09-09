@@ -396,8 +396,16 @@ export function MessageInput({
     onTyping(true);
   };
 
+  const isMobileDevice = typeof window !== "undefined" && (
+    /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+    (window.matchMedia && window.matchMedia("(max-width: 768px)").matches) ||
+    ("ontouchstart" in window && window.innerWidth < 768)
+  );
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // On mobile devices, Enter/Return creates a newline and NEVER sends the message.
+    // On desktop, Enter sends the message; Shift+Enter creates a newline.
+    if (!isMobileDevice && e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
@@ -1124,7 +1132,7 @@ export function MessageInput({
                   });
                 }, 300);
               }}
-              enterKeyHint="send"
+              enterKeyHint={isMobileDevice ? "enter" : "send"}
               style={{ fontSize: "15px" }}
             />
 

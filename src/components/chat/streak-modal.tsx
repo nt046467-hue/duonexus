@@ -34,6 +34,7 @@ interface StreakModalProps {
   streak: number;
   longestStreak: number;
   chattedToday: boolean;
+  isStreakLoaded?: boolean;
   partnerName: string;
   onUpdateStreak?: (newStreak: number) => Promise<void>;
   onStartChat?: () => void;
@@ -185,6 +186,7 @@ export function StreakModal({
   streak,
   longestStreak,
   chattedToday,
+  isStreakLoaded = true,
   partnerName,
   onStartChat,
   onClaimReward,
@@ -293,7 +295,7 @@ export function StreakModal({
             <div className="space-y-1">
               <div className="flex items-center justify-center gap-2">
                 <DialogTitle className="text-2xl sm:text-3xl font-black font-headline tracking-tight text-foreground">
-                  {streak} Days Strong
+                  {isStreakLoaded ? `${streak} Days Strong` : <span className="inline-block w-32 h-8 bg-muted animate-pulse rounded-lg" />}
                 </DialogTitle>
                 <span className="text-2xl">🔥</span>
               </div>

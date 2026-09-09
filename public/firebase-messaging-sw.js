@@ -1,6 +1,8 @@
 /* eslint-disable no-undef */
 // DuoNexus Service Worker & Firebase Cloud Messaging Worker
 
+// Give the service worker access to Firebase Messaging.
+// Note that you can only use Firebase Messaging here if you are using standard v9/v10/v11 compat CDN scripts.
 try {
   importScripts('https://www.gstatic.com/firebasejs/11.9.1/firebase-app-compat.js');
   importScripts('https://www.gstatic.com/firebasejs/11.9.1/firebase-messaging-compat.js');
@@ -46,10 +48,10 @@ try {
     return self.registration.showNotification(title, options);
   });
 } catch (e) {
-  console.log('[SW] Firebase messaging script load skipped or failed:', e);
+  console.log('[SW] Firebase messaging script load skipped or failed (fallback to standard push listener):', e);
 }
 
-// Standard push listener fallback
+// Standard push listener fallback (for custom web push or server-triggered FCM data payloads)
 self.addEventListener('push', function(event) {
   let payload = {};
   if (event.data) {
@@ -60,6 +62,7 @@ self.addEventListener('push', function(event) {
     }
   }
 
+  // If payload was already handled by Firebase compat onBackgroundMessage, we avoid double notification if tag matches
   const data = payload.data || payload;
   const isCall = data.type === "incoming_call";
   const origin = self.location.origin;
@@ -104,6 +107,7 @@ self.addEventListener('notificationclick', function(event) {
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
+      // If a chat tab is already open, focus it and navigate/postMessage
       for (let i = 0; i < clientList.length; i++) {
         let client = clientList[i];
         if (client.url && client.url.includes('/chat') && 'focus' in client) {
@@ -118,6 +122,7 @@ self.addEventListener('notificationclick', function(event) {
           return client.focus();
         }
       }
+      // If no window is open, open the URL directly
       if (clients.openWindow) {
         return clients.openWindow(targetUrl);
       }

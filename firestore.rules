@@ -1,13 +1,14 @@
-
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Only authenticated users with valid role claim ('nabin' or 'karu') minted via correct PIN
     function isAuthenticated() {
-      return request.auth != null;
+      return request.auth != null
+        && request.auth.token.role in ['nabin', 'karu'];
     }
 
-    // Messages: anyone authenticated can read.
+    // Messages: anyone authenticated with role can read.
     // Create: must be your own uid.
     // Update: only allow changing status/reactions-adjacent fields on others' messages.
     //         Sender can update all their own fields.
@@ -28,10 +29,20 @@ service cloud.firestore {
         && resource.data.senderUid == request.auth.uid;
     }
 
-    // Profiles: anyone authenticated can read. Only write your own profile doc.
-    // Profile doc ID is the role string ("nabin" or "karu") stored in localStorage,
-    // so we can't match on request.auth.uid directly. We allow write if the
-    // doc's stored userId field matches — or if it's a new doc being created.
+    // Calls & WebRTC Signaling: authenticated users with role can read/write calls & candidates
+    match /calls/{callId} {
+      allow read, write: if isAuthenticated();
+      match /{subcollection=**} {
+        allow read, write: if isAuthenticated();
+      }
+    }
+
+    // Users & FCM tokens: authenticated users with role can read/write user documents
+    match /users/{userId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Profiles: anyone authenticated with role can read. Only write your own profile doc.
     match /profiles/{userId} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated()
@@ -47,12 +58,12 @@ service cloud.firestore {
       allow write: if isAuthenticated();
     }
 
-    // Typing: any authenticated user can write (needed for the typing indicator).
+    // Typing: any authenticated user with role can write (needed for typing indicator).
     match /typing/{userId} {
       allow read, write: if isAuthenticated();
     }
 
-    // Reactions: authenticated users can add/remove their own reactions.
+    // Reactions: authenticated users with role can add/remove their own reactions.
     match /reactions/{reactionId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated()
@@ -67,13 +78,13 @@ service cloud.firestore {
       allow read, write: if isAuthenticated();
     }
 
-    // Stats: authenticated users can read; write is controlled (streak logic).
+    // Stats: authenticated users with role can read; write is controlled (streak logic).
     match /stats/{statId} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated();
     }
 
-    // Sparks: authenticated users can read/write (AI love sparks).
+    // Sparks: authenticated users with role can read/write (AI love sparks).
     match /sparks/{sparkId} {
       allow read, write: if isAuthenticated();
     }
@@ -83,12 +94,12 @@ service cloud.firestore {
       allow read, write: if isAuthenticated();
     }
 
-    // Nudges (Thinking of You): authenticated users can read/write.
+    // Nudges (Thinking of You): authenticated users with role can read/write.
     match /nudges/{docId} {
       allow read, write: if isAuthenticated();
     }
 
-    // Moods: authenticated users can read all; write only your own.
+    // Moods: authenticated users with role can read all; write only your own.
     match /moods/{docId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated()

@@ -163,13 +163,19 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
     const turnCredential = process.env.NEXT_PUBLIC_TURN_CREDENTIAL;
 
     if (turnUrl && turnUsername && turnCredential) {
-      iceServers.push({ urls: turnUrl, username: turnUsername, credential: turnCredential });
+      // Support comma-separated list of TURN URLs (e.g. "turn:relay.example.com:80,turns:relay.example.com:443")
+      const urls = turnUrl.split(",").map((u) => u.trim());
+      urls.forEach((url) => {
+        iceServers.push({ urls: url, username: turnUsername, credential: turnCredential });
+      });
+      console.log("[WebRTC] Using authenticated TURN relay:", urls);
     } else {
-      // Fallback public TURN servers
-      iceServers.push(
-        { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
-        { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
-        { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" }
+      // ⚠️  No TURN credentials configured — calls may fail across different networks / symmetric NAT.
+      // Set NEXT_PUBLIC_TURN_URL, NEXT_PUBLIC_TURN_USERNAME, NEXT_PUBLIC_TURN_CREDENTIAL in .env.local
+      // (Metered.ca free tier works great: https://www.metered.ca)
+      console.warn(
+        "[WebRTC] TURN env vars not set (NEXT_PUBLIC_TURN_URL / USERNAME / CREDENTIAL). "
+        + "Calls will rely on STUN only, which may fail on cellular or symmetric NAT."
       );
     }
 
@@ -303,6 +309,9 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
     }
   }, []);
 
+  // Caller-side ringing timeout ref
+  const callerRingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Start an outgoing call
   const startCall = useCallback(async (type: CallType) => {
     if (!db || !myId || !partnerId) return;
@@ -346,18 +355,49 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
         createdAt: serverTimestamp(),
       });
 
+      // Dispatch high-priority FCM push notification to wake callee's device
+      fetch("/api/trigger-push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "incoming_call",
+          recipientId: partnerId,
+          senderName: myId === "nabin" ? "Nabin" : "Karu",
+          callId: newCallId,
+          callType: type,
+        }),
+      }).catch((err) => {
+        console.warn("[WebRTC] Trigger push notification error:", err);
+      });
+
+      // Caller-side 90-second ring timeout → writes "missed" so callee also sees it
+      if (callerRingTimerRef.current) clearTimeout(callerRingTimerRef.current);
+      callerRingTimerRef.current = setTimeout(() => {
+        if (callStateRef.current === "ringing" && callIdRef.current === newCallId) {
+          console.log("[WebRTC] Ringing timeout — marking missed");
+          updateDoc(doc(db, "calls", newCallId), {
+            status: "missed",
+            endedAt: serverTimestamp(),
+          }).catch(() => {});
+          cleanUp("missed");
+        }
+      }, 90_000);
+
       // Listen for answer + status changes
       unsubCallRef.current = onSnapshot(callDocRef, async (snapshot) => {
         const data = snapshot.data();
         if (!data) return;
         if (data.status === "declined") {
           console.log("[WebRTC] Call declined");
+          if (callerRingTimerRef.current) { clearTimeout(callerRingTimerRef.current); callerRingTimerRef.current = null; }
           cleanUp("declined");
         } else if (data.status === "ended") {
           console.log("[WebRTC] Call ended by partner");
+          if (callerRingTimerRef.current) { clearTimeout(callerRingTimerRef.current); callerRingTimerRef.current = null; }
           cleanUp("ended");
         } else if (data.answer && pc.signalingState === "have-local-offer") {
           console.log("[WebRTC] Answer received");
+          if (callerRingTimerRef.current) { clearTimeout(callerRingTimerRef.current); callerRingTimerRef.current = null; }
           try {
             await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
             await flushPendingCandidates(pc);
@@ -380,6 +420,7 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
 
     } catch (err) {
       console.error("[WebRTC] Failed to start call:", err);
+      if (callerRingTimerRef.current) { clearTimeout(callerRingTimerRef.current); callerRingTimerRef.current = null; }
       cleanUp();
     }
   }, [db, myId, partnerId, setupPeerConnection, getLocalStream, cleanUp, addCandidateSafe, flushPendingCandidates]);
@@ -488,7 +529,8 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
       where("status", "==", "ringing")
     );
 
-    const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+    // Mirror the caller's 90-second timeout: only surface calls created in the last 90 s
+    const ninetySecondsAgo = new Date(Date.now() - 90 * 1000);
     
     const unsub = onSnapshot(q, (snapshot) => {
       // Check if we are currently idle before triggering notification
@@ -498,7 +540,7 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
         if (change.type === "added") {
           const data = change.doc.data();
           const createdAt = data.createdAt?.toMillis?.() ?? 0;
-          if (createdAt > twoMinutesAgo.getTime()) {
+          if (createdAt > ninetySecondsAgo.getTime()) {
             console.log("[WebRTC] Incoming call detected for me:", change.doc.id);
             onIncomingCallRef.current?.(change.doc.id, data.type);
           }
@@ -511,6 +553,38 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
 
     return () => unsub();
   }, [db, myId]);
+
+  // P1: Visibility + network-change → ICE restart for active calls
+  // When the tab becomes visible again (or the device comes back online) after a network blip,
+  // trigger restartIce() rather than waiting for the browser to detect "failed" state.
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (
+        document.visibilityState === "visible"
+        && pcRef.current
+        && callStateRef.current === "active"
+        && (pcRef.current.iceConnectionState === "disconnected"
+          || pcRef.current.iceConnectionState === "failed")
+      ) {
+        console.log("[WebRTC] Tab visible again — restarting ICE");
+        pcRef.current.restartIce();
+      }
+    };
+
+    const handleOnline = () => {
+      if (pcRef.current && callStateRef.current === "active") {
+        console.log("[WebRTC] Network online — restarting ICE");
+        pcRef.current.restartIce();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("online", handleOnline);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("online", handleOnline);
+    };
+  }, []);
 
   const switchCamera = useCallback(async () => {
     if (!localStreamRef.current || callType !== "video") return;

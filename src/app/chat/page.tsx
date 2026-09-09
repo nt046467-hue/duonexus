@@ -3,7 +3,7 @@
 import React, { useEffect, useLayoutEffect, useState, useRef, useMemo, useCallback, Fragment } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { signInAnonymously, updateProfile } from "firebase/auth";
+import { updateProfile } from "firebase/auth";
 import {
   collection,
   query,
@@ -34,6 +34,7 @@ import { MediaViewer } from "@/components/chat/media-viewer";
 import { AvatarCropModal } from "@/components/chat/avatar-crop-modal";
 import { ProfileSheet } from "@/components/chat/profile-sheet";
 import { useWebRTC } from "@/hooks/use-webrtc";
+import { useNotificationSetup } from "@/hooks/use-notification-setup";
 import { IncomingCall } from "@/components/chat/incoming-call";
 import { CallScreen } from "@/components/chat/call-screen";
 import { MoodCheckin, MoodBadges } from "@/components/chat/mood-checkin";
@@ -190,6 +191,9 @@ export interface Message {
   linkPreview?: {
     title: string;
     url: string;
+    description?: string;
+    image?: string;
+    siteName?: string;
   };
 }
 
@@ -638,25 +642,11 @@ export default function ChatPage() {
     const role = typeof window !== "undefined" ? localStorage.getItem("duonexus_role") : null;
 
     if (!user) {
-      if (role && auth) {
-        signInAnonymously(auth)
-          .then(async (cred) => {
-            const displayName = role === "nabin" ? "Nabin" : "Karu";
-            const photoURL = role === "nabin" ? "/avatars/nabin.png" : "/avatars/karu.png";
-            await updateProfile(cred.user, { displayName, photoURL });
-            setMyId(role);
-          })
-          .catch((err) => {
-            console.error("Silent authentication failed:", err);
-            router.push("/login");
-          });
-      } else {
-        router.push("/login");
-      }
+      router.push("/login");
     } else if (role) {
       setMyId(role);
     }
-  }, [isAuthLoading, user, router, auth]);
+  }, [isAuthLoading, user, router]);
 
   const partnerId = useMemo(() => {
     if (!myId) return "karu";
@@ -820,7 +810,7 @@ export default function ChatPage() {
     if (!firestore || !user) return null;
     return doc(firestore, "global_stats", "relationship");
   }, [firestore, user]);
-  const { data: globalStats } = useDoc(statsDocRef);
+  const { data: globalStats, loading: globalStatsLoading } = useDoc(statsDocRef);
 
   // Real-time Firestore Messages
   const messagesQuery = useMemoFirebase(() => {
@@ -886,10 +876,11 @@ export default function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rawMessages, myId, user?.uid, finalMyName, myProfile?.hiddenMessages, hiddenMsgVersion]);
 
-  // Real Streak Calculation from messages & Firestore
-  const { realStreak, longestStreak, chattedToday } = useMemo(() => {
-    const savedStreak = typeof globalStats?.streak === "number" ? globalStats.streak : 12;
-    const savedLongest = typeof globalStats?.longestStreak === "number" ? globalStats.longestStreak : savedStreak;
+  // Real Streak Calculation from messages & Firestore (no fake fallback 12)
+  const { realStreak, longestStreak, chattedToday, isStreakLoaded } = useMemo(() => {
+    const isLoaded = !globalStatsLoading;
+    const savedStreak = typeof globalStats?.streak === "number" ? globalStats.streak : (isLoaded ? 1 : null);
+    const savedLongest = typeof globalStats?.longestStreak === "number" ? globalStats.longestStreak : (savedStreak ?? 1);
     const todayStr = format(new Date(), "yyyy-MM-dd");
 
     // Check if there are messages today
@@ -899,11 +890,12 @@ export default function ChatPage() {
     });
 
     return {
-      realStreak: Math.max(1, savedStreak),
-      longestStreak: Math.max(savedLongest, savedStreak),
+      realStreak: savedStreak !== null ? Math.max(1, savedStreak) : 1,
+      longestStreak: Math.max(savedLongest, savedStreak ?? 1),
       chattedToday: hasMessageToday,
+      isStreakLoaded: isLoaded,
     };
-  }, [messages, globalStats]);
+  }, [messages, globalStats, globalStatsLoading]);
 
   const streak = realStreak;
 
@@ -1315,10 +1307,18 @@ export default function ChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const documentFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-resize composer textarea height as content grows up to 120px
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.style.height = "auto";
+      inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 120)}px`;
+    }
+  }, [inputText]);
 
   // Floating scroll-to-bottom state
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -1478,16 +1478,42 @@ export default function ChatPage() {
     if (!firestore || (!content.trim() && type === "text")) return;
 
     // Detect link preview (ONLY for standard text, never for stickers, gifs, media, or location)
-    let linkPreview: { title: string; url: string } | undefined = undefined;
+    let linkPreview: { title: string; url: string; description?: string; image?: string; siteName?: string } | undefined = undefined;
     if (type === "text" && !content.includes("notoemoji") && !content.includes("gstatic.com") && !content.match(/Shared Location:/)) {
       const urlMatch = content.match(/(https?:\/\/[^\s]+)/i);
       if (urlMatch) {
+        const rawUrl = urlMatch[0].replace(/[).,;!?'"]+$/, ""); // trim trailing punctuation
         try {
-          const u = new URL(urlMatch[0]);
-          linkPreview = {
-            title: u.hostname.replace("www.", ""),
-            url: u.hostname,
-          };
+          const parsed = new URL(rawUrl);
+          const fallbackDomain = parsed.hostname.replace("www.", "");
+          // Fire & forget — store fallback first, then update with real data if it arrives
+          linkPreview = { title: fallbackDomain, url: rawUrl, siteName: fallbackDomain };
+          // Async fetch real metadata in parallel (will store on Firestore message)
+          try {
+            const ctrl = new AbortController();
+            const timeoutId = setTimeout(() => ctrl.abort(), 8000); // 8 s — server may use two UA attempts (up to 7 s total)
+            const res = await fetch("/api/link-preview", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url: rawUrl }),
+              signal: ctrl.signal,
+            });
+            clearTimeout(timeoutId);
+            if (res.ok) {
+              const meta = await res.json();
+              if (meta && !meta.error) {
+                linkPreview = {
+                  title: meta.title || fallbackDomain,
+                  url: rawUrl,
+                  description: meta.description,
+                  image: meta.image,
+                  siteName: meta.siteName || fallbackDomain,
+                };
+              }
+            }
+          } catch {
+            // Keep fallback if API fails
+          }
         } catch { }
       }
     }
@@ -1537,6 +1563,30 @@ export default function ChatPage() {
       setShowInputEmojiPicker(false);
       setShowMobileLeftIcons(false);
       lastSendWasMe.current = true;
+
+      // Send background FCM push notification to partner's registered devices
+      let previewText = content.trim();
+      if (type === "image") previewText = "📷 Sent a photo";
+      else if (type === "video") previewText = "🎥 Sent a video";
+      else if (type === "audio") previewText = "🎤 Sent a voice message";
+      else if (type === "sticker") previewText = "✨ Sent a sticker";
+      else if (type === "gif") previewText = "Sent a GIF";
+      else if (type === "location") previewText = "📍 Shared location";
+      else if (type === "file") previewText = "📁 Sent a file";
+      else if (previewText.length > 80) previewText = previewText.slice(0, 80) + "...";
+
+      fetch("/api/trigger-push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "message",
+          recipientId: partnerId,
+          senderName: myName,
+          text: previewText,
+        }),
+      }).catch((pushErr) => {
+        console.warn("[Chat] Push notification dispatch warning:", pushErr);
+      });
 
       // Auto-update real streak in Firestore (TikTok-style daily tracking)
       try {
@@ -1589,6 +1639,17 @@ export default function ChatPage() {
     e.preventDefault();
     if (!inputText.trim()) return;
     handleSendMessage(inputText, "text");
+  };
+
+  const handleComposerKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // On desktop, Enter sends immediately; Shift+Enter creates a newline.
+    // On mobile, Enter/Return naturally creates a newline without sending (sending is only done via Send button).
+    if (!isMobile && e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (inputText.trim()) {
+        handleSendMessage(inputText, "text");
+      }
+    }
   };
 
   const handleSendQuickLike = () => {
@@ -2133,6 +2194,48 @@ export default function ChatPage() {
     onCameraError: handleCameraError,
   });
 
+  // Automatically ensure this device's push token is registered in Firestore
+  useNotificationSetup({
+    userId: myId,
+    db: firestore,
+  });
+
+  // Handle deep-link answering / declining / call opening from notification clicks & SW messages
+  useEffect(() => {
+    if (typeof window === "undefined" || !firestore || !myId) return;
+
+    const handleAction = (answerId?: string | null, declineId?: string | null) => {
+      if (answerId) {
+        window.history.replaceState({}, "", "/chat");
+        answerCall(answerId);
+      } else if (declineId) {
+        window.history.replaceState({}, "", "/chat");
+        declineCall(declineId);
+      }
+    };
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const answerParam = urlParams.get("answer");
+    const declineParam = urlParams.get("decline");
+    if (answerParam || declineParam) {
+      handleAction(answerParam, declineParam);
+    }
+
+    const handleSwMessage = (event: MessageEvent) => {
+      if (!event.data) return;
+      if (event.data.type === "ACCEPT_CALL" && event.data.callId) {
+        answerCall(event.data.callId);
+      } else if (event.data.type === "DECLINE_CALL" && event.data.callId) {
+        declineCall(event.data.callId);
+      }
+    };
+
+    navigator.serviceWorker?.addEventListener("message", handleSwMessage);
+    return () => {
+      navigator.serviceWorker?.removeEventListener("message", handleSwMessage);
+    };
+  }, [firestore, myId, answerCall, declineCall]);
+
   const handleStartCall = useCallback(
     (type: "audio" | "video") => {
       startCall(type);
@@ -2462,7 +2565,9 @@ export default function ChatPage() {
                     <span className="text-xs font-bold uppercase tracking-wider block text-orange-300">Love Streak</span>
                     <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.2 rounded-full bg-orange-500/20 text-orange-300">TikTok Flame</span>
                   </div>
-                  <span className="text-sm font-semibold">{streak} Days Strong 🔥</span>
+                  <span className="text-sm font-semibold">
+                    {isStreakLoaded ? `${streak} Days Strong 🔥` : <span className="inline-block w-20 h-4 bg-white/20 animate-pulse rounded" />}
+                  </span>
                 </div>
               </div>
               <Button
@@ -2958,7 +3063,9 @@ export default function ChatPage() {
             </div>
             <div>
               <span className="text-xs font-bold uppercase tracking-wider text-orange-500 block">Love Streak</span>
-              <span className={`text-lg font-bold font-headline ${c("text-gray-900", "text-white")}`}>{streak} Days Strong</span>
+              <span className={`text-lg font-bold font-headline ${c("text-gray-900", "text-white")}`}>
+                {isStreakLoaded ? `${streak} Days Strong` : <span className="inline-block w-24 h-5 bg-black/10 dark:bg-white/10 animate-pulse rounded" />}
+              </span>
             </div>
           </div>
           <Button
@@ -3125,7 +3232,9 @@ export default function ChatPage() {
                 <span className="text-xs font-bold uppercase tracking-wider text-orange-500 block">Love Streak</span>
                 <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.2 rounded-full bg-orange-500/10 text-orange-500">TikTok Flame</span>
               </div>
-              <span className={`text-base font-bold font-headline ${c("text-gray-900", "text-white")}`}>{streak} Days Strong 🔥</span>
+              <span className={`text-base font-bold font-headline ${c("text-gray-900", "text-white")}`}>
+                {isStreakLoaded ? `${streak} Days Strong 🔥` : <span className="inline-block w-20 h-4 bg-black/10 dark:bg-white/10 animate-pulse rounded" />}
+              </span>
             </div>
           </div>
           <Button
@@ -3446,7 +3555,9 @@ export default function ChatPage() {
                   title="Love Streak"
                 >
                   <Flame className={`w-3.5 h-3.5 flex-shrink-0 ${chattedToday ? "text-white fill-white animate-pulse" : "text-amber-400 fill-amber-400"}`} />
-                  <span className="text-[12px] font-bold tracking-tight">{streak}</span>
+                  <span className="text-[12px] font-bold tracking-tight">
+                    {isStreakLoaded ? streak : <span className="inline-block w-3 h-3 bg-current/30 animate-pulse rounded-full" />}
+                  </span>
                 </div>
 
                 {/* Video Call */}
@@ -3708,7 +3819,9 @@ export default function ChatPage() {
                   title="Love Streak — Click for details & goals"
                 >
                   <Flame className={`w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0 ${chattedToday ? "text-white fill-white animate-pulse" : "text-amber-400 fill-amber-400"}`} />
-                  <span className="text-[12px] sm:text-[13px] font-bold tracking-wide">{streak}</span>
+                  <span className="text-[12px] sm:text-[13px] font-bold tracking-wide">
+                    {isStreakLoaded ? streak : <span className="inline-block w-3.5 h-3.5 bg-current/30 animate-pulse rounded-full" />}
+                  </span>
                 </div>
 
                 {/* Video Call */}
@@ -4431,23 +4544,46 @@ export default function ChatPage() {
                           </p>
                         )}
 
-                        {/* Link Preview (never show on stickers, deleted messages, or location messages) */}
+                        {/* Rich Link Preview (never show on stickers, deleted messages, or location messages) */}
                         {!isSticker && !msg.isDeleted && msg.linkPreview && msg.type !== "location" && !(typeof msgContent === "string" && (msgContent.includes("Shared Location") || msgContent.includes("maps.google.com"))) && (
                           <a
                             href={msg.linkPreview.url.startsWith("http") ? msg.linkPreview.url : `https://${msg.linkPreview.url}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             onClick={(e) => e.stopPropagation()}
-                            className={`mt-1.5 mb-1.5 rounded-xl border overflow-hidden cursor-pointer block hover:opacity-90 transition-opacity ${c(
+                            className={`mt-1.5 mb-1.5 rounded-xl border overflow-hidden cursor-pointer block hover:opacity-90 active:scale-[0.98] transition-all ${c(
                               "bg-gray-50 border-gray-200",
                               "bg-[#1E1E1E] border-zinc-700"
                             )}`}
                           >
-                            <div className="p-2.5">
-                              <h4 className={`text-[13px] font-semibold leading-snug ${c("text-gray-900", "text-gray-100")}`}>
+                            {/* Thumbnail image — shown only when available */}
+                            {msg.linkPreview.image && (
+                              <div className="w-full overflow-hidden" style={{ maxHeight: "160px" }}>
+                                <img
+                                  src={msg.linkPreview.image}
+                                  alt={msg.linkPreview.title}
+                                  className="w-full object-cover"
+                                  style={{ maxHeight: "160px" }}
+                                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                                  loading="lazy"
+                                />
+                              </div>
+                            )}
+                            <div className="p-2.5 space-y-0.5">
+                              {/* Site name badge */}
+                              <p className="text-[10px] font-bold uppercase tracking-wide text-blue-500 truncate">
+                                {msg.linkPreview.siteName || new URL(msg.linkPreview.url.startsWith("http") ? msg.linkPreview.url : `https://${msg.linkPreview.url}`).hostname.replace("www.", "")}
+                              </p>
+                              {/* Title */}
+                              <h4 className={`text-[13px] font-semibold leading-snug line-clamp-2 ${c("text-gray-900", "text-gray-100")}`}>
                                 {msg.linkPreview.title}
                               </h4>
-                              <p className="text-[11px] font-semibold uppercase text-blue-500">{msg.linkPreview.url}</p>
+                              {/* Description — shown only when available */}
+                              {msg.linkPreview.description && (
+                                <p className={`text-[11px] leading-relaxed line-clamp-2 ${c("text-gray-500", "text-gray-400")}`}>
+                                  {msg.linkPreview.description}
+                                </p>
+                              )}
                             </div>
                           </a>
                         )}
@@ -4961,13 +5097,13 @@ export default function ChatPage() {
 
             {/* Central Message Input Pill OR Voice Recording Capsule */}
             <div
-              className={`flex-1 rounded-full flex items-center pl-3 pr-1 py-1.5 sm:px-4 sm:py-2.5 shadow-sm border transition-colors relative min-w-0 ${c(
+              className={`flex-1 rounded-[22px] flex items-end pl-3 pr-1 py-1 sm:px-4 sm:py-1.5 shadow-sm border transition-colors relative min-w-0 ${c(
                 "bg-white border-gray-200",
                 "bg-[#242424] border-zinc-800"
               )}`}
             >
               {isRecordingAudio ? (
-                <div className="flex-1 flex items-center justify-between gap-2">
+                <div className="flex-1 flex items-center justify-between gap-2 py-1">
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
                     <span className="text-xs font-mono font-bold text-red-500">
@@ -5001,10 +5137,10 @@ export default function ChatPage() {
                 </div>
               ) : (
                 <>
-                  <input
-                    type="text"
+                  <textarea
                     ref={inputRef}
                     value={inputText}
+                    rows={1}
                     onClick={() => {
                       if (isMobile && showInputEmojiPicker) {
                         setShowInputEmojiPicker(false);
@@ -5032,16 +5168,19 @@ export default function ChatPage() {
                         stopMyTyping();
                       }
                     }}
+                    onKeyDown={handleComposerKeyDown}
                     onBlur={() => stopMyTyping()}
                     placeholder={isMobile ? "Message" : "Aa"}
-                    className={`flex-1 bg-transparent outline-none font-medium min-w-0 text-[14px] sm:text-[15px] ${c(
+                    enterKeyHint={isMobile ? "enter" : "send"}
+                    className={`flex-1 bg-transparent outline-none font-medium min-w-0 text-[14px] sm:text-[15px] resize-none overflow-y-auto leading-relaxed py-1 sm:py-1.5 min-h-[26px] max-h-[120px] ${c(
                       "text-gray-900 placeholder-gray-400",
                       "text-gray-100 placeholder-gray-500"
                     )}`}
+                    style={{ maxHeight: "120px" }}
                   />
 
                   {/* Right Icon Inside Message Capsule */}
-                  <div className="relative shrink-0 ml-0.5 sm:ml-1.5">
+                  <div className="relative shrink-0 ml-0.5 sm:ml-1.5 mb-1">
                     {isMobile ? (
                       inputText.trim() ? (
                         /* Mobile Typing: Search Icon inside capsule (Image 2) */
@@ -5293,6 +5432,7 @@ export default function ChatPage() {
             isOnline={!!partnerPresence?.online}
             isTyping={otherIsTyping}
             streak={streak}
+            isStreakLoaded={isStreakLoaded}
             lastMessage={messages.length > 0 ? (messages[messages.length - 1] as any) : null}
             isActive={selectedConversation === "karu" && activeTab === "chat"}
             onSelectConversation={() => {
@@ -5542,6 +5682,7 @@ export default function ChatPage() {
         photoURL={partnerAvatar}
         isOnline={partnerPresence?.online || false}
         streak={streak}
+        isStreakLoaded={isStreakLoaded}
         onAudioCall={() => handleStartCall("audio")}
         onVideoCall={() => handleStartCall("video")}
       />
@@ -6012,6 +6153,7 @@ export default function ChatPage() {
         streak={streak}
         longestStreak={longestStreak}
         chattedToday={chattedToday}
+        isStreakLoaded={isStreakLoaded}
         partnerName={finalPartnerName}
         onUpdateStreak={handleUpdateStreak}
         onClaimReward={async (surprise) => {

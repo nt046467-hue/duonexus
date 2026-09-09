@@ -23,6 +23,7 @@ interface ProfileSheetProps {
   photoURL: string;
   isOnline?: boolean;
   streak?: number;
+  isStreakLoaded?: boolean;
   /** Called when user taps "Change Photo" — only relevant in 'own' mode */
   onChangePhoto?: () => void;
   /** Called when user taps the Call button */
@@ -39,6 +40,7 @@ export function ProfileSheet({
   photoURL,
   isOnline = false,
   streak = 0,
+  isStreakLoaded = true,
   onChangePhoto,
   onAudioCall,
   onVideoCall,
@@ -152,10 +154,12 @@ export function ProfileSheet({
             </div>
 
             {/* Streak pill */}
-            {streak > 0 && (
+            {(!isStreakLoaded || streak > 0) && (
               <div className="flex items-center gap-2 bg-orange-500/10 text-orange-500 border border-orange-500/20 rounded-full px-4 py-2">
                 <Flame className="w-4 h-4 fill-orange-500" />
-                <span className="text-sm font-headline font-bold">{streak} day streak</span>
+                <span className="text-sm font-headline font-bold">
+                  {isStreakLoaded ? `${streak} day streak` : <span className="inline-block w-20 h-4 bg-orange-500/30 animate-pulse rounded" />}
+                </span>
               </div>
             )}
 

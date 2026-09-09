@@ -47,6 +47,7 @@ import { useToast } from "@/hooks/use-toast";
 import { MoodBadges } from "@/components/chat/mood-checkin";
 import { differenceInDays, parseISO, format, setYear } from "date-fns";
 import { ProfileSheet } from "@/components/chat/profile-sheet";
+import { useNotificationSetup } from "@/hooks/use-notification-setup";
 
 
 interface ChatHeaderProps {
@@ -54,6 +55,7 @@ interface ChatHeaderProps {
   partnerAvatar: string;
   isOnline: boolean;
   streak: number;
+  isStreakLoaded?: boolean;
   countdownLabel: string;
   onGenerateSpark: () => void;
   isGeneratingSpark: boolean;
@@ -96,6 +98,7 @@ export function ChatHeader({
   partnerAvatar,
   isOnline,
   streak,
+  isStreakLoaded = true,
   onGenerateSpark,
   isGeneratingSpark,
   partnerId,
@@ -214,19 +217,32 @@ export function ChatHeader({
     }
   };
 
+  const {
+    permission,
+    isGranted,
+    requestPermission,
+  } = useNotificationSetup({
+    userId: myId,
+    db,
+    onTokenSaved: () => {
+      console.log("[ChatHeader] Push token saved for myId:", myId);
+    },
+  });
+
   const toggleNotifications = async (checked: boolean) => {
     if (!("Notification" in window)) {
       toast({ variant: "destructive", title: "Not Supported", description: "Browser restrictions." });
       return;
     }
     if (checked) {
-      const permission = await Notification.requestPermission();
-      if (permission === "granted") {
-        setNotificationsEnabled(true);
-        toast({ title: "Notifications On", description: "Alerts enabled! ❤️" });
+      const res = await requestPermission();
+      if (res === "granted") {
+        toast({ title: "Notifications On", description: "Real push alerts enabled! ❤️" });
+      } else if (res === "denied") {
+        toast({ variant: "destructive", title: "Permission Denied", description: "Please enable notifications in site settings." });
       }
     } else {
-      setNotificationsEnabled(false);
+      toast({ title: "Notifications Off", description: "Muted on this device." });
     }
   };
 
@@ -241,8 +257,10 @@ export function ChatHeader({
         });
         toast({ title: "Test Sent", description: "System tray check! ❤️" });
       } catch (e) {
-        toast({ variant: "destructive", title: "Error", description: "Check sw.js status." });
+        toast({ variant: "destructive", title: "Error", description: "Check service worker status." });
       }
+    } else {
+      toast({ title: "Notifications not enabled", description: "Turn on notifications above first." });
     }
   };
 
@@ -438,7 +456,9 @@ export function ChatHeader({
             className="bg-orange-500/10 text-orange-500 border-none gap-1 hidden sm:flex items-center font-headline px-2 py-0.5 rounded-full shrink-0 shadow-sm h-7"
           >
             <Flame className="w-3 h-3 fill-orange-500" />
-            <span className="text-[11px] font-bold">{streak}</span>
+            <span className="text-[11px] font-bold">
+              {isStreakLoaded ? streak : <span className="inline-block w-3 h-3 bg-orange-500/30 animate-pulse rounded-full" />}
+            </span>
           </Badge>
 
           {/* Quick Call Buttons (Real App Feel) */}
@@ -535,7 +555,9 @@ export function ChatHeader({
                         <p className="text-[9px] text-muted-foreground">Keep the connection active daily!</p>
                       </div>
                     </div>
-                    <span className="font-headline text-xl font-black pr-1">{streak}</span>
+                    <span className="font-headline text-xl font-black pr-1">
+                      {isStreakLoaded ? streak : <span className="inline-block w-6 h-5 bg-orange-500/30 animate-pulse rounded" />}
+                    </span>
                   </div>
 
                   <div className="space-y-2">

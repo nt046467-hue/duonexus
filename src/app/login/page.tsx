@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { signInAnonymously, updateProfile } from "firebase/auth";
+import { signInWithCustomToken, updateProfile } from "firebase/auth";
 import { useAuth, useUser } from "@/firebase";
 import { motion, AnimatePresence, useAnimation, useReducedMotion } from "motion/react";
 import { Delete, Check, AlertCircle, ExternalLink, Sun, Moon } from "lucide-react";
@@ -120,13 +120,17 @@ export default function LoginPage() {
           } catch {}
         }
 
-        // Authenticate with Firebase using resolved identity
+        // Authenticate with Firebase using resolved identity & server-minted custom token
         const identity: string = data.identity || "nabin";
         const displayName = identity === "nabin" ? "Nabin" : "Karu";
         const photoURL = identity === "nabin" ? "/avatars/nabin.png" : "/avatars/karu.png";
 
-        // Firebase sign-in & update profile
-        const userCredential = await signInAnonymously(auth);
+        if (!data.customToken) {
+          throw new Error("Failed to obtain secure authentication token from server.");
+        }
+
+        // Firebase sign-in with role-gated custom token & update profile
+        const userCredential = await signInWithCustomToken(auth, data.customToken);
         await updateProfile(userCredential.user, { displayName, photoURL });
         localStorage.setItem("duonexus_role", identity);
 
@@ -142,16 +146,7 @@ export default function LoginPage() {
         setPin("");
         setScreenState("pin");
 
-        if (
-          err?.code === "auth/admin-restricted-operation" ||
-          err?.message?.includes("admin-restricted-operation")
-        ) {
-          setAuthError(
-            "Anonymous sign-in is disabled. Please go to your Firebase Console > Authentication > Sign-in method and enable 'Anonymous'."
-          );
-        } else {
-          setAuthError(err?.message || "An unexpected error occurred during login.");
-        }
+        setAuthError(err?.message || "An unexpected error occurred during login.");
 
         toast({
           variant: "destructive",
@@ -232,12 +227,12 @@ export default function LoginPage() {
   return (
     <div
       className={cn(
-        "h-[100dvh] w-full overflow-hidden flex flex-col items-center justify-center font-sans antialiased transition-colors duration-300 relative select-none",
+        "min-h-[100dvh] w-full overflow-y-auto flex flex-col items-center justify-center font-sans antialiased transition-colors duration-300 relative select-none py-8",
         isDark ? "bg-[#0C0C0C] text-gray-100 selection:bg-gray-800" : "bg-[#F8FAFC] text-gray-900 selection:bg-rose-100"
       )}
       style={{
-        paddingTop: "max(1.25rem, env(safe-area-inset-top))",
-        paddingBottom: "max(1.25rem, env(safe-area-inset-bottom))",
+        paddingTop: "max(2rem, env(safe-area-inset-top))",
+        paddingBottom: "max(2rem, env(safe-area-inset-bottom))",
         paddingLeft: "max(1rem, env(safe-area-inset-left))",
         paddingRight: "max(1rem, env(safe-area-inset-right))",
       }}
@@ -272,7 +267,7 @@ export default function LoginPage() {
                 : { opacity: 0, scale: 0.95, y: -16 }
             }
             transition={{ duration: 0.38, ease: [0.22, 1, 0.36, 1] }}
-            className="w-full max-w-[420px] mx-auto flex flex-col items-center px-4 will-change-transform"
+            className="w-full max-w-[420px] mx-auto flex flex-col items-center px-4 will-change-transform my-auto"
           >
             <motion.div
               initial="hidden"
