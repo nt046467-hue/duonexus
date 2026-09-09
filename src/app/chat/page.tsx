@@ -4290,14 +4290,41 @@ export default function ChatPage() {
                         if (debouncedSearchQuery.trim()) scrollToMessage(msg.id);
                       }}
                     >
-                    {/* Partner Avatar for incoming messages */}
+                    {/* Swipe-to-reply reveal icon for partner messages (revealed on left as avatar & bubble slide right) */}
+                    {!isMe && swipingMsgState?.id === msg.id && (
+                      <div
+                        className="absolute left-1 top-1/2 -translate-y-1/2 z-0 flex items-center justify-center pointer-events-none"
+                        style={{
+                          transform: `translateY(-50%) scale(${Math.min(1.2, 0.65 + (Math.max(0, swipingMsgState.deltaX) / 50) * 0.55)})`,
+                          opacity: Math.min(1, Math.max(0, swipingMsgState.deltaX) / 25),
+                        }}
+                      >
+                        <div
+                          className={`w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-colors ${
+                            swipingMsgState.triggered
+                              ? "bg-[#0084ff] text-white ring-2 ring-[#0084ff]/30"
+                              : c("bg-gray-200 text-gray-700", "bg-zinc-700 text-gray-200")
+                          }`}
+                        >
+                          <CornerUpLeft className="w-4 h-4 stroke-[2.5]" />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Partner Avatar for incoming messages — smoothly slides right with bubble on swipe */}
                     {!isMe && (
-                      <div className="w-8 flex-shrink-0 mr-2 flex flex-col justify-end pb-1 self-end">
-                        {isLastInGroup ? (
+                      <div
+                        className="w-8 flex-shrink-0 mr-2 flex flex-col justify-end pb-1 self-end relative z-10"
+                        style={{
+                          transform: swipingMsgState?.id === msg.id && !isMe ? `translateX(${swipingMsgState.deltaX}px)` : undefined,
+                          transition: swipingMsgState?.id === msg.id ? "none" : "transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1)",
+                        }}
+                      >
+                        {isLastInGroup || (swipingMsgState?.id === msg.id && !isMe) ? (
                           <img
                             src={partnerAvatar}
                             alt={finalPartnerName}
-                            className="w-8 h-8 rounded-full object-cover shadow-sm border border-white/10 bg-black"
+                            className="w-8 h-8 rounded-full object-cover shadow-sm border border-white/10 bg-black pointer-events-none"
                           />
                         ) : (
                           <div className="w-8 h-8" />
@@ -4305,30 +4332,30 @@ export default function ChatPage() {
                       </div>
                     )}
 
+                    {/* Swipe-to-reply reveal icon for own messages (revealed on right as bubble slides left) */}
+                    {isMe && swipingMsgState?.id === msg.id && (
+                      <div
+                        className="absolute right-1 top-1/2 -translate-y-1/2 z-0 flex items-center justify-center pointer-events-none"
+                        style={{
+                          transform: `translateY(-50%) scale(${Math.min(1.2, 0.65 + (Math.abs(swipingMsgState.deltaX) / 50) * 0.55)})`,
+                          opacity: Math.min(1, Math.abs(swipingMsgState.deltaX) / 25),
+                        }}
+                      >
+                        <div
+                          className={`w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-colors ${
+                            swipingMsgState.triggered
+                              ? "bg-[#0084ff] text-white ring-2 ring-[#0084ff]/30"
+                              : c("bg-gray-200 text-gray-700", "bg-zinc-700 text-gray-200")
+                          }`}
+                        >
+                          <CornerUpLeft className="w-4 h-4 stroke-[2.5]" />
+                        </div>
+                      </div>
+                    )}
+
                     <div className={`relative flex items-center overflow-visible max-w-[85%] sm:max-w-[75%] md:max-w-[65%] lg:max-w-[55%] xl:max-w-[520px] ${isMsgSelectedOnMobile ? "overflow-visible z-[61]" : ""
                       }`}>
                       {isMe && actionButtons}
-
-                      {/* Swipe-to-reply reveal icon — appears on the right side on left-drag */}
-                      {swipingMsgState?.id === msg.id && (
-                        <div
-                          className="absolute -right-9 top-1/2 -translate-y-1/2 z-0 flex items-center justify-center pointer-events-none"
-                          style={{
-                            transform: `translateY(-50%) scale(${Math.min(1.2, 0.65 + (Math.abs(swipingMsgState.deltaX) / 50) * 0.55)})`,
-                            opacity: Math.min(1, Math.abs(swipingMsgState.deltaX) / 25),
-                          }}
-                        >
-                          <div
-                            className={`w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-colors ${
-                              swipingMsgState.triggered
-                                ? "bg-[#0084ff] text-white ring-2 ring-[#0084ff]/30"
-                                : c("bg-gray-200 text-gray-700", "bg-zinc-700 text-gray-200")
-                            }`}
-                          >
-                            <CornerUpLeft className="w-4 h-4 stroke-[2.5]" />
-                          </div>
-                        </div>
-                      )}
 
                       <div
                         onTouchStart={(e) => {
@@ -4363,23 +4390,45 @@ export default function ChatPage() {
                             }
                           }
 
-                          // Swipe-to-reply: drag leftward with horizontal dominance (like Messenger)
-                          if (rawDeltaX < -8 && absX > absY * 1.1) {
-                            const deltaX = Math.max(-64, rawDeltaX * 0.55); // negative value
-                            const triggered = rawDeltaX <= -50;
+                          // Swipe-to-reply:
+                          // - Partner message (!isMe): swipe RIGHT to reply, profile & bubble slide right
+                          // - Own message (isMe): swipe LEFT to reply, bubble slides left
+                          if (isMe) {
+                            if (rawDeltaX < -8 && absX > absY * 1.1) {
+                              const deltaX = Math.max(-64, rawDeltaX * 0.55); // negative value
+                              const triggered = rawDeltaX <= -50;
 
-                            if (triggered && !swipeVibratedRef.current) {
-                              swipeVibratedRef.current = true;
-                              if (typeof window !== "undefined" && window.navigator?.vibrate) {
-                                try { window.navigator.vibrate(15); } catch { }
+                              if (triggered && !swipeVibratedRef.current) {
+                                swipeVibratedRef.current = true;
+                                if (typeof window !== "undefined" && window.navigator?.vibrate) {
+                                  try { window.navigator.vibrate(15); } catch { }
+                                }
+                              } else if (!triggered && swipeVibratedRef.current) {
+                                swipeVibratedRef.current = false;
                               }
-                            } else if (!triggered && swipeVibratedRef.current) {
-                              swipeVibratedRef.current = false;
-                            }
 
-                            setSwipingMsgState({ id: msg.id, deltaX, triggered });
-                          } else if (swipingMsgState?.id === msg.id && rawDeltaX >= -5) {
-                            setSwipingMsgState(null);
+                              setSwipingMsgState({ id: msg.id, deltaX, triggered });
+                            } else if (swipingMsgState?.id === msg.id && rawDeltaX >= -5) {
+                              setSwipingMsgState(null);
+                            }
+                          } else {
+                            if (rawDeltaX > 8 && absX > absY * 1.1) {
+                              const deltaX = Math.min(64, rawDeltaX * 0.55); // positive value
+                              const triggered = rawDeltaX >= 50;
+
+                              if (triggered && !swipeVibratedRef.current) {
+                                swipeVibratedRef.current = true;
+                                if (typeof window !== "undefined" && window.navigator?.vibrate) {
+                                  try { window.navigator.vibrate(15); } catch { }
+                                }
+                              } else if (!triggered && swipeVibratedRef.current) {
+                                swipeVibratedRef.current = false;
+                              }
+
+                              setSwipingMsgState({ id: msg.id, deltaX, triggered });
+                            } else if (swipingMsgState?.id === msg.id && rawDeltaX <= 5) {
+                              setSwipingMsgState(null);
+                            }
                           }
                         }}
                         onTouchEnd={() => {
@@ -4392,6 +4441,9 @@ export default function ChatPage() {
                               didSwipeRef.current = true;
                               setReplyingTo(msg);
                               inputRef.current?.focus();
+                              if (typeof window !== "undefined" && window.navigator?.vibrate) {
+                                try { window.navigator.vibrate(20); } catch { }
+                              }
                             }
                             setSwipingMsgState(null);
                             swipeVibratedRef.current = false;
@@ -4968,22 +5020,6 @@ export default function ChatPage() {
                   {getCleanMessagePreview(replyingTo, finalPartnerName).text}
                 </span>
               </div>
-
-              {/* Right: avatar — show partner avatar when replying to partner's message */}
-              {replyingTo.senderRole !== myId && (
-                <img
-                  src={partnerAvatar}
-                  alt={finalPartnerName}
-                  className="w-8 h-8 rounded-full object-cover border border-white/10 shrink-0 shadow-sm"
-                />
-              )}
-              {replyingTo.senderRole === myId && user?.photoURL && (
-                <img
-                  src={user.photoURL}
-                  alt="You"
-                  className="w-8 h-8 rounded-full object-cover border border-white/10 shrink-0 shadow-sm"
-                />
-              )}
             </div>
           )}
 

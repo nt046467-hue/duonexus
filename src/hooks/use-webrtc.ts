@@ -26,6 +26,67 @@ export const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   channelCount: 1, // Enforces mono voice channel so hardware/browser Acoustic Echo Cancellation (AEC) is active
 };
 
+/**
+ * Configure video RTCRtpSender:
+ * - Cap video bitrate at 2Mbps (2_000_000 bps)
+ * - Set priority to "medium" so audio ("high") is prioritized during bandwidth contention / TURN relay
+ * - Set degradationPreference to "maintain-resolution"
+ */
+export function applyVideoSenderParameters(sender: RTCRtpSender): Promise<void> {
+  try {
+    const params = sender.getParameters();
+    if (params.encodings && params.encodings.length > 0) {
+      params.encodings[0].maxBitrate = 2_000_000;
+      params.encodings[0].priority = "medium";
+      (params.encodings[0] as any).networkPriority = "medium";
+    } else {
+      params.encodings = [{
+        maxBitrate: 2_000_000,
+        priority: "medium",
+      }];
+    }
+    (params as any).degradationPreference = "maintain-resolution";
+    return sender.setParameters(params).then(() => {
+      console.log("[WebRTC] Video sender encoding parameters applied (2Mbps maxBitrate, priority: medium, maintain-resolution)");
+    }).catch((err) => {
+      console.warn("[WebRTC] Failed to set video sender parameters:", err);
+    });
+  } catch (err) {
+    console.warn("[WebRTC] Error configuring video sender parameters:", err);
+    return Promise.resolve();
+  }
+}
+
+/**
+ * Explicitly prioritize audio RTCRtpSender:
+ * - NO artificial maxBitrate cap (audio should have no artificial maxBitrate set)
+ * - Set priority to "high" so audio never gets starved by video competing for TURN-relayed bandwidth
+ */
+export function applyAudioSenderParameters(sender: RTCRtpSender): Promise<void> {
+  try {
+    const params = sender.getParameters();
+    if (params.encodings && params.encodings.length > 0) {
+      params.encodings.forEach((enc) => {
+        delete enc.maxBitrate;
+        enc.priority = "high";
+        (enc as any).networkPriority = "high";
+      });
+    } else {
+      params.encodings = [{
+        priority: "high",
+      }];
+    }
+    return sender.setParameters(params).then(() => {
+      console.log("[WebRTC] Audio RTCRtpSender prioritized (no bitrate cap, priority: high)");
+    }).catch((err) => {
+      console.warn("[WebRTC] Failed to set audio sender parameters:", err);
+    });
+  } catch (err) {
+    console.warn("[WebRTC] Error configuring audio sender parameters:", err);
+    return Promise.resolve();
+  }
+}
+
 interface UseWebRTCOptions {
   myId: string;
   partnerId: string;
@@ -240,22 +301,9 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
         if (localStreamRef.current) {
           const sender = pc.addTrack(track, localStreamRef.current);
           if (track.kind === "video") {
-            try {
-              const params = sender.getParameters();
-              params.encodings = [{
-                maxBitrate: 2_000_000,
-                priority: "high",
-              }];
-              // Prefer dropping framerate over resolution on congested links
-              (params as any).degradationPreference = "maintain-resolution";
-              sender.setParameters(params).then(() => {
-                console.log("[WebRTC] Initial video bitrate constraint of 2Mbps set successfully");
-              }).catch((err) => {
-                console.warn("[WebRTC] Failed to set initial video bitrate constraint:", err);
-              });
-            } catch (err) {
-              console.warn("[WebRTC] Error setting initial video encoding parameters:", err);
-            }
+            applyVideoSenderParameters(sender);
+          } else if (track.kind === "audio") {
+            applyAudioSenderParameters(sender);
           }
         }
       });
@@ -398,6 +446,11 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
             "renegotiation.answeredBy": myId,
           });
           console.log("[WebRTC] Renegotiation answer sent to partner");
+          // Re-affirm sender priorities post renegotiation
+          const vSender = pc.getSenders().find((s) => s.track?.kind === "video");
+          if (vSender) applyVideoSenderParameters(vSender);
+          const aSender = pc.getSenders().find((s) => s.track?.kind === "audio");
+          if (aSender) applyAudioSenderParameters(aSender);
         } catch (err) {
           console.error("[WebRTC] Error handling renegotiation offer:", err);
         }
@@ -414,6 +467,11 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
           await pc.setRemoteDescription(new RTCSessionDescription(data.renegotiation.answer));
           await flushPendingCandidates(pc);
           console.log("[WebRTC] Renegotiation remote answer applied");
+          // Re-affirm sender priorities post renegotiation
+          const vSender = pc.getSenders().find((s) => s.track?.kind === "video");
+          if (vSender) applyVideoSenderParameters(vSender);
+          const aSender = pc.getSenders().find((s) => s.track?.kind === "audio");
+          if (aSender) applyAudioSenderParameters(aSender);
         } catch (err) {
           console.error("[WebRTC] Error handling renegotiation answer:", err);
         }
@@ -818,18 +876,16 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
         try {
           await sender.replaceTrack(newVideoTrack);
           console.log("[WebRTC] RTCRtpSender video track successfully replaced.");
-          const params = sender.getParameters();
-          params.encodings = [{
-            maxBitrate: 2_000_000,
-            priority: "high",
-          }];
-          (params as any).degradationPreference = "maintain-resolution";
-          await sender.setParameters(params);
+          await applyVideoSenderParameters(sender);
         } catch (e) {
           console.error("[WebRTC] RTCRtpSender.replaceTrack failed:", e);
           newVideoTrack.stop();
           return;
         }
+      }
+      const audioSender = pcRef.current.getSenders().find((s) => s.track?.kind === "audio");
+      if (audioSender) {
+        await applyAudioSenderParameters(audioSender);
       }
     }
 
@@ -883,9 +939,14 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
         if (sender) {
           try {
             await sender.replaceTrack(existingVideoTrack);
+            await applyVideoSenderParameters(sender);
           } catch (e) {
             console.warn("[WebRTC] Failed to replaceTrack with existing video track:", e);
           }
+        }
+        const audioSender = pc.getSenders().find((s) => s.track?.kind === "audio");
+        if (audioSender) {
+          await applyAudioSenderParameters(audioSender);
         }
       }
       setIsVideoEnabled(true);
@@ -954,29 +1015,19 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
     if (sender) {
       try {
         await sender.replaceTrack(newVideoTrack);
-        const params = sender.getParameters();
-        params.encodings = [{
-          maxBitrate: 2_000_000,
-          priority: "high",
-        }];
-        (params as any).degradationPreference = "maintain-resolution";
-        await sender.setParameters(params);
+        await applyVideoSenderParameters(sender);
       } catch (e) {
         console.warn("[WebRTC] Failed to replaceTrack on existing sender:", e);
       }
     } else {
       const newSender = pc.addTrack(newVideoTrack, localStreamRef.current!);
-      try {
-        const params = newSender.getParameters();
-        params.encodings = [{
-          maxBitrate: 2_000_000,
-          priority: "high",
-        }];
-        (params as any).degradationPreference = "maintain-resolution";
-        await newSender.setParameters(params);
-      } catch (e) {
-        console.warn("[WebRTC] Failed to set bitrate on new sender:", e);
-      }
+      await applyVideoSenderParameters(newSender);
+    }
+
+    // Explicitly prioritize audio RTCRtpSender without bitrate cap
+    const audioSender = pc.getSenders().find((s) => s.track?.kind === "audio");
+    if (audioSender) {
+      await applyAudioSenderParameters(audioSender);
     }
 
     // Renegotiate connection
