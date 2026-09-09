@@ -30,6 +30,7 @@ interface CallScreenProps {
   onSwitchCamera?: () => void;
   onToggleVideo?: () => void;
   isVideoEnabled?: boolean;
+  isPartnerVideoEnabled?: boolean;
 }
 
 const FILTERS = [
@@ -52,6 +53,7 @@ export function CallScreen({
   onSwitchCamera,
   onToggleVideo,
   isVideoEnabled,
+  isPartnerVideoEnabled,
 }: CallScreenProps) {
   const [duration, setDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
@@ -168,12 +170,19 @@ export function CallScreen({
     }
   }, [localStream, isCamOff]);
 
+  // Check if partner is actively showing video (via explicit Firestore signaling or fallback)
+  const isPartnerShowingVideo =
+    typeof isPartnerVideoEnabled === "boolean"
+      ? isPartnerVideoEnabled
+      : (!!remoteStream && remoteHasVideo);
+
   // Connect remote stream to video element (when video is active)
   useEffect(() => {
-    if (remoteVideoRef.current && remoteStream && remoteHasVideo) {
+    if (remoteVideoRef.current && remoteStream && isPartnerShowingVideo) {
+      remoteVideoRef.current.muted = true;
       remoteVideoRef.current.srcObject = remoteStream;
     }
-  }, [remoteStream, remoteHasVideo]);
+  }, [remoteStream, isPartnerShowingVideo]);
 
   // Connect remote stream to audio element — always, for every call type
   // This is what actually produces sound in audio calls (and as fallback in video calls)
@@ -213,15 +222,13 @@ export function CallScreen({
 
   const currentFilterClass = FILTERS.find((f) => f.id === activeFilter)?.class || "";
 
-  // Show video layout if: initiated as video, or local cam is on, or remote has video
-  // This also handles the upgrade from audio → video when either party enables camera
-  const isShowingVideo = callType === "video" || !isCamOff || remoteHasVideo;
+  // Show video layout if: initiated as video, or local cam is on, or partner is showing video
+  const isShowingVideo = callType === "video" || !isCamOff || isPartnerShowingVideo;
 
   return (
     <div className="fixed inset-0 z-[250] bg-zinc-950 flex flex-col justify-between text-white safe-top safe-bottom select-none">
 
-      {/* Hidden audio element — always active for remote audio in ALL call types */}
-      {/* This is the element that actually outputs the partner's voice */}
+      {/* Hidden audio element — dedicated single audio output to prevent acoustic feedback loop / sound repeat */}
       <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
       
       {/* ── AUDIO CALL VIEW ── */}
@@ -249,34 +256,44 @@ export function CallScreen({
       {/* ── VIDEO CALL VIEW ── */}
       {isShowingVideo && (
         <div className="absolute inset-0 z-0 bg-black overflow-hidden animate-fade-in">
-          {/* Remote Video (Fullscreen) or Placeholder */}
-          {remoteStream && remoteHasVideo ? (
+          {/* Remote Video (Fullscreen) or Partner Camera Off View */}
+          {remoteStream && isPartnerShowingVideo ? (
             <video
               ref={remoteVideoRef}
               autoPlay
               playsInline
+              muted
               className={cn(
                 "w-full h-full object-cover transition-all duration-300",
                 currentFilterClass
               )}
             />
           ) : (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-900 gap-4">
-              <Avatar className="w-24 h-24 border border-white/10 shadow-2xl">
-                <AvatarImage src={partnerAvatar} className="object-cover" />
-                <AvatarFallback className="bg-primary/10 text-primary text-3xl font-headline font-bold">
-                  {partnerName?.[0]?.toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
-              <p className="text-xs font-headline uppercase tracking-widest text-muted-foreground/60">
-                {partnerName}'s camera is off
-              </p>
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950/95 backdrop-blur-xl gap-6 animate-fade-in">
+              <div className="relative">
+                <Avatar className="w-32 h-32 border-4 border-white/10 shadow-2xl animate-pulse">
+                  <AvatarImage src={partnerAvatar} className="object-cover" />
+                  <AvatarFallback className="bg-primary/15 text-primary text-5xl font-headline font-bold">
+                    {partnerName?.[0]?.toUpperCase() || "P"}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="absolute -bottom-2 -right-2 bg-zinc-900 border-2 border-white/20 rounded-full p-2.5 shadow-xl">
+                  <VideoOff className="w-5 h-5 text-red-400" />
+                </div>
+              </div>
+              <div className="text-center space-y-2">
+                <h3 className="text-2xl font-headline font-bold text-white tracking-wide">{partnerName}</h3>
+                <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-white/10 border border-white/10 text-white/70 text-xs font-headline uppercase tracking-widest">
+                  <VideoOff className="w-3.5 h-3.5 text-red-400" />
+                  <span>Camera is off</span>
+                </div>
+              </div>
             </div>
           )}
 
-          {/* Draggable Picture-in-Picture Local Preview */}
-          {localStream && !isCamOff && (
-            <div className="absolute top-16 right-4 w-28 aspect-[3/4] rounded-2xl overflow-hidden border border-white/15 shadow-2xl z-20">
+          {/* Picture-in-Picture Local Preview */}
+          {localStream && !isCamOff ? (
+            <div className="absolute top-16 right-4 w-28 aspect-[3/4] rounded-2xl overflow-hidden border border-white/15 shadow-2xl z-20 transition-all duration-300">
               <video
                 ref={localVideoRef}
                 autoPlay
@@ -285,7 +302,14 @@ export function CallScreen({
                 className="w-full h-full object-cover [transform:scaleX(-1)]"
               />
             </div>
-          )}
+          ) : isShowingVideo ? (
+            <div className="absolute top-16 right-4 w-24 aspect-[3/4] rounded-2xl overflow-hidden border border-white/10 bg-zinc-900/80 backdrop-blur-md shadow-2xl z-20 flex flex-col items-center justify-center p-2 text-center transition-all duration-300">
+              <div className="w-8 h-8 rounded-full bg-red-500/10 flex items-center justify-center mb-1 border border-red-500/20">
+                <VideoOff className="w-4 h-4 text-red-400" />
+              </div>
+              <span className="text-[10px] text-white/70 font-headline font-medium leading-tight">Your camera off</span>
+            </div>
+          ) : null}
         </div>
       )}
 

@@ -23,6 +23,7 @@ export const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,
   noiseSuppression: true,
   autoGainControl: true,
+  channelCount: 1, // Enforces mono voice channel so hardware/browser Acoustic Echo Cancellation (AEC) is active
 };
 
 interface UseWebRTCOptions {
@@ -43,6 +44,7 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isVideoEnabled, setIsVideoEnabled] = useState<boolean>(false);
+  const [isPartnerVideoEnabled, setIsPartnerVideoEnabled] = useState<boolean>(false);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -162,6 +164,7 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
 
     lastRenegotiationAtRef.current = 0;
     setIsVideoEnabled(false);
+    setIsPartnerVideoEnabled(false);
     pendingCandidatesRef.current = [];
     callStartedAtRef.current = null;
     setRemoteStream(null);
@@ -493,6 +496,7 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
         calleeId: partnerId,
         type,
         status: "ringing",
+        [`cam_${myId}`]: type === "video",
         offer: { sdp: offerDesc.sdp, type: offerDesc.type },
         createdAt: serverTimestamp(),
       });
@@ -530,6 +534,12 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
       unsubCallRef.current = onSnapshot(callDocRef, async (snapshot) => {
         const data = snapshot.data();
         if (!data) return;
+
+        // Monitor partner's camera on/off state in real time
+        if (data[`cam_${partnerId}`] !== undefined) {
+          setIsPartnerVideoEnabled(Boolean(data[`cam_${partnerId}`]));
+        }
+
         if (data.status === "declined") {
           console.log("[WebRTC] Call declined");
           if (callerRingTimerRef.current) { clearTimeout(callerRingTimerRef.current); callerRingTimerRef.current = null; }
@@ -613,6 +623,7 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
       // Push answer + active status to Firestore
       await updateDoc(callDocRef, {
         status: "active",
+        [`cam_${myId}`]: type === "video",
         answer: { sdp: answerDesc.sdp, type: answerDesc.type },
       });
 
@@ -622,6 +633,12 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
       unsubCallRef.current = onSnapshot(callDocRef, async (snapshot) => {
         const data = snapshot.data();
         if (!data) return;
+
+        // Monitor partner's camera on/off state in real time
+        if (data[`cam_${partnerId}`] !== undefined) {
+          setIsPartnerVideoEnabled(Boolean(data[`cam_${partnerId}`]));
+        }
+
         if (data.status === "missed") {
           console.log("[WebRTC] Call missed (callee perspective)");
           logCallOutcome(incomingCallId, type, "missed");
@@ -840,6 +857,9 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
         }
       }
       setIsVideoEnabled(false);
+      if (cid && db) {
+        updateDoc(doc(db, "calls", cid), { [`cam_${myId}`]: false }).catch(() => {});
+      }
       return;
     }
 
@@ -860,6 +880,9 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
         }
       }
       setIsVideoEnabled(true);
+      if (cid && db) {
+        updateDoc(doc(db, "calls", cid), { [`cam_${myId}`]: true }).catch(() => {});
+      }
       return;
     }
 
@@ -947,6 +970,7 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
       lastRenegotiationAtRef.current = version;
       await updateDoc(doc(db, "calls", cid), {
         type: "video",
+        [`cam_${myId}`]: true,
         renegotiation: {
           offer: { sdp: offer.sdp, type: offer.type },
           from: myId,
@@ -967,6 +991,7 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
     switchCamera,
     toggleVideo,
     isVideoEnabled,
+    isPartnerVideoEnabled,
     callId,
     callType,
     callState,

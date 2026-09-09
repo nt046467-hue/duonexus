@@ -2186,6 +2186,7 @@ export default function ChatPage() {
     switchCamera,
     toggleVideo,
     isVideoEnabled,
+    isPartnerVideoEnabled,
     callType,
     callState,
     localStream,
@@ -6094,6 +6095,7 @@ export default function ChatPage() {
           onSwitchCamera={switchCamera}
           onToggleVideo={toggleVideo}
           isVideoEnabled={isVideoEnabled}
+          isPartnerVideoEnabled={isPartnerVideoEnabled}
         />
       )}
       {/* Settings Dialog */}
