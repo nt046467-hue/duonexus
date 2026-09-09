@@ -12,9 +12,13 @@ function getFirebaseAdminApp(): App {
   const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   if (serviceAccountJson) {
     try {
-      const parsed = typeof serviceAccountJson === "string" && serviceAccountJson.trim().startsWith("{")
-        ? JSON.parse(serviceAccountJson)
-        : JSON.parse(Buffer.from(serviceAccountJson, "base64").toString("utf8"));
+      let raw = (typeof serviceAccountJson === "string" ? serviceAccountJson : "").trim();
+      if ((raw.startsWith("'") && raw.endsWith("'")) || (raw.startsWith('"') && raw.endsWith('"'))) {
+        raw = raw.slice(1, -1).trim();
+      }
+      const parsed = raw.startsWith("{")
+        ? JSON.parse(raw)
+        : JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
 
       if (parsed.private_key) {
         parsed.private_key = parsed.private_key.replace(/\\n/g, "\n");

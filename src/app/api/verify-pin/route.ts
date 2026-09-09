@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { adminAuth } from "@/lib/firebase-admin";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
