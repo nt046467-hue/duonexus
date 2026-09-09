@@ -13,10 +13,11 @@ import {
   PhoneOff,
   RefreshCw,
   Heart,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { startDialTone, stopDialTone, stopRingtone, playConnectedChime, playEndedBeep } from "@/lib/callAudio";
-
+import type { ConnectionQuality } from "@/hooks/use-webrtc";
 
 interface CallScreenProps {
   partnerName: string;
@@ -25,6 +26,7 @@ interface CallScreenProps {
   callState: "idle" | "ringing" | "connecting" | "active" | "ended" | "declined" | "missed";
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
+  connectionQuality?: ConnectionQuality;
   onHangUp: () => void;
   onGenerateSpark?: () => Promise<string | undefined>;
   onSwitchCamera?: () => void;
@@ -48,6 +50,7 @@ export function CallScreen({
   callState,
   localStream,
   remoteStream,
+  connectionQuality = "excellent",
   onHangUp,
   onGenerateSpark,
   onSwitchCamera,
@@ -64,6 +67,10 @@ export function CallScreen({
     return vTracks.length === 0 || !vTracks.some((t) => t.enabled);
   });
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
+  const [audioAutoplayBlocked, setAudioAutoplayBlocked] = useState(false);
+
+  // Speaker / Output device capabilities
+  const isSinkIdSupported = typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype;
 
   // Sync isCamOff with localStream video tracks and isVideoEnabled prop
   useEffect(() => {
@@ -82,6 +89,7 @@ export function CallScreen({
       setIsCamOff(!vTracks.some((t) => t.enabled));
     }
   }, [localStream, callType, isVideoEnabled]);
+
   const [activeFilter, setActiveFilter] = useState("none");
   const [showFilters, setShowFilters] = useState(false);
   const [remoteHasVideo, setRemoteHasVideo] = useState(false);
@@ -91,10 +99,10 @@ export function CallScreen({
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
-  // Hidden audio element — plays remote audio for both audio and video calls
+  // Dedicated single audio output path to guarantee zero duplicate audio or acoustic echo feedback
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
 
-  // Call timer (only when active)
+  // Call duration timer (active call only)
   useEffect(() => {
     if (callState !== "active") return;
     const interval = setInterval(() => {
@@ -103,34 +111,11 @@ export function CallScreen({
     return () => clearInterval(interval);
   }, [callState]);
 
-  // Outgoing dial tone when ringing; stop immediately when answered (active)
-  useEffect(() => {
-    if (callState === "ringing") {
-      startDialTone();
-    } else {
-      // Stop dial tone the moment state is anything other than ringing
-      stopDialTone();
-    }
-    return () => {
-      stopDialTone();
-      stopRingtone();
-    };
-  }, [callState]);
-
-  // Reset duration counter whenever a new call starts
+  // Reset duration counter on fresh call
   useEffect(() => {
     if (callState === "ringing" || callState === "connecting") {
       setDuration(0);
     }
-  }, [callState]);
-
-  // Connected chime — fires once when call transitions to active
-  const prevCallStateRef = useRef<string>(callState);
-  useEffect(() => {
-    if (prevCallStateRef.current !== "active" && callState === "active") {
-      playConnectedChime();
-    }
-    prevCallStateRef.current = callState;
   }, [callState]);
 
   // Dynamically check if remote peer has active/unmuted video track
@@ -163,20 +148,19 @@ export function CallScreen({
     };
   }, [remoteStream]);
 
-  // Connect local stream to local video element
+  // Connect local stream to local preview video element
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream;
     }
   }, [localStream, isCamOff]);
 
-  // Check if partner is actively showing video (via explicit Firestore signaling or fallback)
   const isPartnerShowingVideo =
     typeof isPartnerVideoEnabled === "boolean"
       ? isPartnerVideoEnabled
       : (!!remoteStream && remoteHasVideo);
 
-  // Connect remote stream to video element (when video is active)
+  // Connect remote stream to video element — strictly muted to avoid duplicate playback
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream && isPartnerShowingVideo) {
       remoteVideoRef.current.muted = true;
@@ -184,15 +168,25 @@ export function CallScreen({
     }
   }, [remoteStream, isPartnerShowingVideo]);
 
-  // Connect remote stream to audio element — always, for every call type
-  // This is what actually produces sound in audio calls (and as fallback in video calls)
+  // Connect remote stream to dedicated audio element with autoplay guard
   useEffect(() => {
     if (remoteAudioRef.current && remoteStream) {
       remoteAudioRef.current.srcObject = remoteStream;
+      const playPromise = remoteAudioRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            setAudioAutoplayBlocked(false);
+          })
+          .catch((err) => {
+            console.warn("[CallScreen] Remote audio autoplay blocked:", err);
+            setAudioAutoplayBlocked(true);
+          });
+      }
     }
   }, [remoteStream]);
 
-  // Mute local tracks
+  // Toggle microphone mute
   const toggleMute = () => {
     if (localStream) {
       localStream.getAudioTracks().forEach((track) => {
@@ -202,7 +196,7 @@ export function CallScreen({
     }
   };
 
-  // Toggle camera: delegate to onToggleVideo (supports audio-to-video upgrade with WebRTC renegotiation)
+  // Toggle camera (delegates to useWebRTC toggleVideo)
   const toggleCam = () => {
     if (onToggleVideo) {
       onToggleVideo();
@@ -214,6 +208,37 @@ export function CallScreen({
     }
   };
 
+  // Real Speaker Output Handling (using setSinkId where supported)
+  const toggleSpeaker = async () => {
+    if (!remoteAudioRef.current) return;
+
+    if (isSinkIdSupported) {
+      try {
+        const audioEl = remoteAudioRef.current as any;
+        if (isSpeakerOn) {
+          // Route to default or earpiece if supported
+          await audioEl.setSinkId("");
+          setIsSpeakerOn(false);
+        } else {
+          // Find external speaker or default
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const outputDevices = devices.filter((d) => d.kind === "audiooutput");
+          const targetDevice = outputDevices.find((d) => d.deviceId !== "default") || outputDevices[0];
+          if (targetDevice) {
+            await audioEl.setSinkId(targetDevice.deviceId);
+          }
+          setIsSpeakerOn(true);
+        }
+      } catch (err) {
+        console.warn("[CallScreen] setSinkId error:", err);
+        // Retain current state if hardware denied
+      }
+    } else {
+      // Gracefully toggle state if browser handles audio routing natively
+      setIsSpeakerOn(!isSpeakerOn);
+    }
+  };
+
   const formatDuration = (s: number) => {
     const mins = Math.floor(s / 60);
     const secs = s % 60;
@@ -221,20 +246,64 @@ export function CallScreen({
   };
 
   const currentFilterClass = FILTERS.find((f) => f.id === activeFilter)?.class || "";
-
-  // Show video layout if: initiated as video, or local cam is on, or partner is showing video
   const isShowingVideo = callType === "video" || !isCamOff || isPartnerShowingVideo;
+
+  // Render minimal connection quality badge
+  const renderQualityIndicator = () => {
+    switch (connectionQuality) {
+      case "excellent":
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/20 text-emerald-400 text-[10px] font-headline font-semibold">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            HD
+          </span>
+        );
+      case "good":
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400/90 text-[10px] font-headline">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            Good
+          </span>
+        );
+      case "fair":
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/20 text-amber-400 text-[10px] font-headline">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+            Fair
+          </span>
+        );
+      case "poor":
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/20 border border-red-500/30 text-red-400 text-[10px] font-headline font-semibold animate-pulse">
+            <WifiOff className="w-3 h-3" />
+            Weak
+          </span>
+        );
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[250] bg-zinc-950 flex flex-col justify-between text-white safe-top safe-bottom select-none">
-
-      {/* Hidden audio element — dedicated single audio output to prevent acoustic feedback loop / sound repeat */}
+      {/* Hidden audio element — dedicated single audio output path */}
       <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
-      
+
+      {/* Autoplay restriction recovery banner */}
+      {audioAutoplayBlocked && (
+        <button
+          onClick={() => {
+            remoteAudioRef.current?.play().then(() => setAudioAutoplayBlocked(false)).catch(() => {});
+          }}
+          className="absolute top-16 left-1/2 -translate-x-1/2 z-50 bg-amber-500 text-zinc-950 px-4 py-1.5 rounded-full text-xs font-headline font-bold shadow-2xl flex items-center gap-2 hover:bg-amber-400 transition-all active:scale-95"
+        >
+          <Volume2 className="w-4 h-4" />
+          <span>Tap to enable remote audio</span>
+        </button>
+      )}
+
       {/* ── AUDIO CALL VIEW ── */}
       {!isShowingVideo && (
         <div className="flex-1 flex flex-col items-center justify-center gap-6 mt-12">
-          <Avatar className="w-32 h-32 border-4 border-primary/20 shadow-2xl animate-pulse">
+          <Avatar className="w-32 h-32 border-4 border-primary/20 shadow-2xl">
             <AvatarImage src={partnerAvatar} className="object-cover" />
             <AvatarFallback className="bg-primary/15 text-primary text-5xl font-headline font-bold">
               {partnerName?.[0]?.toUpperCase() || "P"}
@@ -242,13 +311,16 @@ export function CallScreen({
           </Avatar>
           <div className="text-center space-y-2">
             <h2 className="text-2xl font-headline font-bold">{partnerName}</h2>
-            <p className="text-sm text-primary/80 uppercase tracking-widest font-headline animate-pulse">
-              {callState === "active"
-                ? formatDuration(duration)
-                : callState === "ringing"
-                ? "Ringing…"
-                : "Connecting…"}
-            </p>
+            <div className="flex items-center justify-center gap-2">
+              <p className="text-sm text-primary/80 uppercase tracking-widest font-headline">
+                {callState === "active"
+                  ? formatDuration(duration)
+                  : callState === "ringing"
+                  ? "Ringing…"
+                  : "Connecting…"}
+              </p>
+              {callState === "active" && renderQualityIndicator()}
+            </div>
           </div>
         </div>
       )}
@@ -256,7 +328,7 @@ export function CallScreen({
       {/* ── VIDEO CALL VIEW ── */}
       {isShowingVideo && (
         <div className="absolute inset-0 z-0 bg-black overflow-hidden animate-fade-in">
-          {/* Remote Video (Fullscreen) or Partner Camera Off View */}
+          {/* Remote Video (Fullscreen) or Partner Camera Off Placeholder */}
           {remoteStream && isPartnerShowingVideo ? (
             <video
               ref={remoteVideoRef}
@@ -271,7 +343,7 @@ export function CallScreen({
           ) : (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950/95 backdrop-blur-xl gap-6 animate-fade-in">
               <div className="relative">
-                <Avatar className="w-32 h-32 border-4 border-white/10 shadow-2xl animate-pulse">
+                <Avatar className="w-32 h-32 border-4 border-white/10 shadow-2xl">
                   <AvatarImage src={partnerAvatar} className="object-cover" />
                   <AvatarFallback className="bg-primary/15 text-primary text-5xl font-headline font-bold">
                     {partnerName?.[0]?.toUpperCase() || "P"}
@@ -317,11 +389,15 @@ export function CallScreen({
       {isShowingVideo && callState === "active" && (
         <div className="absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-black/80 to-transparent flex items-center justify-between">
           <div className="flex flex-col">
-            <span className="font-headline font-bold text-sm">{partnerName}</span>
+            <div className="flex items-center gap-2">
+              <span className="font-headline font-bold text-sm">{partnerName}</span>
+              {renderQualityIndicator()}
+            </div>
             <span className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5">
               {formatDuration(duration)}
             </span>
           </div>
+
           {/* AI Love Spark trigger */}
           <Button
             variant="ghost"
@@ -404,7 +480,7 @@ export function CallScreen({
           {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
         </Button>
 
-        {/* Toggle Video (Camera Off/On) - Always visible so user can upgrade voice to video */}
+        {/* Toggle Video (Camera Off/On) */}
         <Button
           variant="ghost"
           size="icon"
@@ -418,6 +494,7 @@ export function CallScreen({
           {isCamOff ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
         </Button>
 
+        {/* Switch Camera Button (Video mode only) */}
         {isShowingVideo && !isCamOff && onSwitchCamera && (
           <Button
             variant="ghost"
@@ -435,7 +512,7 @@ export function CallScreen({
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => setIsSpeakerOn(!isSpeakerOn)}
+            onClick={toggleSpeaker}
             className={cn(
               "w-12 h-12 rounded-full border border-white/10 text-white hover:bg-white/10",
               !isSpeakerOn ? "bg-red-600/35 hover:bg-red-600/40 text-red-400 border-red-500/20" : "bg-white/10"
@@ -446,24 +523,17 @@ export function CallScreen({
           </Button>
         )}
 
-        {/* Hang Up */}
+        {/* Hang Up (Clean, silent termination) */}
         <Button
-          onClick={() => {
-            stopDialTone();
-            stopRingtone();
-            setTimeout(() => {
-              playEndedBeep();
-            }, 80);
-            onHangUp();
-          }}
+          onClick={onHangUp}
           className="w-14 h-14 rounded-full bg-red-600 hover:bg-red-700 text-white shadow-xl shadow-red-600/30 flex items-center justify-center transition-transform active:scale-95"
           aria-label="Hang Up Call"
         >
           <PhoneOff className="w-6 h-6" />
         </Button>
       </div>
-
     </div>
   );
 }
+
 

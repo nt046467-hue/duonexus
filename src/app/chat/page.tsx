@@ -2187,6 +2187,7 @@ export default function ChatPage() {
     toggleVideo,
     isVideoEnabled,
     isPartnerVideoEnabled,
+    connectionQuality,
     callType,
     callState,
     localStream,
@@ -6146,6 +6147,7 @@ export default function ChatPage() {
           callState={callState}
           localStream={localStream}
           remoteStream={remoteStream}
+          connectionQuality={connectionQuality}
           onHangUp={endCall}
           onGenerateSpark={handleGenerateSpark}
           onSwitchCamera={switchCamera}
