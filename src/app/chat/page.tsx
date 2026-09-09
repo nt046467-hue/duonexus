@@ -1026,40 +1026,10 @@ export default function ChatPage() {
             navigator.vibrate([100, 50, 100]);
           } catch { }
         }
-        // Native system browser push notification when away or tab is backgrounded
-        if (
-          notificationsEnabled &&
-          typeof window !== "undefined" &&
-          "Notification" in window &&
-          Notification.permission === "granted" &&
-          (document.visibilityState !== "visible" || !document.hasFocus())
-        ) {
-          try {
-            const bodyPreview =
-              latest.type === "image" ? "📷 Sent a photo" :
-                latest.type === "video" ? "🎥 Sent a video" :
-                  latest.type === "audio" ? "🎙️ Sent a voice note" :
-                    latest.type === "sticker" ? "🎭 Sent a sticker" :
-                      latest.type === "gif" ? "✨ Sent a GIF" :
-                        (latest.text || latest.content || "New message 💕");
-
-            const notif = new Notification(finalPartnerName || "DuoNexus", {
-              body: bodyPreview,
-              icon: partnerAvatar || "/favicon.ico",
-              tag: "duonexus-chat-msg",
-            });
-            notif.onclick = () => {
-              window.focus();
-              notif.close();
-            };
-          } catch (e) {
-            console.log("Notification trigger error:", e);
-          }
-        }
       }
       lastMessageIdRef.current = latest.id;
     }
-  }, [messages, myId, user, notificationsEnabled, soundEffectsEnabled, vibrationEnabled, finalPartnerName, partnerAvatar]);
+  }, [messages, myId, user, notificationsEnabled, soundEffectsEnabled, vibrationEnabled]);
 
   // Input & Reply & Attachment State
   const [inputText, setInputText] = useState("");
@@ -2179,13 +2149,14 @@ export default function ChatPage() {
    * Called by useWebRTC via the onCallMessage callback.
    */
   const writeCallMessage = useCallback(
-    (cType: "audio" | "video", cStatus: "completed" | "declined" | "missed", duration?: number) => {
+    (cType: "audio" | "video", cStatus: "completed" | "declined" | "missed", duration?: number, cId?: string) => {
       if (!firestore) return;
       addDoc(collection(firestore, "messages"), {
         senderUid: user?.uid || myId,
         senderName: myName,
         senderRole: myId,
         type: "call",
+        callId: cId || null,
         callType: cType,
         callStatus: cStatus,
         duration: typeof duration === "number" ? duration : null,
@@ -2213,6 +2184,8 @@ export default function ChatPage() {
     declineCall,
     endCall,
     switchCamera,
+    toggleVideo,
+    isVideoEnabled,
     callType,
     callState,
     localStream,
@@ -6119,6 +6092,8 @@ export default function ChatPage() {
           onHangUp={endCall}
           onGenerateSpark={handleGenerateSpark}
           onSwitchCamera={switchCamera}
+          onToggleVideo={toggleVideo}
+          isVideoEnabled={isVideoEnabled}
         />
       )}
       {/* Settings Dialog */}

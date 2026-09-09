@@ -28,6 +28,8 @@ interface CallScreenProps {
   onHangUp: () => void;
   onGenerateSpark?: () => Promise<string | undefined>;
   onSwitchCamera?: () => void;
+  onToggleVideo?: () => void;
+  isVideoEnabled?: boolean;
 }
 
 const FILTERS = [
@@ -48,11 +50,36 @@ export function CallScreen({
   onHangUp,
   onGenerateSpark,
   onSwitchCamera,
+  onToggleVideo,
+  isVideoEnabled,
 }: CallScreenProps) {
   const [duration, setDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
-  const [isCamOff, setIsCamOff] = useState(callType === "audio");
+  const [isCamOff, setIsCamOff] = useState(() => {
+    if (typeof isVideoEnabled === "boolean") return !isVideoEnabled;
+    if (!localStream) return callType === "audio";
+    const vTracks = localStream.getVideoTracks();
+    return vTracks.length === 0 || !vTracks.some((t) => t.enabled);
+  });
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
+
+  // Sync isCamOff with localStream video tracks and isVideoEnabled prop
+  useEffect(() => {
+    if (typeof isVideoEnabled === "boolean") {
+      setIsCamOff(!isVideoEnabled);
+      return;
+    }
+    if (!localStream) {
+      setIsCamOff(callType === "audio");
+      return;
+    }
+    const vTracks = localStream.getVideoTracks();
+    if (vTracks.length === 0) {
+      setIsCamOff(true);
+    } else {
+      setIsCamOff(!vTracks.some((t) => t.enabled));
+    }
+  }, [localStream, callType, isVideoEnabled]);
   const [activeFilter, setActiveFilter] = useState("none");
   const [showFilters, setShowFilters] = useState(false);
   const [remoteHasVideo, setRemoteHasVideo] = useState(false);
@@ -166,13 +193,15 @@ export function CallScreen({
     }
   };
 
-  // Toggle camera
+  // Toggle camera: delegate to onToggleVideo (supports audio-to-video upgrade with WebRTC renegotiation)
   const toggleCam = () => {
-    if (localStream) {
+    if (onToggleVideo) {
+      onToggleVideo();
+    } else if (localStream) {
       localStream.getVideoTracks().forEach((track) => {
         track.enabled = !track.enabled;
       });
-      setIsCamOff(!isCamOff);
+      setIsCamOff((prev) => !prev);
     }
   };
 
