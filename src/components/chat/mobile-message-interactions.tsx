@@ -42,7 +42,7 @@ export interface MobileInteractionMessage {
   sender?: "me" | "other";
   content?: string;
   text?: string;
-  type?: "text" | "image" | "audio" | "video" | "gif" | "sticker" | "location" | "file";
+  type?: "text" | "image" | "audio" | "video" | "gif" | "sticker" | "location" | "file" | "call";
   fileName?: string;
   fileSize?: number;
   fileType?: string;

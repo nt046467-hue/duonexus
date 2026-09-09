@@ -35,7 +35,7 @@ import { cn } from "@/lib/utils";
 import { uploadToCloudinary } from "@/lib/cloudinary";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { GifPicker } from "@/components/chat/gif-picker";
+import { MessengerMediaPicker } from "@/components/chat/messenger-media-picker";
 
 interface ReplyingTo {
   id: string;
@@ -1153,15 +1153,19 @@ export function MessageInput({
                 align="end"
                 sideOffset={12}
               >
-                <GifPicker
-                  onEmojiSelect={(emoji) => insertTextAtCursor(emoji)}
-                  onGifSelect={(gifUrl) => {
+                <MessengerMediaPicker
+                  open={true}
+                  variant="popover"
+                  onClose={() => {}}
+                  onSelectEmoji={(emoji) => insertTextAtCursor(emoji)}
+                  onSelectGif={(gifUrl) => {
                     onSendMessage(gifUrl, "gif");
                   }}
-                  onStickerSelect={(stickerUrl) => {
+                  onSelectSticker={(stickerUrl) => {
                     onSendMessage(stickerUrl, "sticker");
                   }}
                 />
+
               </PopoverContent>
             </Popover>
           </div>

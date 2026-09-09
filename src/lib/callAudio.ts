@@ -43,8 +43,9 @@ function playTone(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// INCOMING RING — Messenger-style melodic arpeggio (4 notes, loops every 3s)
+// INCOMING RING — Real audio melody file with automatic Web Audio synth fallback
 // ─────────────────────────────────────────────────────────────────────────────
+let realRingAudio: HTMLAudioElement | null = null;
 let ringCtx: AudioContext | null = null;
 let ringMasterGain: GainNode | null = null;
 let ringInterval: ReturnType<typeof setInterval> | null = null;
@@ -64,8 +65,7 @@ function playRingOnce() {
   });
 }
 
-export function startRingtone() {
-  stopRingtone();
+function startSynthRingtone() {
   ringCtx = getCtx();
   if (!ringCtx) return;
 
@@ -80,7 +80,47 @@ export function startRingtone() {
   ringInterval = setInterval(playRingOnce, 3000);
 }
 
+export function startRingtone() {
+  stopRingtone();
+
+  // Try real audio asset first
+  if (typeof window !== "undefined") {
+    try {
+      const audio = new Audio("/sounds/ringtone.mp3");
+      audio.loop = true;
+      audio.preload = "auto";
+      realRingAudio = audio;
+
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          console.warn("Real ringtone playback failed, falling back to Web Audio synth:", err);
+          if (realRingAudio === audio) {
+            realRingAudio = null;
+            startSynthRingtone();
+          }
+        });
+      }
+      return;
+    } catch (err) {
+      console.warn("Could not instantiate HTMLAudioElement, using synth ringtone:", err);
+      realRingAudio = null;
+    }
+  }
+
+  // Fallback to synthesized oscillator melody
+  startSynthRingtone();
+}
+
 export function stopRingtone() {
+  if (realRingAudio) {
+    try {
+      realRingAudio.pause();
+      realRingAudio.currentTime = 0;
+    } catch { }
+    realRingAudio = null;
+  }
+
   if (ringInterval) clearInterval(ringInterval);
   ringInterval = null;
 

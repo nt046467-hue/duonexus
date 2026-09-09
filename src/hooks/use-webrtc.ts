@@ -24,9 +24,11 @@ interface UseWebRTCOptions {
   onIncomingCall?: (callId: string, type: CallType) => void;
   onCallEnded?: () => void;
   onCameraError?: (errorName: string) => void;
+  /** Called once per call with the outcome so the chat thread can persist a log message */
+  onCallMessage?: (callType: CallType, callStatus: "completed" | "declined" | "missed", duration?: number) => void;
 }
 
-export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCameraError }: UseWebRTCOptions) {
+export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCameraError, onCallMessage }: UseWebRTCOptions) {
   const db = useFirestore();
   const [callId, setCallId] = useState<string | null>(null);
   const [callType, setCallType] = useState<CallType>("audio");
@@ -41,6 +43,10 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
   // callIdRef mirrors callId state — prevents stale closures in async callbacks
   const callIdRef = useRef<string | null>(null);
   const isCallerRef = useRef<boolean>(false);
+  // Tracks the wall-clock moment ICE became active — used to compute call duration
+  const callStartedAtRef = useRef<number | null>(null);
+  // Tracks the callType at the time the call was started to avoid stale closure in endCall
+  const callTypeRef = useRef<CallType>("audio");
 
   const unsubCallRef = useRef<(() => void) | null>(null);
   const unsubCandidatesCallerRef = useRef<(() => void) | null>(null);
@@ -54,6 +60,7 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
   // Keep refs updated
   useEffect(() => { callStateRef.current = callState; }, [callState]);
   useEffect(() => { callIdRef.current = callId; }, [callId]);
+  useEffect(() => { callTypeRef.current = callType; }, [callType]);
 
   const onIncomingCallRef = useRef(onIncomingCall);
   useEffect(() => {
@@ -69,6 +76,11 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
   useEffect(() => {
     onCameraErrorRef.current = onCameraError;
   }, [onCameraError]);
+
+  const onCallMessageRef = useRef(onCallMessage);
+  useEffect(() => {
+    onCallMessageRef.current = onCallMessage;
+  }, [onCallMessage]);
 
   // Clean up and mark call as ended in Firestore if user reloads the tab or closes the window
   useEffect(() => {
@@ -137,6 +149,7 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
     }
 
     pendingCandidatesRef.current = [];
+    callStartedAtRef.current = null;
     setRemoteStream(null);
     setCallId(null);
     callIdRef.current = null;
@@ -229,6 +242,8 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
       const state = pc.iceConnectionState;
       console.log("[WebRTC] ICE state:", state);
       if (state === "connected" || state === "completed") {
+        // Record the moment the call became active for duration calculation
+        if (!callStartedAtRef.current) callStartedAtRef.current = Date.now();
         setCallState("active");
       } else if (state === "failed") {
         console.warn("[WebRTC] ICE failed — attempting restart");
@@ -249,7 +264,10 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
     };
 
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === "connected") setCallState("active");
+      if (pc.connectionState === "connected") {
+        if (!callStartedAtRef.current) callStartedAtRef.current = Date.now();
+        setCallState("active");
+      }
     };
 
     return pc;
@@ -375,6 +393,8 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
       callerRingTimerRef.current = setTimeout(() => {
         if (callStateRef.current === "ringing" && callIdRef.current === newCallId) {
           console.log("[WebRTC] Ringing timeout — marking missed");
+          // Emit call log (caller perspective: unanswered = missed)
+          onCallMessageRef.current?.(type, "missed");
           updateDoc(doc(db, "calls", newCallId), {
             status: "missed",
             endedAt: serverTimestamp(),
@@ -475,8 +495,18 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
       unsubCallRef.current = onSnapshot(callDocRef, (snapshot) => {
         const data = snapshot.data();
         if (!data) return;
-        if (data.status === "ended" || data.status === "missed") {
+        if (data.status === "missed") {
+          console.log("[WebRTC] Call missed (callee perspective)");
+          // Callee perspective: we never answered → missed
+          onCallMessageRef.current?.(type, "missed");
+          cleanUp("ended");
+        } else if (data.status === "ended") {
           console.log("[WebRTC] Call ended by caller");
+          // If the call was active when the caller hung up, log as completed with duration
+          if (callStartedAtRef.current) {
+            const durationSec = Math.round((Date.now() - callStartedAtRef.current) / 1000);
+            onCallMessageRef.current?.(type, "completed", durationSec);
+          }
           cleanUp("ended");
         }
       });
@@ -501,8 +531,11 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
   }, [db, setupPeerConnection, getLocalStream, cleanUp, addCandidateSafe, flushPendingCandidates]);
 
   // Decline an incoming call
-  const declineCall = useCallback(async (incomingCallId: string) => {
+  const declineCall = useCallback(async (incomingCallId: string, incomingCallType?: CallType) => {
     if (!db) return;
+    // Emit call log message before cleanup clears callTypeRef
+    const logType = incomingCallType || callTypeRef.current;
+    onCallMessageRef.current?.(logType, "declined");
     try {
       await updateDoc(doc(db, "calls", incomingCallId), { status: "declined", endedAt: serverTimestamp() });
     } catch (e) {
@@ -513,6 +546,11 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
 
   // End an active or ringing call
   const endCall = useCallback(() => {
+    // Emit a call log message — only if the call actually connected (has a start timestamp)
+    if (callStartedAtRef.current) {
+      const durationSec = Math.round((Date.now() - callStartedAtRef.current) / 1000);
+      onCallMessageRef.current?.(callTypeRef.current, "completed", durationSec);
+    }
     // Caller cancels = "ended", not "missed" (missed is for the callee perspective)
     updateCallStatus("ended");
   }, [updateCallStatus]);

@@ -50,12 +50,6 @@ import {
   MessengerGalleryIcon,
 } from "@/components/chat/messenger-gallery-picker";
 import {
-  DesktopMediaPicker,
-  DesktopStickerPicker,
-  DesktopGifPicker,
-  DesktopEmojiPicker,
-} from "@/components/chat/desktop-media-picker";
-import {
   MobileSelectionHeader,
   MobileReactionPill,
   MobileReactionSheet,
@@ -168,7 +162,7 @@ export interface Message {
   sender?: "me" | "other";
   content?: string;
   text?: string;
-  type?: "text" | "image" | "audio" | "video" | "gif" | "sticker" | "location" | "file";
+  type?: "text" | "image" | "audio" | "video" | "gif" | "sticker" | "location" | "file" | "call";
   fileName?: string;
   fileSize?: number;
   fileType?: string;
@@ -195,6 +189,10 @@ export interface Message {
     image?: string;
     siteName?: string;
   };
+  // Call log fields — present only when type === "call"
+  callType?: "audio" | "video";
+  callStatus?: "completed" | "declined" | "missed";
+  duration?: number | null;
 }
 
 const PAGE_SIZE = 50;
@@ -1153,6 +1151,13 @@ export default function ChatPage() {
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
   const didLongPressRef = useRef<boolean>(false);
+
+  // Touch gesture states: swipe-to-reply and double-tap-to-heart
+  const [swipingMsgState, setSwipingMsgState] = useState<{ id: string; deltaX: number; triggered: boolean } | null>(null);
+  const swipeVibratedRef = useRef<boolean>(false);
+  const didSwipeRef = useRef<boolean>(false);
+  const lastTapRef = useRef<{ id: string; time: number } | null>(null);
+  const [heartPopMessageId, setHeartPopMessageId] = useState<string | null>(null);
 
   // Real Firestore typing state & listeners
   const [otherIsTyping, setOtherIsTyping] = useState(false);
@@ -2168,6 +2173,32 @@ export default function ChatPage() {
     setIncomingCallInfo(null);
   }, []);
 
+  /**
+   * Writes a system "call" message into the messages collection so the chat thread
+   * always shows a record of every call (completed, declined, or missed).
+   * Called by useWebRTC via the onCallMessage callback.
+   */
+  const writeCallMessage = useCallback(
+    (cType: "audio" | "video", cStatus: "completed" | "declined" | "missed", duration?: number) => {
+      if (!firestore) return;
+      addDoc(collection(firestore, "messages"), {
+        senderUid: user?.uid || myId,
+        senderName: myName,
+        senderRole: myId,
+        type: "call",
+        callType: cType,
+        callStatus: cStatus,
+        duration: typeof duration === "number" ? duration : null,
+        content: "",
+        text: "",
+        timestamp: serverTimestamp(),
+        status: "sent",
+        reactions: [],
+      }).catch((err) => console.error("[Chat] Failed to write call log message:", err));
+    },
+    [firestore, user, myId, myName]
+  );
+
   const handleCameraError = useCallback((errName: string) => {
     toast({
       variant: "destructive",
@@ -2192,6 +2223,7 @@ export default function ChatPage() {
     onIncomingCall: handleIncomingCall,
     onCallEnded: handleCallEnded,
     onCameraError: handleCameraError,
+    onCallMessage: writeCallMessage,
   });
 
   // Automatically ensure this device's push token is registered in Firestore
@@ -3972,17 +4004,6 @@ export default function ChatPage() {
               selectMobileMsg(null);
             }}
           >
-            {/* Date Pill */}
-            <div className="flex justify-center mb-3">
-              <span
-                className={`text-xs font-semibold px-4 py-1.5 rounded-full shadow-sm border tracking-wide select-none ${c(
-                  "bg-white text-gray-500 border-gray-200",
-                  "bg-[#262322] text-gray-400 border-zinc-800"
-                )}`}
-              >
-                Today
-              </span>
-            </div>
 
             {/* Empty state */}
             {messages.length === 0 && !messagesLoading && (
@@ -4016,6 +4037,26 @@ export default function ChatPage() {
                 // Format message time
                 const msgTs = msg.timestamp?.seconds ? msg.timestamp.seconds * 1000 : Date.now();
                 const timeStr = format(new Date(msgTs), "h:mm a");
+
+                // ── Date separator helper ────────────────────────────────────────────
+                const getDayLabel = (date: Date): string => {
+                  if (isToday(date)) return "Today";
+                  if (isYesterday(date)) return "Yesterday";
+                  if (date.getFullYear() === new Date().getFullYear())
+                    return format(date, "EEEE, MMMM d");   // e.g. "Tuesday, September 3"
+                  return format(date, "MMMM d, yyyy");     // e.g. "September 3, 2025"
+                };
+
+                const msgDate = new Date(msgTs);
+                const prevMsg = index > 0 ? filteredMessages[index - 1] : null;
+                const prevTs = prevMsg?.timestamp?.seconds ? prevMsg.timestamp.seconds * 1000 : null;
+                const prevDate = prevTs ? new Date(prevTs) : null;
+                // Show separator when this is the first message OR the calendar day changed
+                const showDateSeparator =
+                  !prevDate ||
+                  msgDate.getFullYear() !== prevDate.getFullYear() ||
+                  msgDate.getMonth() !== prevDate.getMonth() ||
+                  msgDate.getDate() !== prevDate.getDate();
 
                 // Helper: parse URLs in text and render them as real clickable links
                 const renderWithLinks = (text: string, query?: string) => {
@@ -4187,20 +4228,94 @@ export default function ChatPage() {
                 const isMsgSelectedOnMobile = isMobile && selectedMobileMessage?.id === msg.id;
                 const hasReactions = Boolean(msg.reactions && msg.reactions.length > 0);
 
-                return (
+                // ── Date separator pill ───────────────────────────────────────────────
+                const dateSeparator = showDateSeparator ? (
                   <div
-                    key={msg.id}
-                    id={`msg-${msg.id}`}
-                    className={`chat-message-item flex ${isMe ? "justify-end" : "justify-start"} relative group items-center ${hasReactions ? "mb-4" : "mb-1"
-                      } overflow-visible transition-colors ${isMsgSelectedOnMobile || isThisMsgMenuOpen
-                        ? "z-[60] overflow-visible bg-[#005c4b]/20 dark:bg-[#005c4b]/30 -mx-3 px-3 py-1 rounded-none"
-                        : "z-10"
-                      } ${debouncedSearchQuery.trim() ? "cursor-pointer hover:bg-white/5 p-1 rounded-xl transition-colors" : ""
-                      }`}
-                    onClick={() => {
-                      if (debouncedSearchQuery.trim()) scrollToMessage(msg.id);
-                    }}
+                    key={`sep-${msg.id}`}
+                    className={`flex items-center gap-3 my-3 px-2 select-none`}
+                    aria-hidden="true"
                   >
+                    <div className={`flex-1 h-px ${c("bg-gray-200/70", "bg-zinc-700/60")}`} />
+                    <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full uppercase tracking-wide ${
+                      c("text-gray-400 bg-gray-100/90", "text-gray-500 bg-zinc-800/90")
+                    }`}>
+                      {getDayLabel(msgDate)}
+                    </span>
+                    <div className={`flex-1 h-px ${c("bg-gray-200/70", "bg-zinc-700/60")}`} />
+                  </div>
+                ) : null;
+
+                // ── Call log bubble (centered system-style pill) ──────────────────────
+                if (msg.type === "call") {
+                  const isAudio = msg.callType === "audio";
+                  const cStatus = msg.callStatus;
+                  const dur = typeof msg.duration === "number" && msg.duration > 0 ? msg.duration : null;
+
+                  // Format duration: 0:32, 1:04, etc.
+                  const durationLabel = dur != null
+                    ? `${Math.floor(dur / 60)}:${String(dur % 60).padStart(2, "0")}`
+                    : null;
+
+                  let callLabel: string;
+                  if (cStatus === "completed" && durationLabel) {
+                    callLabel = `${isAudio ? "Audio" : "Video"} call · ${durationLabel}`;
+                  } else if (cStatus === "missed") {
+                    callLabel = `Missed ${isAudio ? "audio" : "video"} call`;
+                  } else if (cStatus === "declined") {
+                    callLabel = `${isAudio ? "Audio" : "Video"} call declined`;
+                  } else {
+                    callLabel = `${isAudio ? "Audio" : "Video"} call`;
+                  }
+
+                  const isMissedOrDeclined = cStatus === "missed" || cStatus === "declined";
+
+                  return (
+                    <Fragment key={msg.id}>
+                      {dateSeparator}
+                      <div
+                        id={`msg-${msg.id}`}
+                        className="flex justify-center w-full my-1.5 select-none"
+                      >
+                        <div
+                          className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-[12.5px] font-semibold shadow-sm border ${
+                            c(
+                              isMissedOrDeclined
+                                ? "bg-red-50 border-red-100 text-red-600"
+                                : "bg-gray-100/90 border-gray-200/80 text-gray-600",
+                              isMissedOrDeclined
+                                ? "bg-red-950/30 border-red-900/40 text-red-400"
+                                : "bg-zinc-800/80 border-zinc-700/60 text-gray-400"
+                            )
+                          }`}
+                        >
+                          {isAudio ? (
+                            <Phone className="w-3.5 h-3.5 shrink-0" strokeWidth={2.5} />
+                          ) : (
+                            <Video className="w-3.5 h-3.5 shrink-0" strokeWidth={2.5} />
+                          )}
+                          <span>{callLabel}</span>
+                          <span className={`text-[10.5px] font-normal opacity-60`}>{timeStr}</span>
+                        </div>
+                      </div>
+                    </Fragment>
+                  );
+                }
+                // ─────────────────────────────────────────────────────────────────────
+                return (
+                  <Fragment key={msg.id}>
+                    {dateSeparator}
+                    <div
+                      id={`msg-${msg.id}`}
+                      className={`chat-message-item flex ${isMe ? "justify-end" : "justify-start"} relative group items-center ${hasReactions ? "mb-4" : "mb-1"
+                        } overflow-visible transition-colors ${isMsgSelectedOnMobile || isThisMsgMenuOpen
+                          ? "z-[60] overflow-visible bg-[#005c4b]/20 dark:bg-[#005c4b]/30 -mx-3 px-3 py-1 rounded-none"
+                          : "z-10"
+                        } ${debouncedSearchQuery.trim() ? "cursor-pointer hover:bg-white/5 p-1 rounded-xl transition-colors" : ""
+                        }`}
+                      onClick={() => {
+                        if (debouncedSearchQuery.trim()) scrollToMessage(msg.id);
+                      }}
+                    >
                     {/* Partner Avatar for incoming messages */}
                     {!isMe && (
                       <div className="w-8 flex-shrink-0 mr-2 flex flex-col justify-end pb-1 self-end">
@@ -4220,11 +4335,34 @@ export default function ChatPage() {
                       }`}>
                       {isMe && actionButtons}
 
+                      {/* Swipe-to-reply reveal icon behind bubble on drag */}
+                      {swipingMsgState?.id === msg.id && (
+                        <div
+                          className="absolute -left-9 top-1/2 -translate-y-1/2 z-0 flex items-center justify-center pointer-events-none transition-transform"
+                          style={{
+                            transform: `translateY(-50%) scale(${Math.min(1.2, 0.65 + (swipingMsgState.deltaX / 50) * 0.55)})`,
+                            opacity: Math.min(1, swipingMsgState.deltaX / 25),
+                          }}
+                        >
+                          <div
+                            className={`w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-colors ${
+                              swipingMsgState.triggered
+                                ? "bg-[#005c4b] text-white ring-2 ring-[#005c4b]/30"
+                                : c("bg-gray-200 text-gray-700", "bg-zinc-700 text-gray-200")
+                            }`}
+                          >
+                            <CornerUpLeft className="w-4 h-4 stroke-[2.5]" />
+                          </div>
+                        </div>
+                      )}
+
                       <div
                         onTouchStart={(e) => {
                           if (!isMobile) return;
                           touchStartPosRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
                           didLongPressRef.current = false;
+                          didSwipeRef.current = false;
+                          swipeVibratedRef.current = false;
                           if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
                           longPressTimerRef.current = setTimeout(() => {
                             didLongPressRef.current = true;
@@ -4239,13 +4377,35 @@ export default function ChatPage() {
                         }}
                         onTouchMove={(e) => {
                           if (!touchStartPosRef.current) return;
-                          const deltaX = Math.abs(e.touches[0].clientX - touchStartPosRef.current.x);
-                          const deltaY = Math.abs(e.touches[0].clientY - touchStartPosRef.current.y);
-                          if (deltaX > 20 || deltaY > 20) {
+                          const rawDeltaX = e.touches[0].clientX - touchStartPosRef.current.x;
+                          const rawDeltaY = e.touches[0].clientY - touchStartPosRef.current.y;
+                          const absX = Math.abs(rawDeltaX);
+                          const absY = Math.abs(rawDeltaY);
+
+                          if (absX > 15 || absY > 15) {
                             if (longPressTimerRef.current) {
                               clearTimeout(longPressTimerRef.current);
                               longPressTimerRef.current = null;
                             }
+                          }
+
+                          // Swipe-to-reply: drag rightward with horizontal dominance
+                          if (rawDeltaX > 8 && absX > absY * 1.1) {
+                            const deltaX = Math.min(64, rawDeltaX * 0.55);
+                            const triggered = rawDeltaX >= 50;
+
+                            if (triggered && !swipeVibratedRef.current) {
+                              swipeVibratedRef.current = true;
+                              if (typeof window !== "undefined" && window.navigator?.vibrate) {
+                                try { window.navigator.vibrate(15); } catch { }
+                              }
+                            } else if (!triggered && swipeVibratedRef.current) {
+                              swipeVibratedRef.current = false;
+                            }
+
+                            setSwipingMsgState({ id: msg.id, deltaX, triggered });
+                          } else if (swipingMsgState?.id === msg.id && rawDeltaX <= 5) {
+                            setSwipingMsgState(null);
                           }
                         }}
                         onTouchEnd={() => {
@@ -4253,17 +4413,31 @@ export default function ChatPage() {
                             clearTimeout(longPressTimerRef.current);
                             longPressTimerRef.current = null;
                           }
+                          if (swipingMsgState && swipingMsgState.id === msg.id) {
+                            if (swipingMsgState.triggered) {
+                              didSwipeRef.current = true;
+                              setReplyingTo(msg);
+                              inputRef.current?.focus();
+                            }
+                            setSwipingMsgState(null);
+                            swipeVibratedRef.current = false;
+                          }
                         }}
                         onTouchCancel={() => {
                           if (longPressTimerRef.current) {
                             clearTimeout(longPressTimerRef.current);
                             longPressTimerRef.current = null;
                           }
+                          if (swipingMsgState && swipingMsgState.id === msg.id) {
+                            setSwipingMsgState(null);
+                            swipeVibratedRef.current = false;
+                          }
                         }}
                         onMouseDown={(e) => {
                           if (!isMobile) return;
                           touchStartPosRef.current = { x: e.clientX, y: e.clientY };
                           didLongPressRef.current = false;
+                          didSwipeRef.current = false;
                           if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
                           longPressTimerRef.current = setTimeout(() => {
                             didLongPressRef.current = true;
@@ -4300,6 +4474,35 @@ export default function ChatPage() {
                             didLongPressRef.current = false;
                             return;
                           }
+                          if (didSwipeRef.current) {
+                            didSwipeRef.current = false;
+                            return;
+                          }
+
+                          // Double-tap anywhere on a message bubble to quick-react ❤️
+                          const now = Date.now();
+                          if (
+                            lastTapRef.current &&
+                            lastTapRef.current.id === msg.id &&
+                            now - lastTapRef.current.time < 320
+                          ) {
+                            lastTapRef.current = null;
+                            e.stopPropagation();
+
+                            if (typeof window !== "undefined" && window.navigator?.vibrate) {
+                              try { window.navigator.vibrate(25); } catch { }
+                            }
+
+                            setHeartPopMessageId(msg.id);
+                            setTimeout(() => {
+                              setHeartPopMessageId((prev) => (prev === msg.id ? null : prev));
+                            }, 850);
+
+                            handleReact(msg.id, "❤️");
+                            return;
+                          }
+                          lastTapRef.current = { id: msg.id, time: now };
+
                           if (isMobile) {
                             if (selectedMobileMessage) {
                               e.stopPropagation();
@@ -4316,7 +4519,10 @@ export default function ChatPage() {
                         style={{
                           WebkitTouchCallout: "none",
                           touchAction: "pan-y",
+                          transform: swipingMsgState?.id === msg.id ? `translateX(${swipingMsgState.deltaX}px)` : undefined,
+                          transition: swipingMsgState?.id === msg.id ? "none" : "transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1)",
                         }}
+
                         className={cn(
                           "chat-bubble-content relative w-full transition-all select-none overflow-visible",
                           isSticker
@@ -4653,11 +4859,33 @@ export default function ChatPage() {
                             </div>
                           );
                         })()}
+
+                        {/* Floating Pop Heart Animation on Double Tap */}
+                        <AnimatePresence>
+                          {heartPopMessageId === msg.id && (
+                            <motion.div
+                              initial={{ scale: 0.2, opacity: 0, y: 0 }}
+                              animate={{
+                                scale: [0.2, 1.45, 1.2, 1],
+                                opacity: [0, 1, 1, 0],
+                                y: [0, -12, -24, -36],
+                              }}
+                              exit={{ opacity: 0 }}
+                              transition={{ duration: 0.8, ease: "easeOut" }}
+                              className="absolute inset-0 pointer-events-none z-50 flex items-center justify-center select-none"
+                            >
+                              <span className="text-4xl filter drop-shadow-[0_4px_14px_rgba(239,68,68,0.65)]">
+                                ❤️
+                              </span>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
 
                       {!isMe && actionButtons}
                     </div>
                   </div>
+                  </Fragment>
                 );
               })
             )}
@@ -5020,6 +5248,7 @@ export default function ChatPage() {
                       <div className="relative shrink-0">
                         <button
                           type="button"
+                          data-media-picker-trigger="true"
                           onClick={() => {
                             setActiveDesktopPopup(activeDesktopPopup === "stickers" ? null : "stickers");
                             setShowInputEmojiPicker(false);
@@ -5041,14 +5270,24 @@ export default function ChatPage() {
                         </button>
 
                         {activeDesktopPopup === "stickers" && (
-                          <DesktopStickerPicker
+                          <MessengerMediaPicker
                             open={true}
+                            variant="popover"
+                            align="left"
+                            initialTab="stickers"
                             onClose={() => setActiveDesktopPopup(null)}
                             onSelectSticker={(url) => {
                               handleSendMessage(url, "sticker");
                               setActiveDesktopPopup(null);
                             }}
+                            onSelectGif={(url) => {
+                              handleSendMessage(url, "gif");
+                              setActiveDesktopPopup(null);
+                            }}
+                            onSelectEmoji={handleInsertEmoji}
                             darkMode={darkMode}
+                            fullEmojiCategories={fullEmojiCategories}
+                            emojiTabIcons={emojiTabIcons}
                           />
                         )}
                       </div>
@@ -5057,6 +5296,7 @@ export default function ChatPage() {
                       <div className="relative shrink-0">
                         <button
                           type="button"
+                          data-media-picker-trigger="true"
                           onClick={() => {
                             setActiveDesktopPopup(activeDesktopPopup === "gifs" ? null : "gifs");
                             setShowInputEmojiPicker(false);
@@ -5078,14 +5318,24 @@ export default function ChatPage() {
                         </button>
 
                         {activeDesktopPopup === "gifs" && (
-                          <DesktopGifPicker
+                          <MessengerMediaPicker
                             open={true}
+                            variant="popover"
+                            align="left"
+                            initialTab="gifs"
                             onClose={() => setActiveDesktopPopup(null)}
                             onSelectGif={(url) => {
                               handleSendMessage(url, "gif");
                               setActiveDesktopPopup(null);
                             }}
+                            onSelectSticker={(url) => {
+                              handleSendMessage(url, "sticker");
+                              setActiveDesktopPopup(null);
+                            }}
+                            onSelectEmoji={handleInsertEmoji}
                             darkMode={darkMode}
+                            fullEmojiCategories={fullEmojiCategories}
+                            emojiTabIcons={emojiTabIcons}
                           />
                         )}
                       </div>
@@ -5225,6 +5475,7 @@ export default function ChatPage() {
                       <>
                         <button
                           type="button"
+                          data-media-picker-trigger="true"
                           onClick={() => {
                             setActiveDesktopPopup(activeDesktopPopup === "emojis" ? null : "emojis");
                             setShowInputEmojiPicker(false);
@@ -5239,10 +5490,21 @@ export default function ChatPage() {
                         </button>
 
                         {activeDesktopPopup === "emojis" && (
-                          <DesktopEmojiPicker
+                          <MessengerMediaPicker
                             open={true}
+                            variant="popover"
+                            align="right"
+                            initialTab="emojis"
                             onClose={() => setActiveDesktopPopup(null)}
                             onSelectEmoji={handleInsertEmoji}
+                            onSelectSticker={(url) => {
+                              handleSendMessage(url, "sticker");
+                              setActiveDesktopPopup(null);
+                            }}
+                            onSelectGif={(url) => {
+                              handleSendMessage(url, "gif");
+                              setActiveDesktopPopup(null);
+                            }}
                             darkMode={darkMode}
                             fullEmojiCategories={fullEmojiCategories}
                             emojiTabIcons={emojiTabIcons}

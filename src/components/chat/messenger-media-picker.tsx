@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { searchEmojis } from "@/lib/emoji-search";
 
-export const KLIPY_API_KEY = "3S5TuqL9AlT1oBzpg85fjcVGDEb2KkDwYgj96JW5j3M79kjRyFI0Ogg8YaX28fW9";
+export const KLIPY_API_KEY = process.env.NEXT_PUBLIC_KLIPY_API_KEY || "";
 
 // Sticker Tab Icon matching DuoNexus / Messenger
 function MessengerStickerIcon({ className = "w-5 h-5" }: { className?: string }) {
@@ -174,9 +174,17 @@ export interface MessengerMediaPickerProps {
   onBackspace?: () => void;
   darkMode?: boolean;
   initialTab?: "stickers" | "gifs" | "emojis" | "recent";
-  fullEmojiCategories: Record<string, string[]>;
+  fullEmojiCategories?: Record<string, string[]>;
   emojiTabIcons?: { key: string; label: string; icon: React.ReactNode }[];
+  variant?: "drawer" | "popover";
+  align?: "left" | "right";
+  className?: string;
 }
+
+const DEFAULT_EMOJI_CATEGORIES: Record<string, string[]> = {
+  "Smileys & people": ["😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "🥲", "☺️", "😊", "😇", "🙂", "🙃", "😉", "😌", "😍", "🥰", "😘", "😗", "😙", "😚", "😋", "😛", "😝", "😜", "🤪", "🤨", "🧐", "🤓", "😎", "🥸", "🤩", "🥳", "😏", "😒", "😞", "😔", "😟", "😕", "🙁", "☹️", "😣", "😖", "😫", "😩", "🥺", "😢", "😭", "😮‍💨", "😤", "😠", "😡", "🤬", "🤯", "😳", "🥵", "🥶", "😱", "😨", "😰", "😥", "😓", "🤗", "🤔", "🫣", "🫢", "🫡", "🤫", "🫠", "🤥", "😶", "😶‍🌫️", "😐", "😑", "😬", "🫨", "😮", "😯", "😲", "🥱", "😴", "🤤", "😪", "😵", "😵‍💫", "🫥", "🤐", "🥴", "🤢", "🤮", "🤧", "😷", "🤒", "🤕", "🤑", "🤠"],
+  "Symbols": ["❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "🤎", "💔", "❤️‍🔥", "❤️‍🩹", "💕", "💞", "💓", "💗", "💖", "💘", "💝", "💟", "☮️", "✝️", "☪️", "🕉️", "☸️", "✡️", "🔯", "🕎", "☯️", "☦️", "🛐", "⛎", "♈", "♉", "♊", "♋", "♌", "♍", "♎", "♏", "♐", "♑", "♒", "♓", "🆔", "⚛️", "✨", "💫", "⭐", "🌟", "🔥", "💥", "💯", "🎉", "🎊"],
+};
 
 export function MessengerMediaPicker({
   open,
@@ -188,16 +196,51 @@ export function MessengerMediaPicker({
   darkMode = true,
   initialTab = "emojis",
   fullEmojiCategories,
+  emojiTabIcons,
+  variant = "drawer",
+  align = "left",
+  className,
 }: MessengerMediaPickerProps) {
+
   const [activeTab, setActiveTab] = useState<"recent" | "emojis" | "stickers" | "gifs">(
     initialTab || "emojis"
   );
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const isPopover = variant === "popover";
 
   useEffect(() => {
     if (initialTab && open) {
       setActiveTab(initialTab);
     }
   }, [initialTab, open]);
+
+  // Handle escape key and click outside when in popover mode
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        containerRef.current?.contains(target) ||
+        target?.closest("[data-media-picker-trigger]")
+      ) {
+        return;
+      }
+      onClose();
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    if (isPopover) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [open, onClose, isPopover]);
 
   // Recent emojis state (synced with localStorage)
   const [recentEmojis, setRecentEmojis] = useState<string[]>(() => {
@@ -240,10 +283,13 @@ export function MessengerMediaPicker({
   const stickerTimerRef = useRef<NodeJS.Timeout | null>(null);
   const dk = darkMode;
 
+  const categories = fullEmojiCategories || DEFAULT_EMOJI_CATEGORIES;
+
   // Flattened emoji list for search
   const allEmojis = React.useMemo(() => {
-    return Object.values(fullEmojiCategories).flat();
-  }, [fullEmojiCategories]);
+    return Object.values(categories).flat();
+  }, [categories]);
+
 
   // Klipy API fetch for GIFs
   const fetchGifs = async (query: string) => {
@@ -363,23 +409,16 @@ export function MessengerMediaPicker({
     { key: "Flags", label: "Flags", icon: <Flag className="w-[18px] h-[18px]" /> },
   ];
 
-  return (
-    <motion.div
-      initial={{ height: 0, opacity: 0 }}
-      animate={{ height: 350, opacity: 1 }}
-      exit={{ height: 0, opacity: 0 }}
-      transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-      className={`w-full overflow-hidden flex flex-col border-t select-none shrink-0 z-20 ${
-        dk ? "bg-[#18181A] border-zinc-800 text-white" : "bg-[#F3F2EE] border-gray-200 text-gray-900"
-      }`}
-      style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      {/* Top Drag Indicator Line */}
-      <div className="w-9 h-1 rounded-full mx-auto my-1.5 opacity-25 bg-current shrink-0" />
+  const content = (
+    <>
+      {/* Top Drag Indicator Line (drawer only) */}
+      {!isPopover && (
+        <div className="w-9 h-1 rounded-full mx-auto my-1.5 opacity-25 bg-current shrink-0" />
+      )}
 
       {/* Top Header / Tab Bar */}
-      <div className="px-3 pb-1.5 shrink-0 flex items-center gap-2">
+      <div className={`px-3 ${isPopover ? "pt-2.5 pb-2" : "pb-1.5"} shrink-0 flex items-center gap-2`}>
+
         {isSearching ? (
           /* Inline Search Input Mode (replaces tab bar) */
           <div
@@ -587,7 +626,7 @@ export function MessengerMediaPicker({
               </div>
             </div>
           ) : (
-            Object.entries(fullEmojiCategories).map(([catKey, emojis]) => (
+            Object.entries(categories).map(([catKey, emojis]) => (
               <div key={catKey} id={`mobile-emoji-cat-${catKey}`} className="pt-0.5">
                 <span
                   className={`text-[11px] font-bold uppercase tracking-wider block mb-2 sticky top-0 py-1 backdrop-blur-md z-10 ${
@@ -826,6 +865,52 @@ export function MessengerMediaPicker({
           </button>
         </div>
       )}
+    </>
+  );
+
+  if (!open) return null;
+
+  if (isPopover) {
+    return (
+      <div
+        ref={containerRef}
+        onClick={(e) => e.stopPropagation()}
+        className={`absolute bottom-full mb-3 ${
+          align === "left"
+            ? "left-[-8px] sm:left-[-12px] right-auto"
+            : "right-[-8px] sm:right-[-12px] left-auto"
+        } z-[100] w-[340px] sm:w-[370px] max-w-[calc(100vw-24px)] h-[460px] max-h-[65vh] flex flex-col rounded-2xl shadow-2xl border overflow-hidden select-none animate-in fade-in zoom-in-95 duration-150 ${
+          dk ? "bg-[#18181A] border-zinc-800 text-white" : "bg-white border-gray-200 text-gray-900"
+        } ${className || ""}`}
+      >
+        {/* Speech Bubble Arrow pointing down to the trigger button */}
+        <div
+          className={`absolute -bottom-2 ${
+            align === "left" ? "left-6 sm:left-7" : "right-6 sm:right-7"
+          } w-4 h-4 rotate-45 border-r border-b ${
+            dk ? "bg-[#18181A] border-zinc-800" : "bg-white border-gray-200"
+          }`}
+        />
+        {content}
+      </div>
+    );
+
+  }
+
+  return (
+    <motion.div
+      ref={containerRef}
+      initial={{ height: 0, opacity: 0 }}
+      animate={{ height: 350, opacity: 1 }}
+      exit={{ height: 0, opacity: 0 }}
+      transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+      className={`w-full overflow-hidden flex flex-col border-t select-none shrink-0 z-20 ${
+        dk ? "bg-[#18181A] border-zinc-800 text-white" : "bg-[#F3F2EE] border-gray-200 text-gray-900"
+      } ${className || ""}`}
+      style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {content}
     </motion.div>
   );
 }
