@@ -1,8 +1,8 @@
-import type {NextConfig} from 'next';
+import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   /* config options here */
-  serverExternalPackages: ["firebase-admin"],
+  serverExternalPackages: ["firebase-admin", "google-auth-library", "jwks-rsa", "jose"],
   typescript: {
     ignoreBuildErrors: true,
   },
