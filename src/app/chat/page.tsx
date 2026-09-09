@@ -4309,19 +4309,19 @@ export default function ChatPage() {
                       }`}>
                       {isMe && actionButtons}
 
-                      {/* Swipe-to-reply reveal icon behind bubble on drag */}
+                      {/* Swipe-to-reply reveal icon — appears on the right side on left-drag */}
                       {swipingMsgState?.id === msg.id && (
                         <div
-                          className="absolute -left-9 top-1/2 -translate-y-1/2 z-0 flex items-center justify-center pointer-events-none transition-transform"
+                          className="absolute -right-9 top-1/2 -translate-y-1/2 z-0 flex items-center justify-center pointer-events-none"
                           style={{
-                            transform: `translateY(-50%) scale(${Math.min(1.2, 0.65 + (swipingMsgState.deltaX / 50) * 0.55)})`,
-                            opacity: Math.min(1, swipingMsgState.deltaX / 25),
+                            transform: `translateY(-50%) scale(${Math.min(1.2, 0.65 + (Math.abs(swipingMsgState.deltaX) / 50) * 0.55)})`,
+                            opacity: Math.min(1, Math.abs(swipingMsgState.deltaX) / 25),
                           }}
                         >
                           <div
                             className={`w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-colors ${
                               swipingMsgState.triggered
-                                ? "bg-[#005c4b] text-white ring-2 ring-[#005c4b]/30"
+                                ? "bg-[#0084ff] text-white ring-2 ring-[#0084ff]/30"
                                 : c("bg-gray-200 text-gray-700", "bg-zinc-700 text-gray-200")
                             }`}
                           >
@@ -4363,10 +4363,10 @@ export default function ChatPage() {
                             }
                           }
 
-                          // Swipe-to-reply: drag rightward with horizontal dominance
-                          if (rawDeltaX > 8 && absX > absY * 1.1) {
-                            const deltaX = Math.min(64, rawDeltaX * 0.55);
-                            const triggered = rawDeltaX >= 50;
+                          // Swipe-to-reply: drag leftward with horizontal dominance (like Messenger)
+                          if (rawDeltaX < -8 && absX > absY * 1.1) {
+                            const deltaX = Math.max(-64, rawDeltaX * 0.55); // negative value
+                            const triggered = rawDeltaX <= -50;
 
                             if (triggered && !swipeVibratedRef.current) {
                               swipeVibratedRef.current = true;
@@ -4378,7 +4378,7 @@ export default function ChatPage() {
                             }
 
                             setSwipingMsgState({ id: msg.id, deltaX, triggered });
-                          } else if (swipingMsgState?.id === msg.id && rawDeltaX <= 5) {
+                          } else if (swipingMsgState?.id === msg.id && rawDeltaX >= -5) {
                             setSwipingMsgState(null);
                           }
                         }}
@@ -4493,6 +4493,7 @@ export default function ChatPage() {
                         style={{
                           WebkitTouchCallout: "none",
                           touchAction: "pan-y",
+                          // deltaX is negative for left swipe — bubble slides left
                           transform: swipingMsgState?.id === msg.id ? `translateX(${swipingMsgState.deltaX}px)` : undefined,
                           transition: swipingMsgState?.id === msg.id ? "none" : "transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1)",
                         }}
@@ -4933,37 +4934,56 @@ export default function ChatPage() {
           {/* Replying banner */}
           {replyingTo && (
             <div
-              className={`mb-2 px-4 py-2.5 rounded-2xl flex items-center justify-between shadow-sm border animate-in fade-in slide-in-from-bottom-2 ${c(
+              className={`mb-2 px-3 py-2 rounded-2xl flex items-center gap-2 shadow-sm border animate-in fade-in slide-in-from-bottom-2 ${c(
                 "bg-white border-gray-200",
                 "bg-[#242424] border-zinc-800"
               )}`}
             >
-              <div
-                onClick={() => {
-                  if (replyingTo.id) scrollToMessage(replyingTo.id);
-                }}
-                className="flex flex-col overflow-hidden border-l-4 border-blue-500 pl-3 flex-1 cursor-pointer hover:opacity-80 transition-opacity"
-                title="Click to view message"
-              >
-                <span className="text-xs font-bold text-blue-500 flex items-center gap-1">
-                  <CornerUpLeft className="w-3 h-3" />
-                  Replying to {replyingTo.senderRole === myId ? "Yourself" : finalPartnerName}
-                </span>
-                <span className="text-[13px] truncate font-medium text-gray-400">
-                  {getCleanMessagePreview(replyingTo, finalPartnerName).text}
-                </span>
-              </div>
+              {/* Left: cancel button */}
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   setReplyingTo(null);
                 }}
-                className="p-1.5 rounded-full hover:bg-zinc-700 text-gray-400 transition-colors"
+                className="p-1 rounded-full hover:bg-zinc-700/60 text-gray-400 transition-colors shrink-0"
                 title="Cancel reply"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
+
+              {/* Center: reply text */}
+              <div
+                onClick={() => {
+                  if (replyingTo.id) scrollToMessage(replyingTo.id);
+                }}
+                className="flex flex-col overflow-hidden border-l-4 border-[#0084ff] pl-2.5 flex-1 cursor-pointer hover:opacity-80 transition-opacity min-w-0"
+                title="Click to view message"
+              >
+                <span className="text-xs font-bold text-[#0084ff] flex items-center gap-1">
+                  <CornerUpLeft className="w-3 h-3" />
+                  {replyingTo.senderRole === myId ? "Reply to yourself" : `Reply to ${finalPartnerName}`}
+                </span>
+                <span className="text-[12px] truncate text-gray-400">
+                  {getCleanMessagePreview(replyingTo, finalPartnerName).text}
+                </span>
+              </div>
+
+              {/* Right: avatar — show partner avatar when replying to partner's message */}
+              {replyingTo.senderRole !== myId && (
+                <img
+                  src={partnerAvatar}
+                  alt={finalPartnerName}
+                  className="w-8 h-8 rounded-full object-cover border border-white/10 shrink-0 shadow-sm"
+                />
+              )}
+              {replyingTo.senderRole === myId && user?.photoURL && (
+                <img
+                  src={user.photoURL}
+                  alt="You"
+                  className="w-8 h-8 rounded-full object-cover border border-white/10 shrink-0 shadow-sm"
+                />
+              )}
             </div>
           )}
 

@@ -242,9 +242,14 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
           if (track.kind === "video") {
             try {
               const params = sender.getParameters();
-              params.encodings = [{ maxBitrate: 900_000, priority: "high" }];
+              params.encodings = [{
+                maxBitrate: 2_000_000,
+                priority: "high",
+              }];
+              // Prefer dropping framerate over resolution on congested links
+              (params as any).degradationPreference = "maintain-resolution";
               sender.setParameters(params).then(() => {
-                console.log("[WebRTC] Initial video bitrate constraint of 900kbps set successfully");
+                console.log("[WebRTC] Initial video bitrate constraint of 2Mbps set successfully");
               }).catch((err) => {
                 console.warn("[WebRTC] Failed to set initial video bitrate constraint:", err);
               });
@@ -814,7 +819,11 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
           await sender.replaceTrack(newVideoTrack);
           console.log("[WebRTC] RTCRtpSender video track successfully replaced.");
           const params = sender.getParameters();
-          params.encodings = [{ maxBitrate: 900_000, priority: "high" }];
+          params.encodings = [{
+            maxBitrate: 2_000_000,
+            priority: "high",
+          }];
+          (params as any).degradationPreference = "maintain-resolution";
           await sender.setParameters(params);
         } catch (e) {
           console.error("[WebRTC] RTCRtpSender.replaceTrack failed:", e);
@@ -946,7 +955,11 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
       try {
         await sender.replaceTrack(newVideoTrack);
         const params = sender.getParameters();
-        params.encodings = [{ maxBitrate: 900_000, priority: "high" }];
+        params.encodings = [{
+          maxBitrate: 2_000_000,
+          priority: "high",
+        }];
+        (params as any).degradationPreference = "maintain-resolution";
         await sender.setParameters(params);
       } catch (e) {
         console.warn("[WebRTC] Failed to replaceTrack on existing sender:", e);
@@ -955,7 +968,11 @@ export function useWebRTC({ myId, partnerId, onIncomingCall, onCallEnded, onCame
       const newSender = pc.addTrack(newVideoTrack, localStreamRef.current!);
       try {
         const params = newSender.getParameters();
-        params.encodings = [{ maxBitrate: 900_000, priority: "high" }];
+        params.encodings = [{
+          maxBitrate: 2_000_000,
+          priority: "high",
+        }];
+        (params as any).degradationPreference = "maintain-resolution";
         await newSender.setParameters(params);
       } catch (e) {
         console.warn("[WebRTC] Failed to set bitrate on new sender:", e);
