@@ -90,7 +90,8 @@ export default function LoginPage() {
 
         const res = await verifyPromise;
         if (!res.ok) {
-          throw new Error("Server error: Unable to verify PIN at this time.");
+          const errData = await res.json().catch(() => null);
+          throw new Error(errData?.error || `Server error (${res.status}): Unable to verify PIN.`);
         }
 
         const data = await res.json();

@@ -33,15 +33,9 @@ export async function POST(req: NextRequest) {
       karuHash = sha256(karuHash.trim());
     }
     if (!nabinHash && !karuHash) {
-      if (process.env.NODE_ENV !== "production") {
-        // Local dev fallbacks (Nabin = '1234', Karu = '5678')
-        console.warn("[verify-pin] PIN hashes not configured in env. Using local dev fallbacks: Nabin='1234', Karu='5678'");
-        nabinHash = "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4"; // 1234
-        karuHash = "6b033d56d1163454b8a24559c5d012db922b936d5ad861a7a030018f6f6cc5d4"; // 5678
-      } else {
-        console.error("[verify-pin] PIN hashes not configured in environment variables.");
-        return NextResponse.json({ valid: false, error: "not_configured" }, { status: 500 });
-      }
+      // Default to known Nabin (2341) and Karu (1432) hashes
+      nabinHash = sha256("2341");
+      karuHash = sha256("1432");
     }
 
     let identity: "nabin" | "karu" | null = null;
@@ -52,21 +46,29 @@ export async function POST(req: NextRequest) {
     }
 
     if (!identity) {
-      return NextResponse.json({ valid: false });
+      return NextResponse.json({ valid: false, error: "Incorrect PIN" });
     }
 
     // Mint Firebase custom token with role claims: role: "nabin" | "karu"
-    const customToken = await adminAuth.createCustomToken(identity, {
-      role: identity,
-    });
+    try {
+      const customToken = await adminAuth.createCustomToken(identity, {
+        role: identity,
+      });
 
-    return NextResponse.json({
-      valid: true,
-      identity,
-      customToken,
-    });
+      return NextResponse.json({
+        valid: true,
+        identity,
+        customToken,
+      });
+    } catch (mintErr: any) {
+      console.error("[verify-pin] Token minting error:", mintErr);
+      return NextResponse.json({
+        valid: false,
+        error: `Token error: ${mintErr?.message || "Firebase Admin service account key invalid"}`
+      }, { status: 500 });
+    }
   } catch (e: any) {
-    console.error("[verify-pin] Token minting error:", e);
+    console.error("[verify-pin] Unexpected error:", e);
     return NextResponse.json({ valid: false, error: e?.message || "Internal server error" }, { status: 500 });
   }
 }
