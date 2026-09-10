@@ -6,12 +6,12 @@ import {
   MessageCircle,
   CalendarHeart,
   LayoutGrid,
-  Sparkles,
   Settings,
   Sun,
   Moon,
   Heart,
 } from "lucide-react";
+import { SparklesSvg } from "@/components/ui/sparkles-svg";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -100,7 +100,7 @@ export function DesktopNavRail({
     {
       id: "sparks",
       label: "AI Love Sparks",
-      icon: Sparkles,
+      icon: SparklesSvg,
       onClick: onGenerateSpark,
       loading: isGeneratingSpark,
     },

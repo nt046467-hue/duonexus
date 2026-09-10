@@ -117,5 +117,15 @@ service cloud.firestore {
     match /readReceipts/{userId} {
       allow read, write: if isAuthenticated();
     }
+
+    // Bucket List: shared checklist, both can manage
+    match /bucketList/{docId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Time Capsules: couple love letters with unlock dates
+    match /timeCapsules/{docId} {
+      allow read, write: if isAuthenticated();
+    }
   }
 }

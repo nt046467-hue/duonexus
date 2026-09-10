@@ -64,7 +64,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="font-body antialiased bg-background text-foreground overflow-hidden h-[100dvh] w-screen selection:bg-primary/20">
+      <body className="font-body antialiased bg-background text-foreground overflow-hidden h-[100dvh] w-screen selection:bg-primary/20" suppressHydrationWarning>
         <FirebaseClientProvider>
           {children}
           <Toaster />

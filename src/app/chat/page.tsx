@@ -40,8 +40,13 @@ import { CallScreen } from "@/components/chat/call-screen";
 import { MoodCheckin, MoodBadges } from "@/components/chat/mood-checkin";
 import { useViewport } from "@/hooks/use-viewport";
 import { DesktopNavRail } from "@/components/chat/desktop-nav-rail";
+import { HomeDashboard } from "@/components/dashboard/home-dashboard";
+import { ToolsHub } from "@/components/tools/tools-hub";
+import { NudgeOverlay } from "@/components/nudges/nudge-overlay";
+import { LoveSparksRitual } from "@/components/sparks/love-sparks-ritual";
 import { ConversationListPanel } from "@/components/chat/conversation-list-panel";
 import { WallpaperDialog, WallpaperConfig, DEFAULT_WALLPAPER } from "@/components/chat/wallpaper-dialog";
+import { ChatWallpaperLayer } from "@/components/chat/chat-wallpaper-layer";
 import { StreakModal } from "@/components/chat/streak-modal";
 import { CameraModal } from "@/components/chat/camera-modal";
 import { MessengerMediaPicker } from "@/components/chat/messenger-media-picker";
@@ -628,12 +633,7 @@ export default function ChatPage() {
   const c = (light: string, dark: string) => (darkMode ? dark : light);
 
   // Identity state
-  const [myId, setMyId] = useState<string>(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("duonexus_role") || "nabin";
-    }
-    return "nabin";
-  });
+  const [myId, setMyId] = useState<string>("nabin");
 
   useEffect(() => {
     if (isAuthLoading) return;
@@ -918,34 +918,10 @@ export default function ChatPage() {
 
   // Notifications & User Preferences State
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [soundEffectsEnabled, setSoundEffectsEnabled] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem("duonexus_sound_effects");
-      return stored !== null ? stored === "true" : true;
-    }
-    return true;
-  });
-  const [vibrationEnabled, setVibrationEnabled] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem("duonexus_vibration");
-      return stored !== null ? stored === "true" : true;
-    }
-    return true;
-  });
-  const [hdDefaultEnabled, setHdDefaultEnabled] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem("duonexus_hd_default");
-      return stored !== null ? stored === "true" : false;
-    }
-    return false;
-  });
-  const [readReceiptsEnabled, setReadReceiptsEnabled] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem("duonexus_read_receipts");
-      return stored !== null ? stored === "true" : true;
-    }
-    return true;
-  });
+  const [soundEffectsEnabled, setSoundEffectsEnabled] = useState<boolean>(true);
+  const [vibrationEnabled, setVibrationEnabled] = useState<boolean>(true);
+  const [hdDefaultEnabled, setHdDefaultEnabled] = useState<boolean>(false);
+  const [readReceiptsEnabled, setReadReceiptsEnabled] = useState<boolean>(true);
 
   const handleToggleNotifications = async (enabled: boolean) => {
     setNotificationsEnabled(enabled);
@@ -1023,8 +999,13 @@ export default function ChatPage() {
         if (notificationsEnabled && soundEffectsEnabled && !isInCallRef.current) {
           receiveAudioRef.current?.play().catch(() => { });
         }
-        // Vibrate mobile device if enabled
-        if (vibrationEnabled && typeof navigator !== "undefined" && navigator.vibrate) {
+        // Vibrate mobile device if enabled and user has interacted with document
+        if (
+          vibrationEnabled &&
+          typeof navigator !== "undefined" &&
+          navigator.vibrate &&
+          (!("userActivation" in navigator) || (navigator as any).userActivation?.hasBeenActive)
+        ) {
           try {
             navigator.vibrate([100, 50, 100]);
           } catch { }
@@ -1055,14 +1036,7 @@ export default function ChatPage() {
   // Dedicated desktop popups anchored to their specific icons
   const [activeDesktopPopup, setActiveDesktopPopup] = useState<"stickers" | "gifs" | "emojis" | null>(null);
   // Quick reaction emoji (defaults to Kiss '😘' as requested)
-  const [quickReactionEmoji, setQuickReactionEmoji] = useState<string>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        return localStorage.getItem("duonexus_quick_emoji") || "😘";
-      } catch { }
-    }
-    return "😘";
-  });
+  const [quickReactionEmoji, setQuickReactionEmoji] = useState<string>("😘");
   const [isQuickEmojiModalOpen, setIsQuickEmojiModalOpen] = useState(false);
   // Temp state for quick emoji picker — only committed on "Done"
   const [tempQuickEmoji, setTempQuickEmoji] = useState<string>("😘");
@@ -1242,18 +1216,44 @@ export default function ChatPage() {
   const [reactionDetailFilter, setReactionDetailFilter] = useState<string>("all");
 
   // Quick reactions
-  const [quickReactions, setQuickReactions] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem("customReactions");
-      return saved ? JSON.parse(saved) : defaultReactions;
-    } catch {
-      return defaultReactions;
-    }
-  });
+  const [quickReactions, setQuickReactions] = useState<string[]>(defaultReactions);
   const [showReactionCustomizer, setShowReactionCustomizer] = useState(false);
-  const [tempReactions, setTempReactions] = useState<string[]>([...quickReactions]);
+  const [tempReactions, setTempReactions] = useState<string[]>(defaultReactions);
   const [selectedSlot, setSelectedSlot] = useState<number>(0);
   const emojiPalette = ["❤️", "😂", "😮", "😢", "🙏", "👍", "🤣", "🥰", "😍", "😒", "😭", "🔥", "😊", "😎", "😡", "🤯", "💀", "👀", "💯", "✨", "🎉", "💩", "💔", "🤔"];
+
+  // Hydrate client-only settings from localStorage after mount to prevent SSR hydration mismatch
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const storedRole = localStorage.getItem("duonexus_role");
+      if (storedRole) setMyId(storedRole);
+
+      const storedSound = localStorage.getItem("duonexus_sound_effects");
+      if (storedSound !== null) setSoundEffectsEnabled(storedSound === "true");
+
+      const storedVib = localStorage.getItem("duonexus_vibration");
+      if (storedVib !== null) setVibrationEnabled(storedVib === "true");
+
+      const storedHd = localStorage.getItem("duonexus_hd_default");
+      if (storedHd !== null) setHdDefaultEnabled(storedHd === "true");
+
+      const storedRr = localStorage.getItem("duonexus_read_receipts");
+      if (storedRr !== null) setReadReceiptsEnabled(storedRr === "true");
+
+      const storedEmoji = localStorage.getItem("duonexus_quick_emoji");
+      if (storedEmoji) setQuickReactionEmoji(storedEmoji);
+
+      const savedReactions = localStorage.getItem("customReactions");
+      if (savedReactions) {
+        const parsed = JSON.parse(savedReactions);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setQuickReactions(parsed);
+          setTempReactions([...parsed]);
+        }
+      }
+    } catch { }
+  }, []);
 
   // Search in conversation
   const [isSearching, setIsSearching] = useState(false);
@@ -2439,23 +2439,15 @@ export default function ChatPage() {
     }
   };
 
-  // Daily AI Love Spark
+  // Daily AI Love Spark & Couple Tools state
   const [dailyPrompt, setDailyPrompt] = useState<string | null>(null);
   const [isGeneratingSpark, setIsGeneratingSpark] = useState(false);
+  const [toolsInitialTab, setToolsInitialTab] = useState<string>("calling");
+  const [isLoveSparksModalOpen, setIsLoveSparksModalOpen] = useState(false);
 
   const handleGenerateSpark = async (): Promise<string | undefined> => {
-    setIsGeneratingSpark(true);
-    try {
-      const res = await dailyAiConversationPrompt({});
-      setDailyPrompt(res.prompt);
-      return res.prompt;
-    } catch {
-      const fallback = "What is one little thing I did recently that made you smile? 💕";
-      setDailyPrompt(fallback);
-      return fallback;
-    } finally {
-      setIsGeneratingSpark(false);
-    }
+    setIsLoveSparksModalOpen(true);
+    return undefined;
   };
 
   // Sign out
@@ -2521,21 +2513,36 @@ export default function ChatPage() {
         </div>
 
         {/* Tab Content inside Hub */}
-        {activeTab === "home" || activeTab === "chat" ? (
+        {activeTab === "home" ? (
+          <div className="flex-1 overflow-y-auto mb-4 w-full">
+            <HomeDashboard
+              firestore={firestore}
+              myId={myId}
+              partnerId={partnerId}
+              myName={finalMyName}
+              partnerName={finalPartnerName}
+              myAvatar={myAvatar}
+              partnerAvatar={partnerAvatar}
+              partnerPresence={partnerPresence ?? undefined}
+              streak={streak}
+              isStreakLoaded={isStreakLoaded}
+              onOpenStreakModal={() => setIsStreakModalOpen(true)}
+              onNavigateToChat={() => {
+                setActiveTab("chat");
+                setCurrentScreen("chat");
+              }}
+              onNavigateToTools={(subTab) => {
+                setActiveTab("tools");
+                setToolsInitialTab(subTab || "calling");
+              }}
+              onOpenMemories={() => setActiveTab("memories")}
+              memories={memories || []}
+              messages={messages || []}
+              darkMode={darkMode}
+            />
+          </div>
+        ) : activeTab === "chat" ? (
           <div className="mt-auto mb-4 w-full space-y-4">
-            {/* Daily Love Spark Banner */}
-            {dailyPrompt ? (
-              <div className="p-4 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 text-white animate-in fade-in">
-                <div className="flex items-center gap-2 mb-1">
-                  <Heart className="w-4 h-4 text-pink-300 fill-pink-300" />
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-pink-200">
-                    Today's Love Spark
-                  </span>
-                </div>
-                <p className="text-sm font-medium">{dailyPrompt}</p>
-              </div>
-            ) : null}
-
             {/* Chat List Item to open real conversation */}
             <div
               onClick={() => {
@@ -2608,52 +2615,29 @@ export default function ChatPage() {
                   e.stopPropagation();
                   handleGenerateSpark();
                 }}
-                disabled={isGeneratingSpark}
                 className="h-8 text-xs text-white hover:bg-white/10 rounded-full gap-1.5"
               >
                 <Heart className="w-3.5 h-3.5 text-pink-400 fill-pink-400" />
-                {isGeneratingSpark ? "Thinking..." : "Love Spark"}
+                <span>Love Spark</span>
               </Button>
             </div>
           </div>
         ) : activeTab === "tools" ? (
-          <div className="mt-auto mb-4 w-full space-y-3 animate-in fade-in">
-            <div className={`p-5 rounded-2xl shadow-xl ${c("bg-white", "bg-[#18181A]")}`}>
-              <h3 className={`font-bold text-lg mb-2 ${c("text-gray-900", "text-white")}`}>Quick Calling</h3>
-              <p className={`text-sm mb-4 ${c("text-gray-500", "text-gray-400")}`}>Start a crystal-clear call with {finalPartnerName}.</p>
-              <div className="grid grid-cols-2 gap-3">
-                <Button
-                  onClick={() => {
-                    setCurrentScreen("chat");
-                    handleStartCall("video");
-                  }}
-                  className="gap-2 h-12 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold"
-                >
-                  <Video className="w-5 h-5" /> Video Call
-                </Button>
-                <Button
-                  onClick={() => {
-                    setCurrentScreen("chat");
-                    handleStartCall("audio");
-                  }}
-                  className="gap-2 h-12 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
-                >
-                  <Phone className="w-5 h-5" /> Voice Call
-                </Button>
-              </div>
-            </div>
-
-            <div className={`p-5 rounded-2xl shadow-xl ${c("bg-white", "bg-[#18181A]")}`}>
-              <h3 className={`font-bold text-lg mb-2 ${c("text-gray-900", "text-white")}`}>AI Conversation Sparks</h3>
-              <p className={`text-sm mb-3 ${c("text-gray-500", "text-gray-400")}`}>Get romantic questions and sweet moments.</p>
-              <Button
-                onClick={handleGenerateSpark}
-                disabled={isGeneratingSpark}
-                className="w-full h-11 rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 text-white font-bold"
-              >
-                {isGeneratingSpark ? "Generating Spark..." : "Generate Love Spark ❤️"}
-              </Button>
-            </div>
+          <div className="flex-1 overflow-y-auto mb-4 w-full animate-in fade-in">
+            <ToolsHub
+              firestore={firestore}
+              myId={myId}
+              partnerId={partnerId}
+              myName={finalMyName}
+              partnerName={finalPartnerName}
+              partnerAvatar={partnerAvatar}
+              onStartCall={(type) => {
+                setCurrentScreen("chat");
+                handleStartCall(type);
+              }}
+              initialTab={toolsInitialTab}
+              darkMode={darkMode}
+            />
           </div>
         ) : activeTab === "memories" ? (
           <div className="mt-auto mb-4 w-full space-y-3 animate-in fade-in">
@@ -3182,185 +3166,52 @@ export default function ChatPage() {
   );
 
   const renderDesktopHome = () => (
-    <div className={`flex-1 h-full overflow-y-auto p-6 lg:p-8 flex flex-col ${c("bg-[#F6F5F0]", "bg-[#121212]")}`}>
-      <div className="max-w-2xl w-full mx-auto space-y-6">
-        {/* DuoNexus Logo & Banner */}
-        <div className="text-center py-6">
-          <div className="relative inline-block mb-3">
-            <div
-              className="w-16 h-16 rounded-[20px] flex items-center justify-center shadow-xl mx-auto"
-              style={{
-                background: "linear-gradient(135deg, #ff6b9d 0%, #c44dff 50%, #6d5aff 100%)",
-              }}
-            >
-              <Heart className="w-8 h-8 text-white fill-white" />
-            </div>
-          </div>
-          <h2 className={`text-2xl font-bold font-headline ${c("text-gray-900", "text-white")}`}>
-            DuoNexus
-          </h2>
-          <p className={`text-sm mt-1 font-medium ${c("text-gray-500", "text-gray-400")}`}>
-            Your private couple sanctuary 💕
-          </p>
-        </div>
-
-        {/* Daily Love Spark */}
-        {dailyPrompt && (
-          <div className={`p-5 rounded-2xl border shadow-sm ${c("bg-white border-pink-100", "bg-[#18181A] border-pink-950/40")}`}>
-            <div className="flex items-center gap-2 mb-2">
-              <Heart className="w-4 h-4 text-pink-500 fill-pink-500" />
-              <span className="text-xs font-bold uppercase tracking-wider text-pink-500">Today's Love Spark</span>
-            </div>
-            <p className={`text-base font-medium ${c("text-gray-800", "text-gray-200")}`}>{dailyPrompt}</p>
-          </div>
-        )}
-
-        {/* Quick Action to Karu Conversation */}
-        <div
-          onClick={() => {
-            setSelectedConversation("karu");
-            setActiveTab("chat");
-          }}
-          className={`p-4 rounded-2xl border flex items-center gap-4 cursor-pointer transition-all hover:scale-[1.01] ${c("bg-white border-gray-100 shadow-sm", "bg-[#18181A] border-zinc-800 shadow-sm")}`}
-        >
-          <div className="relative">
-            <Avatar className="h-14 w-14 border-2 border-primary/20 bg-black">
-              <AvatarImage src={partnerAvatar} className="rounded-full object-cover" />
-              <AvatarFallback>{finalPartnerName?.[0] || "P"}</AvatarFallback>
-            </Avatar>
-            {partnerPresence?.online && (
-              <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-background rounded-full" />
-            )}
-          </div>
-          <div className="flex-1 min-w-0">
-            <h3 className={`font-bold text-base flex items-center gap-1.5 ${c("text-gray-900", "text-white")}`}>
-              <span>{finalPartnerName}</span>
-              <Heart className="w-3.5 h-3.5 text-primary fill-primary" />
-            </h3>
-            <div className={`text-xs truncate mt-0.5 ${c("text-gray-500", "text-gray-400")}`}>
-              <RenderMessageSnippet
-                msg={messages.length > 0 ? messages[messages.length - 1] : null}
-                fallbackName={finalPartnerName}
-              />
-            </div>
-          </div>
-          <Button size="sm" className="rounded-xl font-bold bg-primary text-primary-foreground">
-            Chat
-          </Button>
-        </div>
-
-        {/* Love Streak Card */}
-        <div
-          onClick={() => setIsStreakModalOpen(true)}
-          className={`p-5 rounded-2xl flex items-center justify-between border shadow-sm cursor-pointer hover:scale-[1.01] active:scale-[0.99] transition-all ${c("bg-white border-gray-100", "bg-[#18181A] border-zinc-800")}`}
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-orange-500/15 flex items-center justify-center">
-              <Flame className="w-6 h-6 text-orange-500 fill-orange-500 animate-pulse" />
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-bold uppercase tracking-wider text-orange-500 block">Love Streak</span>
-                <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.2 rounded-full bg-orange-500/10 text-orange-500">TikTok Flame</span>
-              </div>
-              <span className={`text-base font-bold font-headline ${c("text-gray-900", "text-white")}`}>
-                {isStreakLoaded ? `${streak} Days Strong 🔥` : <span className="inline-block w-20 h-4 bg-black/10 dark:bg-white/10 animate-pulse rounded" />}
-              </span>
-            </div>
-          </div>
-          <Button
-            size="sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleGenerateSpark();
-            }}
-            disabled={isGeneratingSpark}
-            className="rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 text-white font-bold gap-1 text-xs"
-          >
-            <Heart className="w-3 h-3 fill-white" />
-            <span>{isGeneratingSpark ? "Thinking..." : "Love Spark"}</span>
-          </Button>
-        </div>
-      </div>
+    <div className={`flex-1 h-full overflow-y-auto ${c("bg-[#F6F5F0]", "bg-[#121212]")}`}>
+      <HomeDashboard
+        firestore={firestore}
+        myId={myId}
+        partnerId={partnerId}
+        myName={finalMyName}
+        partnerName={finalPartnerName}
+        myAvatar={myAvatar}
+        partnerAvatar={partnerAvatar}
+        partnerPresence={partnerPresence ?? undefined}
+        streak={streak}
+        isStreakLoaded={isStreakLoaded}
+        onOpenStreakModal={() => setIsStreakModalOpen(true)}
+        onNavigateToChat={() => {
+          setSelectedConversation("karu");
+          setActiveTab("chat");
+        }}
+        onNavigateToTools={(subTab) => {
+          setActiveTab("tools");
+          setToolsInitialTab(subTab || "calling");
+        }}
+        onOpenMemories={() => setActiveTab("memories")}
+        memories={memories || []}
+        messages={messages || []}
+        darkMode={darkMode}
+      />
     </div>
   );
 
   const renderDesktopTools = () => (
-    <div className={`flex-1 h-full overflow-y-auto p-6 lg:p-8 flex flex-col ${c("bg-[#F6F5F0]", "bg-[#121212]")}`}>
-      <div className="max-w-2xl w-full mx-auto space-y-6">
-        <div>
-          <h2 className={`text-2xl font-bold font-headline flex items-center gap-2 ${c("text-gray-900", "text-white")}`}>
-            <LayoutGrid className="w-6 h-6 text-primary" />
-            <span>Couple Calling & Tools</span>
-          </h2>
-          <p className={`text-sm mt-1 font-medium ${c("text-gray-500", "text-gray-400")}`}>
-            Instant connection with {finalPartnerName}
-          </p>
-        </div>
-
-        {/* Calling Cards */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className={`p-5 rounded-2xl border flex flex-col justify-between shadow-sm ${c("bg-white border-gray-100", "bg-[#18181A] border-zinc-800")}`}>
-            <div>
-              <div className="w-12 h-12 rounded-2xl bg-blue-500/15 flex items-center justify-center mb-3">
-                <Video className="w-6 h-6 text-blue-500" />
-              </div>
-              <h3 className={`font-bold text-base ${c("text-gray-900", "text-white")}`}>Video Call</h3>
-              <p className={`text-xs mt-1 ${c("text-gray-500", "text-gray-400")}`}>Face-to-face HD private video.</p>
-            </div>
-            <Button
-              onClick={() => {
-                setSelectedConversation("karu");
-                setActiveTab("chat");
-                handleStartCall("video");
-              }}
-              className="mt-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold gap-2"
-            >
-              <Video className="w-4 h-4" /> Start Video
-            </Button>
-          </div>
-
-          <div className={`p-5 rounded-2xl border flex flex-col justify-between shadow-sm ${c("bg-white border-gray-100", "bg-[#18181A] border-zinc-800")}`}>
-            <div>
-              <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 flex items-center justify-center mb-3">
-                <Phone className="w-6 h-6 text-emerald-500" />
-              </div>
-              <h3 className={`font-bold text-base ${c("text-gray-900", "text-white")}`}>Voice Call</h3>
-              <p className={`text-xs mt-1 ${c("text-gray-500", "text-gray-400")}`}>Crystal-clear private audio.</p>
-            </div>
-            <Button
-              onClick={() => {
-                setSelectedConversation("karu");
-                setActiveTab("chat");
-                handleStartCall("audio");
-              }}
-              className="mt-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold gap-2"
-            >
-              <Phone className="w-4 h-4" /> Start Voice
-            </Button>
-          </div>
-        </div>
-
-        {/* AI Sparks */}
-        <div className={`p-6 rounded-2xl border shadow-sm ${c("bg-white border-gray-100", "bg-[#18181A] border-zinc-800")}`}>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 rounded-xl bg-purple-500/15 flex items-center justify-center text-purple-500">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className={`font-bold text-base ${c("text-gray-900", "text-white")}`}>AI Conversation Sparks</h3>
-              <p className={`text-xs ${c("text-gray-500", "text-gray-400")}`}>Get romantic questions and deep conversation starters.</p>
-            </div>
-          </div>
-          <Button
-            onClick={handleGenerateSpark}
-            disabled={isGeneratingSpark}
-            className="w-full h-11 mt-3 rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 text-white font-bold"
-          >
-            {isGeneratingSpark ? "Generating Spark..." : "Generate Love Spark ❤️"}
-          </Button>
-        </div>
-      </div>
+    <div className={`flex-1 h-full overflow-y-auto ${c("bg-[#F6F5F0]", "bg-[#121212]")}`}>
+      <ToolsHub
+        firestore={firestore}
+        myId={myId}
+        partnerId={partnerId}
+        myName={finalMyName}
+        partnerName={finalPartnerName}
+        partnerAvatar={partnerAvatar}
+        onStartCall={(type) => {
+          setSelectedConversation("karu");
+          setActiveTab("chat");
+          handleStartCall(type);
+        }}
+        initialTab={toolsInitialTab}
+        darkMode={darkMode}
+      />
     </div>
   );
 
@@ -3400,50 +3251,15 @@ export default function ChatPage() {
         )}`}
       >
         {/* Full-Screen Edge-to-Edge Chat Wallpaper Layer (Behind Header, Messages & Input) */}
-        <div className="absolute inset-0 pointer-events-none z-0 overflow-hidden select-none">
-          {/* Ambient atmosphere backdrop */}
-          <div
-            suppressHydrationWarning
-            className="absolute inset-0 transition-all duration-500 pointer-events-none"
-            style={{
-              backgroundImage: `url("${wallpaperSrc}")`,
-              backgroundPosition: "center center",
-              backgroundSize: "cover",
-              filter: "blur(36px) saturate(1.35) brightness(0.8)",
-              transform: "scale(1.2)",
-              opacity: Math.max(0.3, opacityVal * 0.8),
-            }}
-          />
-
-          {/* Crisp Wallpaper (Full Cover edge-to-edge on mobile, smart adaptive on desktop) */}
-          <div className="absolute inset-0 transition-all duration-300 pointer-events-none flex items-center justify-center">
-            <div
-              suppressHydrationWarning
-              className="w-full h-full transition-all duration-300"
-              style={{
-                backgroundImage: `url("${wallpaperSrc}")`,
-                backgroundPosition: `${posX}% ${posY}%`,
-                backgroundSize: zoom > 100
-                  ? `${zoom}%`
-                  : isMobile
-                    ? "cover"
-                    : (fitMode === "contain" ? "contain" : "cover"),
-                backgroundRepeat: "no-repeat",
-                opacity: opacityVal,
-              }}
-            />
-          </div>
-
-          {/* Gentle ambient readability wash */}
-          <div
-            className="absolute inset-0 pointer-events-none"
-            style={{
-              background: darkMode
-                ? "linear-gradient(to bottom, rgba(10,10,14,0.3) 0%, rgba(10,10,14,0.05) 30%, rgba(10,10,14,0.1) 70%, rgba(10,10,14,0.45) 100%)"
-                : "linear-gradient(to bottom, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0.05) 30%, rgba(255,255,255,0.1) 70%, rgba(255,255,255,0.35) 100%)",
-            }}
-          />
-        </div>
+        <ChatWallpaperLayer
+          src={wallpaperSrc}
+          positionX={posX}
+          positionY={posY}
+          zoom={zoom}
+          fit={fitMode}
+          opacity={wallpaperConfig.opacity || 85}
+          isDark={darkMode}
+        />
 
         {/* Top Header */}
         <header
@@ -5008,43 +4824,64 @@ export default function ChatPage() {
             }`}
           style={{ paddingBottom: isMobile ? ((showInputEmojiPicker || showMobileGallery) ? "0.5rem" : "max(1.5rem, env(safe-area-inset-bottom))") : "0.75rem" }}
         >
-          {/* Replying banner */}
+          {/* Replying banner (WhatsApp/Messenger real layout: content on left, thumbnail & cancel X on right) */}
           {replyingTo && (
             <div
-              className={`mb-2 px-3 py-2 rounded-2xl flex items-center gap-2 shadow-sm border animate-in fade-in slide-in-from-bottom-2 ${c(
-                "bg-white border-gray-200",
-                "bg-[#242424] border-zinc-800"
+              className={`mb-2 px-3 py-2 rounded-2xl flex items-center justify-between gap-2.5 shadow-sm border animate-in fade-in slide-in-from-bottom-2 ${c(
+                "bg-white/95 border-gray-200 backdrop-blur-md",
+                "bg-[#242424]/95 border-zinc-800 backdrop-blur-md"
               )}`}
             >
-              {/* Left: cancel button */}
+              {/* Left: reply text with colored accent bar */}
+              <div
+                onClick={() => {
+                  if (replyingTo.id) scrollToMessage(replyingTo.id);
+                }}
+                className="flex flex-col overflow-hidden border-l-4 border-primary pl-2.5 flex-1 cursor-pointer hover:opacity-85 transition-opacity min-w-0 py-0.5"
+                title="Click to view message"
+              >
+                <span className="text-xs font-bold text-primary flex items-center gap-1.5 truncate">
+                  <CornerUpLeft className="w-3.5 h-3.5 shrink-0" />
+                  <span>{replyingTo.senderRole === myId ? "Reply to yourself" : `Reply to ${finalPartnerName}`}</span>
+                </span>
+                <span className={`text-[12px] truncate mt-0.5 ${c("text-gray-600", "text-gray-300")}`}>
+                  {getCleanMessagePreview(replyingTo, finalPartnerName).text}
+                </span>
+              </div>
+
+              {/* Optional media thumbnail if replying to a photo */}
+              {Boolean(replyingTo.type === "image" && replyingTo.content) && (
+                <div
+                  onClick={() => {
+                    if (replyingTo.id) scrollToMessage(replyingTo.id);
+                  }}
+                  className="w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-black/10 dark:border-white/10 cursor-pointer"
+                  title="View replied media"
+                >
+                  <img
+                    src={replyingTo.content}
+                    alt="attachment"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              )}
+
+              {/* Right: cancel (X) button */}
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   setReplyingTo(null);
                 }}
-                className="p-1 rounded-full hover:bg-zinc-700/60 text-gray-400 transition-colors shrink-0"
+                className={`p-1.5 rounded-full transition-all shrink-0 active:scale-95 ${c(
+                  "hover:bg-gray-100 text-gray-500 hover:text-gray-900",
+                  "hover:bg-zinc-700/60 text-gray-400 hover:text-white"
+                )}`}
                 title="Cancel reply"
+                aria-label="Cancel reply"
               >
                 <X className="w-4 h-4" />
               </button>
-
-              {/* Center: reply text */}
-              <div
-                onClick={() => {
-                  if (replyingTo.id) scrollToMessage(replyingTo.id);
-                }}
-                className="flex flex-col overflow-hidden border-l-4 border-[#0084ff] pl-2.5 flex-1 cursor-pointer hover:opacity-80 transition-opacity min-w-0"
-                title="Click to view message"
-              >
-                <span className="text-xs font-bold text-[#0084ff] flex items-center gap-1">
-                  <CornerUpLeft className="w-3 h-3" />
-                  {replyingTo.senderRole === myId ? "Reply to yourself" : `Reply to ${finalPartnerName}`}
-                </span>
-                <span className="text-[12px] truncate text-gray-400">
-                  {getCleanMessagePreview(replyingTo, finalPartnerName).text}
-                </span>
-              </div>
             </div>
           )}
 
@@ -6405,6 +6242,10 @@ export default function ChatPage() {
         currentConfig={wallpaperConfig}
         onSaveConfig={handleSaveWallpaper}
         isDark={darkMode}
+        partnerName={finalPartnerName}
+        partnerAvatar={partnerAvatar}
+        isPartnerOnline={Boolean(partnerPresence?.online)}
+        streak={typeof streak === "number" ? streak : undefined}
       />
 
       {/* Quick Reaction Customizer Modal (from 3-dots menu) */}
@@ -7046,6 +6887,45 @@ export default function ChatPage() {
         src={activeMediaViewerSrc || ""}
         onClose={() => setActiveMediaViewerSrc(null)}
       />
+
+      {/* Realtime Couple Nudge Alert Overlay */}
+      <NudgeOverlay
+        firestore={firestore}
+        myId={myId}
+        partnerId={partnerId}
+        myName={finalMyName}
+        partnerName={finalPartnerName}
+        partnerAvatar={partnerAvatar}
+      />
+
+      {/* Love Sparks Daily Ritual Dialog */}
+      <Dialog open={isLoveSparksModalOpen} onOpenChange={setIsLoveSparksModalOpen}>
+        <DialogContent className="sm:max-w-xl rounded-3xl p-4 sm:p-6 bg-background border border-pink-500/30 shadow-2xl">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Daily Love Spark Ritual</DialogTitle>
+            <DialogDescription>
+              Personalized couple daily conversation spark and reveal ritual
+            </DialogDescription>
+          </DialogHeader>
+          <LoveSparksRitual
+            firestore={firestore}
+            myId={myId}
+            partnerId={partnerId}
+            myName={finalMyName}
+            partnerName={finalPartnerName}
+            myAvatar={myAvatar}
+            partnerAvatar={partnerAvatar}
+            messages={messages}
+            memories={memories || []}
+            keyDates={[]}
+            darkMode={darkMode}
+            onOpenMemories={() => {
+              setIsLoveSparksModalOpen(false);
+              setActiveTab("memories");
+            }}
+          />
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

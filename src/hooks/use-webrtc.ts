@@ -420,8 +420,19 @@ export function useWebRTC({
   }, []);
 
   // ── ICE Candidate Helpers ─────────────────────────────────────────────────
+  const sanitizeCandidate = (candidate: RTCIceCandidate): Record<string, any> => {
+    const json = candidate.toJSON();
+    const res: Record<string, any> = {};
+    if (json.candidate !== undefined && json.candidate !== null) res.candidate = json.candidate;
+    if (json.sdpMid !== undefined && json.sdpMid !== null) res.sdpMid = json.sdpMid;
+    if (json.sdpMLineIndex !== undefined && json.sdpMLineIndex !== null) res.sdpMLineIndex = json.sdpMLineIndex;
+    if (json.usernameFragment !== undefined && json.usernameFragment !== null) res.usernameFragment = json.usernameFragment;
+    return res;
+  };
+
   const addCandidateSafe = useCallback(async (pc: RTCPeerConnection, data: RTCIceCandidateInit) => {
-    if (!data.candidate) return;
+    if (!data || !data.candidate) return;
+    if (!pc || pc.signalingState === "closed") return;
     const candKey = `${data.candidate}_${data.sdpMid}_${data.sdpMLineIndex}`;
     if (seenCandidateIdsRef.current.has(candKey)) return;
     seenCandidateIdsRef.current.add(candKey);
@@ -431,6 +442,7 @@ export function useWebRTC({
       return;
     }
     try {
+      if ((pc.signalingState as string) === "closed") return;
       await pc.addIceCandidate(new RTCIceCandidate(data));
     } catch (err) {
       console.warn("[WebRTC] Ignorable addIceCandidate notice:", err);
@@ -438,11 +450,16 @@ export function useWebRTC({
   }, []);
 
   const flushPendingCandidates = useCallback(async (pc: RTCPeerConnection) => {
+    if (!pc || (pc.signalingState as string) === "closed") return;
     const pending = [...pendingCandidatesRef.current];
     pendingCandidatesRef.current = [];
     for (const data of pending) {
-      try { await pc.addIceCandidate(new RTCIceCandidate(data)); }
-      catch (err) { console.warn("[WebRTC] Ignorable flush candidate notice:", err); }
+      try {
+        if ((pc.signalingState as string) === "closed") return;
+        await pc.addIceCandidate(new RTCIceCandidate(data));
+      } catch (err) {
+        console.warn("[WebRTC] Ignorable flush candidate notice:", err);
+      }
     }
   }, []);
 
@@ -596,6 +613,7 @@ export function useWebRTC({
   const handleRenegotiationSnapshot = useCallback(
     async (pc: RTCPeerConnection, cid: string, data: any) => {
       if (!data?.renegotiation || !db) return;
+      if (!pc || (pc.signalingState as string) === "closed" || isTerminal(callStateRef.current)) return;
 
       if (
         data.renegotiation.offer &&
@@ -605,6 +623,7 @@ export function useWebRTC({
       ) {
         lastRenegotiationAtRef.current = data.renegotiation.version;
         try {
+          if (!pc || (pc.signalingState as string) === "closed") return;
           if (pc.signalingState === "have-local-offer") {
             const isPolite = !isCallerRef.current;
             if (isPolite) {
@@ -613,20 +632,25 @@ export function useWebRTC({
               return;
             }
           }
+          if (!pc || (pc.signalingState as string) === "closed") return;
           await pc.setRemoteDescription(new RTCSessionDescription(data.renegotiation.offer));
+          if (!pc || (pc.signalingState as string) === "closed") return;
           await flushPendingCandidates(pc);
           const answer = await pc.createAnswer();
+          if (!pc || (pc.signalingState as string) === "closed") return;
           await pc.setLocalDescription(answer);
-          await updateDoc(doc(db, "calls", cid), {
-            "renegotiation.answer": { sdp: answer.sdp, type: answer.type },
-            "renegotiation.answeredBy": myId,
-          });
+          if (answer?.sdp && cid) {
+            await updateDoc(doc(db, "calls", cid), {
+              "renegotiation.answer": { sdp: answer.sdp, type: answer.type || "answer" },
+              "renegotiation.answeredBy": myId,
+            }).catch((e) => console.warn("[WebRTC] Renegotiation answer write notice:", e));
+          }
           const vSender = pc.getSenders().find((s) => s.track?.kind === "video");
           if (vSender) applyVideoSenderParameters(vSender);
           const aSender = pc.getSenders().find((s) => s.track?.kind === "audio");
           if (aSender) applyAudioSenderParameters(aSender);
         } catch (err) {
-          console.error("[WebRTC] Error handling renegotiation offer:", err);
+          console.warn("[WebRTC] Ignorable renegotiation offer notice:", err);
         }
       }
 
@@ -636,18 +660,20 @@ export function useWebRTC({
         pc.signalingState === "have-local-offer"
       ) {
         try {
+          if (!pc || (pc.signalingState as string) === "closed") return;
           await pc.setRemoteDescription(new RTCSessionDescription(data.renegotiation.answer));
+          if (!pc || (pc.signalingState as string) === "closed") return;
           await flushPendingCandidates(pc);
           const vSender = pc.getSenders().find((s) => s.track?.kind === "video");
           if (vSender) applyVideoSenderParameters(vSender);
           const aSender = pc.getSenders().find((s) => s.track?.kind === "audio");
           if (aSender) applyAudioSenderParameters(aSender);
         } catch (err) {
-          console.error("[WebRTC] Error handling renegotiation answer:", err);
+          console.warn("[WebRTC] Ignorable renegotiation answer notice:", err);
         }
       }
     },
-    [db, myId, flushPendingCandidates]
+    [db, myId, flushPendingCandidates, isTerminal]
   );
 
   // ── Send a push notification ───────────────────────────────────────────────
@@ -693,8 +719,11 @@ export function useWebRTC({
       const pc = setupPeerConnection();
 
       pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          addDoc(collection(db, "calls", newCallId, "callerCandidates"), event.candidate.toJSON());
+        if (event.candidate && event.candidate.candidate) {
+          const cleanCand = sanitizeCandidate(event.candidate);
+          addDoc(collection(db, "calls", newCallId, "callerCandidates"), cleanCand).catch((err) => {
+            console.warn("[WebRTC] Candidate write notice:", err);
+          });
         }
       };
 
@@ -766,15 +795,18 @@ export function useWebRTC({
             clearRingTimeout();
             cleanUp("declined");
           }
+          return;
         } else if (status === "ended") {
           if (!isTerminal(callStateRef.current)) {
             console.log("[WebRTC] Call ended by partner");
             cleanUp("ended");
           }
+          return;
         } else if (status === "missed") {
           if (!isTerminal(callStateRef.current)) {
             cleanUp("missed");
           }
+          return;
         } else if (data.answer && pc.signalingState === "have-local-offer" && callStateRef.current === "ringing") {
           console.log("[WebRTC] Call answered by partner");
           // Cancel timeout — call was answered
@@ -786,11 +818,13 @@ export function useWebRTC({
             await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
             await flushPendingCandidates(pc);
           } catch (e) {
-            console.error("[WebRTC] setRemoteDescription error:", e);
+            console.warn("[WebRTC] setRemoteDescription notice:", e);
           }
         }
 
-        await handleRenegotiationSnapshot(pc, newCallId, data);
+        if (pc && pc.signalingState !== "closed" && !isTerminal(callStateRef.current)) {
+          await handleRenegotiationSnapshot(pc, newCallId, data);
+        }
       });
 
       // Inbound Callee ICE candidates
@@ -865,8 +899,11 @@ export function useWebRTC({
       const pc = setupPeerConnection();
 
       pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          addDoc(collection(db, "calls", incomingCallId, "calleeCandidates"), event.candidate.toJSON());
+        if (event.candidate && event.candidate.candidate) {
+          const cleanCand = sanitizeCandidate(event.candidate);
+          addDoc(collection(db, "calls", incomingCallId, "calleeCandidates"), cleanCand).catch((err) => {
+            console.warn("[WebRTC] Callee candidate write notice:", err);
+          });
         }
       };
 
@@ -904,6 +941,7 @@ export function useWebRTC({
             logCallOutcome(incomingCallId, type, "missed");
             cleanUp("ended");
           }
+          return;
         } else if (status === "ended" || status === "cancelled") {
           if (!isTerminal(callStateRef.current)) {
             if (callStartedAtRef.current) {
@@ -912,9 +950,12 @@ export function useWebRTC({
             }
             cleanUp("ended");
           }
+          return;
         }
 
-        await handleRenegotiationSnapshot(pc, incomingCallId, data);
+        if (pc && pc.signalingState !== "closed" && !isTerminal(callStateRef.current)) {
+          await handleRenegotiationSnapshot(pc, incomingCallId, data);
+        }
       });
 
       // Inbound Caller ICE candidates
@@ -1118,13 +1159,15 @@ export function useWebRTC({
       await pc.setLocalDescription(offer);
       const version = Date.now();
       lastRenegotiationAtRef.current = version;
-      await updateDoc(doc(db, "calls", cid), {
-        type: "video",
-        [`cam_${myId}`]: true,
-        renegotiation: { offer: { sdp: offer.sdp, type: offer.type }, from: myId, version },
-      });
+      if (offer?.sdp) {
+        await updateDoc(doc(db, "calls", cid), {
+          type: "video",
+          [`cam_${myId}`]: true,
+          renegotiation: { offer: { sdp: offer.sdp, type: offer.type || "offer" }, from: myId, version },
+        }).catch((e) => console.warn("[WebRTC] Video upgrade update notice:", e));
+      }
     } catch (renegErr) {
-      console.error("[WebRTC] Renegotiation error on video upgrade:", renegErr);
+      console.warn("[WebRTC] Renegotiation notice on video upgrade:", renegErr);
     }
   }, [db, myId]);
 
