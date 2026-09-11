@@ -1156,7 +1156,10 @@ export function useWebRTC({
   const endCall = useCallback(async () => {
     const cid = callIdRef.current;
 
-    if (isTerminal(callStateRef.current)) return;
+    if (isTerminal(callStateRef.current)) {
+      cleanUp("idle");
+      return;
+    }
 
     if (callStartedAtRef.current) {
       const durationSec = Math.round((Date.now() - callStartedAtRef.current) / 1000);
