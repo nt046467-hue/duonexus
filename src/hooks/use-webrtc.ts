@@ -83,8 +83,10 @@ export const STANDARD_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
     googHighpassFilter: true,
     googTypingNoiseDetection: true,
     // W3C draft — suppresses audio sent to the local speaker from
-    // leaking back into the captured mic stream (draft, Chrome 114+)
-    suppressLocalAudioPlayback: false,
+    // leaking back into the captured mic stream (draft, Chrome 114+).
+    // MUST be true — prevents speaker output from leaking back into
+    // the mic and causing echo on the remote (mobile) side.
+    suppressLocalAudioPlayback: true,
   } as any),
 };
 
@@ -249,7 +251,7 @@ export function useWebRTC({
         updateDoc(doc(db, "calls", cid), {
           status: "ended",
           endedAt: serverTimestamp(),
-        }).catch(() => {});
+        }).catch(() => { });
       }
     };
     window.addEventListener("beforeunload", handleUnload);
@@ -336,8 +338,8 @@ export function useWebRTC({
     navigator.serviceWorker.ready.then((reg) => {
       reg.getNotifications({ tag: `call-${targetCallId}` }).then((notifications) => {
         notifications.forEach((n) => n.close());
-      }).catch(() => {});
-    }).catch(() => {});
+      }).catch(() => { });
+    }).catch(() => { });
   }, []);
 
   // ── Idempotent Cleanup ─────────────────────────────────────────────────────
@@ -368,13 +370,13 @@ export function useWebRTC({
       pcRef.current.onicecandidate = null;
       pcRef.current.oniceconnectionstatechange = null;
       pcRef.current.onconnectionstatechange = null;
-      try { pcRef.current.close(); } catch {}
+      try { pcRef.current.close(); } catch { }
       pcRef.current = null;
     }
 
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((t) => {
-        try { t.stop(); } catch {}
+        try { t.stop(); } catch { }
       });
       localStreamRef.current = null;
       setLocalStream(null);
@@ -382,7 +384,7 @@ export function useWebRTC({
 
     if (remoteStreamRef.current) {
       remoteStreamRef.current.getTracks().forEach((t) => {
-        try { t.stop(); } catch {}
+        try { t.stop(); } catch { }
       });
       remoteStreamRef.current = null;
       setRemoteStream(null);
@@ -568,7 +570,7 @@ export function useWebRTC({
               if (process.env.NODE_ENV === "development") {
                 console.warn("[WebRTC] Restarting ICE after disconnection timeout");
               }
-              try { pc.restartIce(); } catch {}
+              try { pc.restartIce(); } catch { }
             }
           }, 6000);
         }
@@ -576,7 +578,7 @@ export function useWebRTC({
         if (process.env.NODE_ENV === "development") {
           console.warn("[WebRTC] ICE failed — attempting restartIce()");
         }
-        try { pc.restartIce(); } catch {}
+        try { pc.restartIce(); } catch { }
       } else if (state === "closed") {
         if (!isTerminal(callStateRef.current)) cleanUp("ended");
       }
@@ -650,7 +652,7 @@ export function useWebRTC({
         }
       }
 
-      // 3. Progressive fallback: basic video: true + standard audio
+      // 3. Progressive fallback: basic video: true + audio with echo cancellation
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: STANDARD_AUDIO_CONSTRAINTS,
@@ -659,23 +661,12 @@ export function useWebRTC({
         stream.getAudioTracks().forEach((t) => (t.enabled = true));
         stream.getVideoTracks().forEach((t) => (t.enabled = true));
         return stream;
-      } catch {
-        // Final fallback: no video constraints, just AEC audio
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: STANDARD_AUDIO_CONSTRAINTS,
-            video: true,
-          });
-          stream.getAudioTracks().forEach((t) => (t.enabled = true));
-          stream.getVideoTracks().forEach((t) => (t.enabled = true));
-          return stream;
-        } catch (basicVideoErr: any) {
-          if (process.env.NODE_ENV === "development") {
-            console.warn("[WebRTC] Video hardware acquisition failed, falling back to voice channel:", basicVideoErr);
-          }
-          if (onCameraErrorRef.current) {
-            onCameraErrorRef.current(basicVideoErr?.name || "CameraError");
-          }
+      } catch (basicVideoErr: any) {
+        if (process.env.NODE_ENV === "development") {
+          console.warn("[WebRTC] Video hardware acquisition failed, falling back to voice channel:", basicVideoErr);
+        }
+        if (onCameraErrorRef.current) {
+          onCameraErrorRef.current(basicVideoErr?.name || "CameraError");
         }
       }
     }
@@ -766,7 +757,7 @@ export function useWebRTC({
             await updateDoc(doc(db, "calls", cid), {
               "renegotiation.answer": { sdp: answer.sdp, type: answer.type || "answer" },
               "renegotiation.answeredBy": myId,
-            }).catch(() => {});
+            }).catch(() => { });
           }
           const vSender = pc.getSenders().find((s) => s.track?.kind === "video");
           if (vSender) applyVideoSenderParameters(vSender);
@@ -809,7 +800,7 @@ export function useWebRTC({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-    }).catch(() => {});
+    }).catch(() => { });
   }, []);
 
   // ── Start Outgoing Call ────────────────────────────────────────────────────
@@ -850,7 +841,7 @@ export function useWebRTC({
       pc.onicecandidate = (event) => {
         if (event.candidate && event.candidate.candidate) {
           const cleanCand = sanitizeCandidate(event.candidate);
-          addDoc(collection(db, "calls", newCallId, "callerCandidates"), cleanCand).catch(() => {});
+          addDoc(collection(db, "calls", newCallId, "callerCandidates"), cleanCand).catch(() => { });
         }
       };
 
@@ -889,7 +880,7 @@ export function useWebRTC({
           updateDoc(doc(db, "calls", newCallId), {
             status: "missed",
             endedAt: serverTimestamp(),
-          }).catch(() => {});
+          }).catch(() => { });
           sendPush({
             type: "missed_call",
             recipientId: partnerId,
@@ -1042,7 +1033,7 @@ export function useWebRTC({
       pc.onicecandidate = (event) => {
         if (event.candidate && event.candidate.candidate) {
           const cleanCand = sanitizeCandidate(event.candidate);
-          addDoc(collection(db, "calls", incomingCallId, "calleeCandidates"), cleanCand).catch(() => {});
+          addDoc(collection(db, "calls", incomingCallId, "calleeCandidates"), cleanCand).catch(() => { });
         }
       };
 
@@ -1117,7 +1108,7 @@ export function useWebRTC({
           status: "failed",
           endedAt: serverTimestamp(),
         });
-      } catch {}
+      } catch { }
       cleanUp("failed");
     }
   }, [db, myId, partnerId, getLocalStream, setupPeerConnection, logCallOutcome, cleanUp, clearRingTimeout, dismissCallNotification, addCandidateSafe, flushPendingCandidates, handleRenegotiationSnapshot, isTerminal]);
@@ -1228,7 +1219,7 @@ export function useWebRTC({
       existingVideoTrack.enabled = false;
       setIsVideoEnabled(false);
       if (cid && db) {
-        updateDoc(doc(db, "calls", cid), { [`cam_${myId}`]: false }).catch(() => {});
+        updateDoc(doc(db, "calls", cid), { [`cam_${myId}`]: false }).catch(() => { });
       }
       return;
     }
@@ -1237,7 +1228,7 @@ export function useWebRTC({
       existingVideoTrack.enabled = true;
       setIsVideoEnabled(true);
       if (cid && db) {
-        updateDoc(doc(db, "calls", cid), { [`cam_${myId}`]: true }).catch(() => {});
+        updateDoc(doc(db, "calls", cid), { [`cam_${myId}`]: true }).catch(() => { });
       }
       return;
     }
@@ -1287,7 +1278,7 @@ export function useWebRTC({
 
     const sender = pc.getSenders().find((s) => s.track?.kind === "video");
     if (sender) {
-      try { await sender.replaceTrack(newVideoTrack); await applyVideoSenderParameters(sender); } catch {}
+      try { await sender.replaceTrack(newVideoTrack); await applyVideoSenderParameters(sender); } catch { }
     } else {
       const newSender = pc.addTrack(newVideoTrack, localStreamRef.current!);
       await applyVideoSenderParameters(newSender);
@@ -1306,7 +1297,7 @@ export function useWebRTC({
           type: "video",
           [`cam_${myId}`]: true,
           renegotiation: { offer: { sdp: offer.sdp, type: offer.type || "offer" }, from: myId, version },
-        }).catch(() => {});
+        }).catch(() => { });
       }
     } catch (renegErr) {
       if (process.env.NODE_ENV === "development") {
@@ -1438,14 +1429,14 @@ export function useWebRTC({
       if (document.visibilityState === "visible" && pcRef.current) {
         const ice = pcRef.current.iceConnectionState;
         if (ice === "disconnected" || ice === "failed") {
-          try { pcRef.current.restartIce(); } catch {}
+          try { pcRef.current.restartIce(); } catch { }
         }
       }
     };
 
     const handleOnline = () => {
       if (pcRef.current) {
-        try { pcRef.current.restartIce(); } catch {}
+        try { pcRef.current.restartIce(); } catch { }
       }
     };
 
