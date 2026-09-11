@@ -17,6 +17,7 @@ import {
   onSnapshot,
   orderBy,
   getDocs,
+  getDoc,
   where,
   startAfter,
   QueryDocumentSnapshot,
@@ -2250,29 +2251,50 @@ export default function ChatPage() {
       handleAction(answerParam, declineParam);
     } else if (callIdParam) {
       window.history.replaceState({}, "", "/chat");
-      setIncomingCallInfo((prev) => prev || { id: callIdParam, type: "audio" });
+      getDoc(doc(firestore, "calls", callIdParam)).then((snap: any) => {
+        if (snap.exists()) {
+          const d = snap.data();
+          if (d.status === "ringing") {
+            setIncomingCallInfo({ id: callIdParam, type: d.type || "video" });
+          } else if (d.status === "active" && d.calleeId === myId) {
+            answerCall(callIdParam);
+          }
+        } else {
+          setIncomingCallInfo((prev) => prev || { id: callIdParam, type: "video" });
+        }
+      }).catch(() => {
+        setIncomingCallInfo((prev) => prev || { id: callIdParam, type: "video" });
+      });
     }
 
     const handleSwMessage = (event: MessageEvent) => {
       if (!event.data) return;
       if (event.data.type === "ACCEPT_CALL" && event.data.callId) {
-        // Clear incoming call UI immediately before answering
         setIncomingCallInfo(null);
         answerCall(event.data.callId);
       } else if (event.data.type === "DECLINE_CALL" && event.data.callId) {
         setIncomingCallInfo(null);
         declineCall(event.data.callId);
       } else if (event.data.type === "OPEN_INCOMING_CALL" && event.data.callId) {
-        // User tapped incoming call notification — ensure incoming call screen is active
-        setIncomingCallInfo({
-          id: event.data.callId,
-          type: (event.data.callType as "audio" | "video") || "audio",
+        const cId = event.data.callId;
+        getDoc(doc(firestore, "calls", cId)).then((snap: any) => {
+          if (snap.exists()) {
+            const d = snap.data();
+            if (d.status === "ringing") {
+              setIncomingCallInfo({ id: cId, type: d.type || (event.data.callType as "audio" | "video") || "video" });
+            } else if (d.status === "active" && d.calleeId === myId) {
+              answerCall(cId);
+            }
+          } else {
+            setIncomingCallInfo({ id: cId, type: (event.data.callType as "audio" | "video") || "video" });
+          }
+        }).catch(() => {
+          setIncomingCallInfo({ id: cId, type: (event.data.callType as "audio" | "video") || "video" });
         });
       } else if (
         (event.data.type === "CALL_CANCELLED" || event.data.type === "CALL_ENDED") &&
         event.data.callId
       ) {
-        // Caller cancelled or call ended — dismiss incoming call UI
         setIncomingCallInfo((prev) =>
           prev?.id === event.data.callId ? null : prev
         );
@@ -2491,48 +2513,57 @@ export default function ChatPage() {
   // ================= MOBILE MAIN HUB SCREEN =================
   const renderMobileMain = () => (
     <div
-      className={`h-[100dvh] w-full flex flex-col font-sans transition-colors duration-300 select-none overflow-hidden ${c(
+      className={`h-[100dvh] w-full flex flex-col font-sans transition-colors duration-300 overflow-hidden ${c(
         "bg-[#4834d4]",
         "bg-[#0D0B1C]"
       )}`}
     >
+      {/* Sleek Mobile Top Header Bar (Moving naturally) */}
       <div
-        className="flex-1 p-6 overflow-y-auto flex flex-col"
-        style={{ paddingTop: "max(1.5rem, env(safe-area-inset-top))" }}
+        className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0 bg-black/25 backdrop-blur-xl z-20"
+        style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
       >
-        {/* DuoNexus Logo — Premium */}
-        <div className="mt-4 mb-8 flex flex-col items-center text-center">
-          {/* App Icon */}
-          <div className="relative mb-4">
-            <div
-              className="w-20 h-20 rounded-[24px] flex items-center justify-center shadow-2xl"
-              style={{
-                background: "linear-gradient(135deg, #ff6b9d 0%, #c44dff 50%, #6d5aff 100%)",
-                boxShadow: "0 20px 60px rgba(196,77,255,0.45), 0 4px 20px rgba(0,0,0,0.3)",
-              }}
-            >
-              <Heart className="w-10 h-10 text-white fill-white drop-shadow-md" />
-            </div>
-            {/* Glow ring */}
-            <div
-              className="absolute inset-0 rounded-[24px] blur-xl opacity-40"
-              style={{ background: "linear-gradient(135deg, #ff6b9d, #c44dff, #6d5aff)" }}
-            />
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-pink-500 via-rose-500 to-purple-600 flex items-center justify-center shadow-md shadow-pink-500/20">
+            <Heart className="w-4 h-4 text-white fill-white" />
           </div>
-          <h1
-            className="text-[32px] font-black text-white tracking-tight"
-            style={{ textShadow: "0 2px 16px rgba(196,77,255,0.5)" }}
-          >
-            DuoNexus
-          </h1>
-          <p className="text-[14px] font-medium text-white/60 mt-1.5 tracking-wide">
-            Your private space, just for two 💕
-          </p>
+          <div>
+            <h1 className="text-base font-black text-white tracking-tight leading-none">DuoNexus</h1>
+            <span className="text-[10px] font-semibold text-white/60">Private Space 💕</span>
+          </div>
         </div>
 
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsStreakModalOpen(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-orange-500/20 border border-orange-500/30 text-orange-300 text-xs font-bold active:scale-95 transition-all shadow-xs"
+          >
+            <Flame className="w-3.5 h-3.5 fill-orange-400 text-orange-400 animate-pulse" />
+            <span>{streak}d</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsMyProfileOpen(true)}
+            className="w-8 h-8 rounded-full border-2 border-white/20 overflow-hidden shadow-sm active:scale-95 transition-all"
+            title="My Profile"
+          >
+            <img src={myAvatar} alt={finalMyName} className="w-full h-full object-cover" />
+          </button>
+        </div>
+      </div>
+
+      <div
+        className="flex-1 min-h-0 overflow-y-auto w-full"
+        style={{
+          WebkitOverflowScrolling: "touch",
+          overscrollBehavior: "contain",
+          touchAction: "pan-y",
+        }}
+      >
         {/* Tab Content inside Hub */}
         {activeTab === "home" ? (
-          <div className="flex-1 overflow-y-auto mb-4 w-full">
+          <div className="w-full">
             <HomeDashboard
               firestore={firestore}
               myId={myId}
@@ -2560,7 +2591,7 @@ export default function ChatPage() {
             />
           </div>
         ) : activeTab === "chat" ? (
-          <div className="mt-auto mb-4 w-full space-y-4">
+          <div className="px-3.5 py-3 pb-32 w-full space-y-4">
             {/* Chat List Item to open real conversation */}
             <div
               onClick={() => {
@@ -2641,7 +2672,7 @@ export default function ChatPage() {
             </div>
           </div>
         ) : activeTab === "tools" ? (
-          <div className="flex-1 overflow-y-auto mb-4 w-full animate-in fade-in">
+          <div className="w-full animate-in fade-in">
             <ToolsHub
               firestore={firestore}
               myId={myId}
@@ -2658,7 +2689,7 @@ export default function ChatPage() {
             />
           </div>
         ) : activeTab === "memories" ? (
-          <div className="mt-auto mb-4 w-full space-y-3 animate-in fade-in">
+          <div className="px-3.5 py-3 pb-32 w-full space-y-3 animate-in fade-in">
             <div className={`p-5 rounded-2xl shadow-xl ${c("bg-white", "bg-[#18181A]")}`}>
               <div className="flex items-center justify-between mb-4">
                 <h3 className={`font-bold text-lg ${c("text-gray-900", "text-white")}`}>Our Milestones</h3>
@@ -2733,7 +2764,7 @@ export default function ChatPage() {
           </div>
         ) : (
           /* Mobile Settings View with Real Toggler Switches */
-          <div className="w-full space-y-4 pb-6 animate-in fade-in">
+          <div className="px-3.5 py-3 w-full space-y-4 pb-32 animate-in fade-in">
             {/* User Profile Card */}
             <div className={`p-4 rounded-3xl shadow-xl border ${c("bg-white border-gray-100", "bg-[#18181A] border-zinc-800")}`}>
               <div className="flex items-center justify-between">
@@ -2975,7 +3006,7 @@ export default function ChatPage() {
       </div>
 
       {/* Bottom Curved 5-Tab Bar */}
-      <div className="w-full px-4 pt-3 relative" style={{ paddingBottom: "max(1.8rem, env(safe-area-inset-bottom))" }}>
+      <div className="w-full px-4 pt-3 relative shrink-0 z-20" style={{ paddingBottom: "max(1.8rem, env(safe-area-inset-bottom))" }}>
         <div
           className={`w-full h-[82px] rounded-[32px] relative flex justify-between items-center px-2 shadow-[0_20px_50px_-10px_rgba(0,0,0,0.3)] ${c(
             "bg-white",

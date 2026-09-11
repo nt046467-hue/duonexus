@@ -1000,7 +1000,7 @@ export function WallpaperDialog({
             onClick={handleSave}
             className="w-full h-11 rounded-xl font-bold text-sm"
           >
-            Save Wallpaper ðŸ’•
+            Save Wallpaper
           </Button>
           <div className="flex gap-2">
             <Button
@@ -1203,7 +1203,7 @@ export function WallpaperDialog({
                       onClick={() => { setIsMobileFramingOpen(false); handleSave(); }}
                       className="bg-primary text-primary-foreground font-bold text-xs px-4 rounded-xl"
                     >
-                      Save Wallpaper ðŸ’•
+                      Save Wallpaper
                     </Button>
                   </div>
                 </motion.div>
@@ -1398,7 +1398,7 @@ export function WallpaperDialog({
                   onClick={handleSave}
                   className="bg-primary text-primary-foreground font-semibold rounded-xl px-5 text-xs h-8 shadow-md hover:shadow-primary/20"
                 >
-                  Save Wallpaper ðŸ’•
+                  Save Wallpaper
                 </Button>
               </div>
             </>

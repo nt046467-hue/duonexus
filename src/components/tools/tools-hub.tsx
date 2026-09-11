@@ -319,7 +319,7 @@ export function ToolsHub({
   }, [bucketItems, bucketFilter]);
 
   return (
-    <div className="flex-1 h-full overflow-y-auto overscroll-contain pb-8 select-none">
+    <div className="w-full pb-32 sm:pb-24">
       {/* Header */}
       <div className="px-4 pt-5 pb-1">
         <h2 className="text-xl font-black text-foreground flex items-center gap-2">
@@ -515,10 +515,11 @@ export function ToolsHub({
             {/* Custom Nudge Input */}
             <div className="pt-2 flex gap-2">
               <Input
+                dir="ltr"
                 value={customNudgeText}
                 onChange={(e) => setCustomNudgeText(e.target.value)}
                 placeholder="Or write a custom poke (e.g., 'Drink some water! 💕')"
-                className="rounded-xl text-xs h-10 bg-background"
+                className="rounded-xl text-base sm:text-xs h-10 bg-background text-left dir-ltr"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && customNudgeText.trim()) {
                     handleSendNudge(customNudgeText.trim(), "💌");
@@ -797,10 +798,11 @@ export function ToolsHub({
             Event Title
           </label>
           <Input
+            dir="ltr"
             value={dateTitle}
             onChange={(e) => setDateTitle(e.target.value)}
             placeholder="e.g. Our First Date, Karu's Birthday, Japan Trip"
-            className="rounded-xl h-11"
+            className="rounded-xl h-11 text-base sm:text-sm text-left dir-ltr"
           />
         </div>
 
@@ -944,10 +946,11 @@ export function ToolsHub({
             Secret Message (hidden until unlock date)
           </label>
           <Textarea
+            dir="ltr"
             value={capsuleMessage}
             onChange={(e) => setCapsuleMessage(e.target.value)}
             placeholder="Write your heartfelt note, wishes, or secrets..."
-            className="rounded-xl text-sm min-h-[140px] resize-none"
+            className="rounded-xl text-base sm:text-sm min-h-[140px] resize-none text-left dir-ltr"
           />
         </div>
 

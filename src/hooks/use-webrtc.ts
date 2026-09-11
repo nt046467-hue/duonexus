@@ -83,10 +83,8 @@ export const STANDARD_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
     googHighpassFilter: true,
     googTypingNoiseDetection: true,
     // W3C draft — suppresses audio sent to the local speaker from
-    // leaking back into the captured mic stream (draft, Chrome 114+).
-    // MUST be true — prevents speaker output from leaking back into
-    // the mic and causing echo on the remote (mobile) side.
-    suppressLocalAudioPlayback: true,
+    // leaking back into the captured mic stream (draft, Chrome 114+)
+    suppressLocalAudioPlayback: false,
   } as any),
 };
 
@@ -652,10 +650,10 @@ export function useWebRTC({
         }
       }
 
-      // 3. Progressive fallback: basic video: true + audio with echo cancellation
+      // 3. Progressive fallback: basic video: true + audio: true
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          audio: STANDARD_AUDIO_CONSTRAINTS,
+          audio: true,
           video: true,
         });
         stream.getAudioTracks().forEach((t) => (t.enabled = true));
@@ -998,7 +996,7 @@ export function useWebRTC({
         return;
       }
       const callData = callSnap.data();
-      if (callData.status !== "ringing") {
+      if (callData.status !== "ringing" && callData.status !== "active") {
         stopRingtone(incomingCallId);
         dismissCallNotification(incomingCallId);
         onCallEndedRef.current?.();
@@ -1024,7 +1022,23 @@ export function useWebRTC({
       setCallType(type);
       setIsVideoEnabled(type === "video");
 
-      const stream = await getLocalStream(type);
+      // Robust local stream acquisition with fallback
+      let stream: MediaStream;
+      try {
+        stream = await getLocalStream(type);
+      } catch (streamErr) {
+        if (process.env.NODE_ENV === "development") {
+          console.warn("[WebRTC] Primary stream acquisition failed in answerCall, falling back to voice:", streamErr);
+        }
+        if (type === "video") {
+          setIsVideoEnabled(false);
+          setCallType("audio");
+          stream = await getLocalStream("audio");
+        } else {
+          throw streamErr;
+        }
+      }
+
       localStreamRef.current = stream;
       setLocalStream(stream);
 

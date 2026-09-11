@@ -186,13 +186,7 @@ export function HomeDashboard({
   const isPartnerOnline = partnerPresence?.online;
 
   return (
-    <div
-      className="flex-1 h-full overflow-y-auto overscroll-contain select-none pb-32 sm:pb-24"
-      style={{
-        paddingTop: "max(0.75rem, env(safe-area-inset-top, 0px))",
-        WebkitOverflowScrolling: "touch",
-      }}
-    >
+    <div className="w-full pb-32 sm:pb-24">
       <div className="px-3.5 sm:px-5 space-y-3 sm:space-y-4 pt-1">
 
         {/* ═══ HERO BANNER — standalone couple card (never overlaps) ═══ */}

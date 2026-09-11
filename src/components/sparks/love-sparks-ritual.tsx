@@ -477,10 +477,17 @@ export function LoveSparksRitual({
 
               <div className="space-y-2.5">
                 <Textarea
+                  dir="ltr"
                   value={myAnswerText}
                   onChange={(e) => setMyAnswerText(e.target.value)}
+                  onFocus={(e) => {
+                    // Smoothly scroll text area into view when mobile keyboard pops up
+                    setTimeout(() => {
+                      e.target.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }, 250);
+                  }}
                   placeholder={`Write your secret answer here... (Neither sees the other's answer until both submit)`}
-                  className="min-h-[96px] bg-background/90 rounded-2xl border-pink-500/25 focus-visible:ring-pink-500/30 text-base sm:text-sm resize-none p-3.5 leading-relaxed"
+                  className="min-h-[96px] bg-background/90 rounded-2xl border-pink-500/25 focus-visible:ring-pink-500/30 text-base sm:text-sm resize-none p-3.5 leading-relaxed text-left text-foreground dir-ltr"
                 />
 
                 <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 pt-0.5">
