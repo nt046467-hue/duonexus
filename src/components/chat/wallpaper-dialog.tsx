@@ -31,6 +31,7 @@ import {
   Maximize2,
   X,
   ZoomIn,
+  ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useViewport } from "@/hooks/use-viewport";
@@ -111,31 +112,31 @@ const STYLE_OPTIONS: { id: WallpaperStyle; label: string; icon: string; desc: st
   {
     id: "cinematic",
     label: "Cinematic",
-    icon: "🎬",
+    icon: "ðŸŽ¬",
     desc: "35mm warm tone, gentle anamorphic mood",
   },
   {
     id: "golden_hour",
     label: "Golden Hour",
-    icon: "🌅",
+    icon: "ðŸŒ…",
     desc: "Warm amber glow & tender rim lighting",
   },
   {
     id: "dreamy_soft",
     label: "Dreamy Glow",
-    icon: "🌸",
+    icon: "ðŸŒ¸",
     desc: "Soft daylight diffusion & romantic pastel tone",
   },
   {
     id: "clean_studio",
     label: "Clean Studio",
-    icon: "📸",
+    icon: "ðŸ“¸",
     desc: "Crisp natural tones & calm neutral balance",
   },
   {
     id: "film_noir",
     label: "Velvet Noir",
-    icon: "🖤",
+    icon: "ðŸ–¤",
     desc: "High tonal monochrome & velvety shadows",
   },
 ];
@@ -179,6 +180,9 @@ export function WallpaperDialog({
   const [generationMessage, setGenerationMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Mobile wizard: 1=Choose source, 2=AI Style (custom photo only), 3=Preview, 4=Frame & Save
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4>(1);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -195,6 +199,7 @@ export function WallpaperDialog({
       setIsMobileFramingOpen(false);
       setErrorMessage(null);
       setGenerationMessage(null);
+      setWizardStep(1);
       if (typeof window !== "undefined") {
         setPreviewDevice(window.innerWidth < 768 ? "mobile" : "desktop");
       }
@@ -224,7 +229,8 @@ export function WallpaperDialog({
       setSelectedId("custom");
 
       if (isMobile) {
-        setIsMobileFramingOpen(true);
+        // Go to Step 2 (Style) so user can pick AI mood before generating
+        setWizardStep(2);
       } else {
         setInStudioMode(true);
         setPreviewTab("generated");
@@ -253,7 +259,7 @@ export function WallpaperDialog({
 
       if (aiResult.success && aiResult.wallpaperUrl && aiResult.wallpaperUrl !== photoBase64) {
         setCustomUrl(aiResult.wallpaperUrl);
-        setGenerationMessage(aiResult.message || "Wallpaper generated ✨");
+        setGenerationMessage(aiResult.message || "Wallpaper generated âœ¨");
       } else {
         setGenerationMessage(aiResult.message || "Photographic wallpaper ready");
       }
@@ -645,7 +651,7 @@ export function WallpaperDialog({
         </div>
       )}
 
-      {/* Device Switcher (Desktop 💻 vs Phone 📱) */}
+      {/* Device Switcher (Desktop ðŸ’» vs Phone ðŸ“±) */}
       <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-full border border-primary/10">
         <button
           type="button"
@@ -679,8 +685,348 @@ export function WallpaperDialog({
     </div>
   );
 
-  /* ═══════════ MOBILE-ONLY BOTTOM SHEET (<768px) ═══════════ */
+  /* â•â•â•â•â•â•â•â•â•â•â• MOBILE WIZARD (<768px) â€” 4 steps â•â•â•â•â•â•â•â•â•â•â•
+   * Step 1: Choose source (preset grid + upload)
+   * Step 2: AI Style  (custom photo only â€” skippable for presets)
+   * Step 3: Generate & Preview
+   * Step 4: Frame, Fit & Save
+   * Desktop branch below this block stays 100% unchanged.
+   * â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
   if (isMounted && isMobile) {
+    /* â”€â”€ wizard navigation helpers â”€â”€ */
+    const TOTAL_STEPS = 4;
+    const wizardTitles: Record<number, string> = {
+      1: "Choose Wallpaper",
+      2: "AI Style",
+      3: "Preview",
+      4: "Frame & Save",
+    };
+
+    const goBack = () => {
+      if (wizardStep === 1) { onOpenChange(false); return; }
+      if (wizardStep === 3 && selectedId !== "custom") {
+        // Presets skip step 2, so go back to step 1
+        setWizardStep(1);
+      } else {
+        setWizardStep((s) => Math.max(1, s - 1) as 1 | 2 | 3 | 4);
+      }
+    };
+
+    /* â”€â”€ step content â”€â”€ */
+    const renderStep = () => {
+      /* STEP 1 â€” Choose source */
+      if (wizardStep === 1) {
+        return (
+          <div className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              Pick a preset or upload your own couple photo.
+            </p>
+
+            {errorMessage && (
+              <div className="flex items-center gap-2 p-2.5 bg-destructive/10 text-destructive text-xs rounded-xl border border-destructive/20">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-3 gap-2">
+              {/* Upload tile */}
+              <div
+                onClick={() => {
+                  if (customUrl) {
+                    setSelectedId("custom");
+                    setWizardStep(2);
+                  } else {
+                    fileInputRef.current?.click();
+                  }
+                }}
+                className={cn(
+                  "relative aspect-[9/13] rounded-2xl overflow-hidden border-2 transition-all p-1 flex flex-col items-center justify-between text-left cursor-pointer group shadow-xs",
+                  selectedId === "custom"
+                    ? "border-primary ring-2 ring-primary/40 scale-[1.02]"
+                    : "border-dashed border-primary/40 hover:border-primary bg-primary/5"
+                )}
+              >
+                <div className="w-full flex-1 rounded-xl overflow-hidden relative flex flex-col items-center justify-center bg-gradient-to-br from-pink-500/10 via-purple-500/10 to-indigo-500/10">
+                  {customUrl ? (
+                    <img
+                      src={customUrl}
+                      alt="Uploaded"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center p-2 text-center">
+                      <div className="w-8 h-8 rounded-full bg-primary/15 text-primary flex items-center justify-center mb-1">
+                        <ImagePlus className="w-4 h-4 stroke-[2.2]" />
+                      </div>
+                      <span className="text-[10px] font-bold text-foreground">Upload</span>
+                      <span className="text-[8px] text-muted-foreground mt-0.5">Custom photo</span>
+                    </div>
+                  )}
+                </div>
+                <span className="text-[10px] font-bold mt-1 truncate w-full px-1 text-center">
+                  {customUrl ? "Custom" : "Upload"}
+                </span>
+                {selectedId === "custom" && (
+                  <div className="absolute top-2 right-2 w-4 h-4 bg-primary text-primary-foreground rounded-full flex items-center justify-center shadow-md">
+                    <Check className="w-2.5 h-2.5 stroke-[3]" />
+                  </div>
+                )}
+              </div>
+
+              {/* Preset tiles */}
+              {PRESET_WALLPAPERS.map((wp) => {
+                const isSelected = selectedId === wp.id;
+                return (
+                  <button
+                    key={wp.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedId(wp.id);
+                      // Presets skip step 2, go straight to preview
+                      setWizardStep(3);
+                    }}
+                    className={cn(
+                      "relative aspect-[9/13] rounded-2xl overflow-hidden border-2 transition-all p-1 group flex flex-col items-center justify-between text-left shadow-xs",
+                      isSelected
+                        ? "border-primary ring-2 ring-primary/40 scale-[1.02]"
+                        : "border-border/60 hover:border-primary/40 bg-card"
+                    )}
+                  >
+                    <div className="w-full flex-1 rounded-xl overflow-hidden relative bg-muted/40">
+                      <img
+                        src={wp.image}
+                        alt={wp.name}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    </div>
+                    <span className="text-[10px] font-bold mt-1 truncate w-full px-1 text-center">
+                      {wp.name}
+                    </span>
+                    {isSelected && (
+                      <div className="absolute top-2 right-2 w-4 h-4 bg-primary text-primary-foreground rounded-full flex items-center justify-center shadow-md">
+                        <Check className="w-2.5 h-2.5 stroke-[3]" />
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      }
+
+      /* STEP 2 â€” AI Style (custom photo only) */
+      if (wizardStep === 2) {
+        return (
+          <div className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              Choose a photographic mood â€” the AI will apply it to your photo.
+            </p>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              {STYLE_OPTIONS.map((st) => {
+                const isSelected = selectedStyle === st.id;
+                return (
+                  <button
+                    key={st.id}
+                    type="button"
+                    onClick={() => setSelectedStyle(st.id)}
+                    className={cn(
+                      "flex items-start gap-3 p-3 rounded-2xl border text-left transition-all min-h-[68px]",
+                      isSelected
+                        ? "border-primary bg-primary/10 ring-1 ring-primary/30"
+                        : "border-border/60 hover:border-primary/40 bg-muted/20"
+                    )}
+                  >
+                    <span className="text-2xl leading-none shrink-0">{st.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold truncate">{st.label}</p>
+                      <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">{st.desc}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      }
+
+      /* STEP 3 â€” Generate & Preview */
+      if (wizardStep === 3) {
+        return (
+          <div className="space-y-3">
+            {renderPreviewTopBar()}
+            <WallpaperFramingViewport
+              imageSrc={currentDisplayImage}
+              positionX={positionX}
+              positionY={positionY}
+              zoom={zoom}
+              fit={fitMode}
+              opacity={opacity}
+              device="mobile"
+              isDark={isDark}
+              partnerName={partnerName}
+              partnerAvatar={partnerAvatar}
+              isPartnerOnline={isPartnerOnline}
+              streak={streak}
+              onChange={handleTransformChange}
+              showControlsBar={false}
+            />
+            {isGenerating && (
+              <div className="flex items-center gap-2.5 p-3 bg-muted/60 rounded-xl border border-border/60">
+                <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />
+                <span className="text-xs text-muted-foreground">{generationMessage || "Generatingâ€¦"}</span>
+              </div>
+            )}
+            {!isGenerating && generationMessage && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span>{generationMessage}</span>
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      /* STEP 4 â€” Frame & Save */
+      return (
+        <div className="space-y-3">
+          <WallpaperFramingViewport
+            imageSrc={currentDisplayImage}
+            positionX={positionX}
+            positionY={positionY}
+            zoom={zoom}
+            fit={fitMode}
+            opacity={opacity}
+            device="mobile"
+            isDark={isDark}
+            partnerName={partnerName}
+            partnerAvatar={partnerAvatar}
+            isPartnerOnline={isPartnerOnline}
+            streak={streak}
+            onChange={handleTransformChange}
+            showControlsBar={true}
+          />
+          {renderFitModes()}
+          {renderOpacityControl()}
+        </div>
+      );
+    };
+
+    /* â”€â”€ wizard footer buttons per step â”€â”€ */
+    const renderFooter = () => {
+      if (wizardStep === 1) {
+        return (
+          <Button
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            className="w-full h-11 rounded-xl text-sm font-medium text-muted-foreground"
+          >
+            Cancel
+          </Button>
+        );
+      }
+
+      if (wizardStep === 2) {
+        return (
+          <>
+            <Button
+              type="button"
+              onClick={async () => {
+                if (originalPhotoUrl) {
+                  setPreviewTab("generated");
+                  setWizardStep(3);
+                  await runGeneration(originalPhotoUrl, selectedStyle);
+                }
+              }}
+              disabled={isGenerating || !originalPhotoUrl}
+              className="w-full h-11 rounded-xl font-bold text-sm gap-2"
+            >
+              <Wand2 className="w-4 h-4" />
+              Generate Wallpaper
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                // Skip generation â€” use original photo as wallpaper
+                setPreviewTab("original");
+                setWizardStep(3);
+              }}
+              className="w-full h-11 rounded-xl text-sm"
+            >
+              Skip â€” Use Original Photo
+            </Button>
+          </>
+        );
+      }
+
+      if (wizardStep === 3) {
+        return (
+          <>
+            <Button
+              type="button"
+              onClick={() => setWizardStep(4)}
+              disabled={isGenerating}
+              className="w-full h-11 rounded-xl font-bold text-sm gap-2"
+            >
+              Next Frame & Save
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+            {selectedId === "custom" && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleRegenerate}
+                disabled={isGenerating || !originalPhotoUrl}
+                className="w-full h-10 rounded-xl text-sm gap-2"
+              >
+                <RefreshCw className={cn("w-3.5 h-3.5", isGenerating && "animate-spin")} />
+                Regenerate
+              </Button>
+            )}
+          </>
+        );
+      }
+
+      // Step 4
+      return (
+        <>
+          <Button
+            type="button"
+            onClick={handleSave}
+            className="w-full h-11 rounded-xl font-bold text-sm"
+          >
+            Save Wallpaper ðŸ’•
+          </Button>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleResetAll}
+              className="flex-1 h-10 rounded-xl text-xs text-muted-foreground gap-1.5"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Reset
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onOpenChange(false)}
+              className="flex-1 h-10 rounded-xl text-xs"
+            >
+              Cancel
+            </Button>
+          </div>
+        </>
+      );
+    };
+
     return (
       <AnimatePresence>
         {open && (
@@ -691,7 +1037,7 @@ export function WallpaperDialog({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => onOpenChange(false)}
-              className="fixed inset-0 bg-black/60 backdrop-blur-xs cursor-pointer z-0"
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm cursor-pointer z-0"
             />
 
             <input
@@ -715,65 +1061,53 @@ export function WallpaperDialog({
                   ? "bg-[#18181A] border-zinc-800 text-white"
                   : "bg-white border-gray-200 text-gray-900"
               )}
+              onClick={(e) => e.stopPropagation()}
             >
-              {/* Top Handle */}
-              <div className="w-full flex items-center justify-center pt-2.5 pb-1 shrink-0">
-                <div
-                  className={cn(
-                    "w-12 h-1.5 rounded-full",
-                    isDark ? "bg-zinc-700" : "bg-gray-300"
-                  )}
-                />
+              {/* Drag handle */}
+              <div className="w-full flex items-center justify-center pt-3 pb-1 shrink-0">
+                <div className={cn("w-10 h-1 rounded-full", isDark ? "bg-zinc-700" : "bg-gray-300")} />
               </div>
 
-              {/* Header */}
-              <div className="flex items-center justify-between px-4 py-2 border-b border-border/40 shrink-0">
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  {inStudioMode && (
-                    <button
-                      type="button"
-                      onClick={() => setInStudioMode(false)}
-                      className="w-8 h-8 rounded-full bg-muted/60 hover:bg-muted flex items-center justify-center text-foreground transition-colors mr-0.5 shrink-0 active:scale-95"
-                      aria-label="Back to wallpapers"
-                    >
-                      <ArrowLeft className="w-4 h-4" />
-                    </button>
-                  )}
-                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-pink-500/20 to-purple-500/20 border border-pink-500/30 flex items-center justify-center text-pink-500 shadow-xs shrink-0">
-                    {inStudioMode ? <Wand2 className="w-4 h-4" /> : <Palette className="w-4 h-4" />}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <h2 className="text-base font-bold truncate leading-tight">
-                      {inStudioMode ? "AI Wallpaper Studio" : "Chat Wallpaper"}
-                    </h2>
-                    <p className="text-[11px] text-muted-foreground truncate">
-                      {inStudioMode
-                        ? "Personalize photo with realistic styling"
-                        : "Drag to pan • Pinch to zoom"}
-                    </p>
+              {/* Header with back button + step indicator */}
+              <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border/40 shrink-0">
+                <button
+                  type="button"
+                  onClick={goBack}
+                  className="w-9 h-9 rounded-full bg-muted/60 hover:bg-muted flex items-center justify-center text-foreground transition-colors shrink-0 active:scale-95"
+                  aria-label={wizardStep === 1 ? "Close" : "Back"}
+                >
+                  {wizardStep === 1
+                    ? <X className="w-4 h-4" />
+                    : <ArrowLeft className="w-4 h-4" />
+                  }
+                </button>
+
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-base font-bold leading-tight">
+                    {wizardTitles[wizardStep]}
+                  </h2>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    {[1, 2, 3, 4].map((s) => (
+                      <div
+                        key={s}
+                        className={cn(
+                          "h-1 rounded-full transition-all duration-300",
+                          s === wizardStep
+                            ? "w-5 bg-primary"
+                            : s < wizardStep
+                              ? "w-2.5 bg-primary/40"
+                              : "w-2.5 bg-muted-foreground/25"
+                        )}
+                      />
+                    ))}
+                    <span className="text-[10px] text-muted-foreground ml-1">
+                      {wizardStep}/{TOTAL_STEPS}
+                    </span>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0 ml-2">
-                  {!inStudioMode && customUrl && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setInStudioMode(true)}
-                      className="text-xs h-7 gap-1 px-2.5 rounded-full border-pink-500/30 text-pink-600 dark:text-pink-400 hover:bg-pink-500/10"
-                    >
-                      <Wand2 className="w-3 h-3" />
-                      Studio
-                    </Button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => onOpenChange(false)}
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/60 active:scale-95 transition-all"
-                    title="Close"
-                  >
-                    <X className="w-4.5 h-4.5" />
-                  </button>
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-pink-500/20 to-purple-500/20 border border-pink-500/30 flex items-center justify-center text-pink-500 shadow-xs shrink-0">
+                  <Palette className="w-4 h-4" />
                 </div>
               </div>
 
@@ -784,145 +1118,34 @@ export function WallpaperDialog({
                 </div>
               )}
 
-              {/* Scrollable Content */}
-              <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 overscroll-contain scrollbar-thin">
-                {/* Embedded Live Preview & Framing Viewport */}
-                <div className="flex flex-col items-center">
-                  {renderPreviewTopBar()}
-                  <WallpaperFramingViewport
-                    imageSrc={currentDisplayImage}
-                    positionX={positionX}
-                    positionY={positionY}
-                    zoom={zoom}
-                    fit={fitMode}
-                    opacity={opacity}
-                    device={previewDevice}
-                    isDark={isDark}
-                    partnerName={partnerName}
-                    partnerAvatar={partnerAvatar}
-                    isPartnerOnline={isPartnerOnline}
-                    streak={streak}
-                    onChange={handleTransformChange}
-                    showControlsBar={true}
-                  />
-                </div>
-
-                {inStudioMode ? (
-                  renderStudioControls()
-                ) : (
-                  <>
-                    <div className="space-y-1.5">
-                      <div className="flex justify-between items-center text-xs font-bold">
-                        <span>Select Wallpaper</span>
-                        <span className="text-[10px] text-muted-foreground font-normal">
-                          Tap to preview
-                        </span>
-                      </div>
-                      {renderWallpaperCards()}
-                    </div>
-
-                    {renderFitModes()}
-                    {renderOpacityControl()}
-                  </>
-                )}
+              {/* Step content */}
+              <div className="flex-1 overflow-y-auto px-4 py-3 overscroll-contain">
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={wizardStep}
+                    initial={{ opacity: 0, x: 24 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -24 }}
+                    transition={{ duration: 0.18 }}
+                  >
+                    {renderStep()}
+                  </motion.div>
+                </AnimatePresence>
               </div>
 
-              {/* Sticky Footer */}
+              {/* Footer */}
               <div
                 className={cn(
-                  "p-3.5 border-t border-border/40 flex flex-col gap-2 shrink-0 z-20",
-                  isDark
-                    ? "bg-[#18181A]/95 border-zinc-800 backdrop-blur-md"
-                    : "bg-white/95 border-gray-200 backdrop-blur-md"
+                  "px-4 py-3.5 border-t border-border/40 flex flex-col gap-2 shrink-0",
+                  isDark ? "bg-[#18181A]/95" : "bg-white/95"
                 )}
                 style={{ paddingBottom: "max(0.875rem, env(safe-area-inset-bottom))" }}
               >
-                {!inStudioMode ? (
-                  <>
-                    <Button
-                      type="button"
-                      onClick={handleSave}
-                      className="w-full h-10 rounded-xl font-bold bg-primary text-primary-foreground shadow-md active:scale-98 transition-all text-sm"
-                    >
-                      Save Wallpaper 💕
-                    </Button>
-                    <div className="flex items-center gap-2 w-full">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleResetAll}
-                        className="flex-1 h-9 rounded-xl text-xs text-muted-foreground hover:text-foreground gap-1.5"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        Reset
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => onOpenChange(false)}
-                        className="flex-1 h-9 rounded-xl text-xs font-medium"
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <Button
-                      type="button"
-                      onClick={handleApplyFromStudio}
-                      disabled={isGenerating || !customUrl}
-                      className="w-full h-10 rounded-xl font-bold bg-primary text-primary-foreground shadow-md active:scale-98 transition-all text-sm gap-1.5"
-                    >
-                      <CheckCircle2 className="w-4 h-4" />
-                      Use This Wallpaper
-                    </Button>
-                    <div className="flex items-center gap-2 w-full">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={handleRegenerate}
-                        disabled={isGenerating || !originalPhotoUrl}
-                        className="flex-1 h-9 rounded-xl text-xs gap-1.5"
-                      >
-                        <RefreshCw className={cn("w-3.5 h-3.5", isGenerating && "animate-spin")} />
-                        Regenerate
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          if (originalPhotoUrl) {
-                            setCustomUrl(originalPhotoUrl);
-                            setSelectedId("custom");
-                            onSaveConfig({
-                              id: "custom",
-                              customUrl: originalPhotoUrl,
-                              originalPhotoUrl,
-                              opacity,
-                              positionX,
-                              positionY,
-                              zoom,
-                              fit: fitMode,
-                            });
-                            onOpenChange(false);
-                          }
-                        }}
-                        className="flex-1 h-9 rounded-xl text-xs"
-                      >
-                        Use Original
-                      </Button>
-                    </div>
-                  </>
-                )}
+                {renderFooter()}
               </div>
             </motion.div>
 
-            {/* Immersive Full Screen Framing Cropper for Mobile */}
+            {/* Immersive full-screen framing overlay (reachable from upload card crop button) */}
             <AnimatePresence>
               {isMobileFramingOpen && (
                 <motion.div
@@ -934,9 +1157,7 @@ export function WallpaperDialog({
                   style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
                 >
                   <div className="flex items-center justify-between px-4 py-3 shrink-0 border-b border-white/10">
-                    <span className="text-white/80 text-sm font-semibold">
-                      Frame Wallpaper
-                    </span>
+                    <span className="text-white/80 text-sm font-semibold">Frame Wallpaper</span>
                     <button
                       type="button"
                       onClick={() => setIsMobileFramingOpen(false)}
@@ -970,11 +1191,7 @@ export function WallpaperDialog({
                       type="button"
                       variant="ghost"
                       size="sm"
-                      onClick={() => {
-                        setPositionX(50);
-                        setPositionY(35);
-                        setZoom(100);
-                      }}
+                      onClick={() => { setPositionX(50); setPositionY(35); setZoom(100); }}
                       className="text-xs text-white/70 hover:text-white gap-1.5"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
@@ -983,13 +1200,10 @@ export function WallpaperDialog({
                     <Button
                       type="button"
                       size="sm"
-                      onClick={() => {
-                        setIsMobileFramingOpen(false);
-                        handleSave();
-                      }}
+                      onClick={() => { setIsMobileFramingOpen(false); handleSave(); }}
                       className="bg-primary text-primary-foreground font-bold text-xs px-4 rounded-xl"
                     >
-                      Save Wallpaper 💕
+                      Save Wallpaper ðŸ’•
                     </Button>
                   </div>
                 </motion.div>
@@ -1001,7 +1215,7 @@ export function WallpaperDialog({
     );
   }
 
-  /* ═══════════ DESKTOP CENTERED DIALOG (≥768px): 2-COLUMN STUDIO ═══════════ */
+  /* DESKTOP CENTERED DIALOG (>=768px): 2-COLUMN STUDIO */
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl lg:max-w-5xl w-[95vw] p-5 sm:p-6 bg-background/95 backdrop-blur-2xl border border-primary/20 rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
@@ -1038,7 +1252,7 @@ export function WallpaperDialog({
                 <DialogDescription className="text-xs text-muted-foreground line-clamp-1">
                   {inStudioMode
                     ? "Personalize photo with realistic photorealistic styling"
-                    : "Drag to frame • Wheel/Pinch to zoom • Realistic chat preview"}
+                    : "Drag to frame â€¢ Wheel/Pinch to zoom â€¢ Realistic chat preview"}
                 </DialogDescription>
               </div>
             </div>
@@ -1064,7 +1278,7 @@ export function WallpaperDialog({
           </div>
         )}
 
-        {/* ── 2-COLUMN MAIN BODY ── */}
+        {/* â”€â”€ 2-COLUMN MAIN BODY â”€â”€ */}
         <div className="flex-1 flex flex-col md:flex-row gap-5 overflow-hidden py-2 min-h-0">
           {/* Left Column: Settings & Controls */}
           <div className="w-full md:w-[380px] lg:w-[410px] flex flex-col gap-4 overflow-y-auto pr-1.5 scrollbar-thin">
@@ -1097,7 +1311,7 @@ export function WallpaperDialog({
                       Quick Framing Snaps
                     </span>
                     <span className="text-[10px] font-mono text-muted-foreground">
-                      X: {positionX}% · Y: {positionY}%
+                      X: {positionX}% Â· Y: {positionY}%
                     </span>
                   </div>
                   <div className="grid grid-cols-4 gap-1.5">
@@ -1184,7 +1398,7 @@ export function WallpaperDialog({
                   onClick={handleSave}
                   className="bg-primary text-primary-foreground font-semibold rounded-xl px-5 text-xs h-8 shadow-md hover:shadow-primary/20"
                 >
-                  Save Wallpaper 💕
+                  Save Wallpaper ðŸ’•
                 </Button>
               </div>
             </>

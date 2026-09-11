@@ -112,8 +112,8 @@ export function applyAudioSenderParameters(sender: RTCRtpSender): Promise<void> 
  */
 export function applyVideoSenderParameters(
   sender: RTCRtpSender,
-  targetBitrate: number = 1_200_000,
-  degradation: RTCDegradationPreference = "maintain-framerate"
+  targetBitrate: number = 2_500_000,
+  degradation: RTCDegradationPreference = "balanced"
 ): Promise<void> {
   try {
     const params = sender.getParameters();
@@ -132,6 +132,32 @@ export function applyVideoSenderParameters(
     console.warn("[WebRTC] Error configuring video sender parameters:", err);
     return Promise.resolve();
   }
+}
+
+/**
+ * Optimize SDP for studio-grade voice clarity and WebRTC Forward Error Correction (FEC):
+ * - useinbandfec=1: Enables FEC, preventing voice packet loss cutouts
+ * - maxaveragebitrate=64000: Studio voice quality (64 kbps Opus)
+ * - stereo=0: Clean mono voice
+ * - cbr=1: Constant bitrate for stability
+ * - minptime=10: Ultra-low latency 10ms audio packets
+ */
+export function optimizeSdp(sdp: string): string {
+  if (!sdp) return sdp;
+  let modified = sdp;
+  const opusMatch = modified.match(/a=rtpmap:(\d+)\s+opus\/48000\/2/i);
+  if (opusMatch) {
+    const pt = opusMatch[1];
+    const fmtpRegex = new RegExp(`a=fmtp:${pt}\\s+(.*)`, "i");
+    const fmtpMatch = modified.match(fmtpRegex);
+    const opusParams = "minptime=10;useinbandfec=1;stereo=0;sprop-stereo=0;maxaveragebitrate=64000;cbr=1";
+    if (fmtpMatch) {
+      modified = modified.replace(fmtpRegex, `a=fmtp:${pt} ${fmtpMatch[1]};${opusParams}`);
+    } else {
+      modified = modified.replace(opusMatch[0], `${opusMatch[0]}\r\na=fmtp:${pt} ${opusParams}`);
+    }
+  }
+  return modified;
 }
 
 // ─── Hook Interface ────────────────────────────────────────────────────────────
@@ -292,11 +318,12 @@ export function useWebRTC({
         if (now - lastQualityAdjustmentRef.current > 6000) {
           const videoSender = pc.getSenders().find((s) => s.track?.kind === "video");
           if (videoSender) {
-            let targetBitrate = 1_500_000;
-            let degradation: RTCDegradationPreference = "maintain-framerate";
-            if (grade === "poor") { targetBitrate = 350_000; }
-            else if (grade === "fair") { targetBitrate = 700_000; }
-            else if (grade === "good") { targetBitrate = 1_100_000; }
+            let targetBitrate = 2_800_000;
+            let degradation: RTCDegradationPreference = "balanced";
+            if (grade === "poor") { targetBitrate = 600_000; degradation = "maintain-framerate"; }
+            else if (grade === "fair") { targetBitrate = 1_400_000; degradation = "balanced"; }
+            else if (grade === "good") { targetBitrate = 2_200_000; degradation = "balanced"; }
+            else { targetBitrate = 3_200_000; degradation = "balanced"; }
             applyVideoSenderParameters(videoSender, targetBitrate, degradation);
             lastQualityAdjustmentRef.current = now;
           }
@@ -491,6 +518,30 @@ export function useWebRTC({
       });
     }
 
+    // Prioritize hardware-accelerated HD video codecs (H.264 / VP9 / VP8)
+    if (typeof RTCRtpSender.getCapabilities === "function") {
+      try {
+        const capabilities = RTCRtpSender.getCapabilities("video");
+        if (capabilities && capabilities.codecs) {
+          const preferredOrder = ["video/H264", "video/VP9", "video/VP8"];
+          const sortedCodecs = [...capabilities.codecs].sort((a, b) => {
+            const idxA = preferredOrder.indexOf(a.mimeType);
+            const idxB = preferredOrder.indexOf(b.mimeType);
+            if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+            if (idxA !== -1) return -1;
+            if (idxB !== -1) return 1;
+            return 0;
+          });
+          const videoTransceiver = pc.getTransceivers().find((t) => t.sender.track?.kind === "video");
+          if (videoTransceiver && typeof videoTransceiver.setCodecPreferences === "function") {
+            videoTransceiver.setCodecPreferences(sortedCodecs);
+          }
+        }
+      } catch (e) {
+        console.warn("[WebRTC] setCodecPreferences notice:", e);
+      }
+    }
+
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState;
       console.log("[WebRTC] ICE State:", state);
@@ -537,39 +588,72 @@ export function useWebRTC({
 
   // ── Local Stream Acquisition ───────────────────────────────────────────────
   const getLocalStream = useCallback(async (type: CallType): Promise<MediaStream> => {
-    let audioStream: MediaStream;
-    try {
-      audioStream = await navigator.mediaDevices.getUserMedia({ audio: PRODUCTION_AUDIO_CONSTRAINTS, video: false });
-    } catch (err) {
-      console.warn("[WebRTC] Ideal audio constraints rejected, falling back:", err);
+    const isMobile = typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const currentFacing = facingModeRef.current;
+
+    // Production HD video constraints (adaptive for mobile portrait 9:16 and desktop landscape 16:9)
+    const idealWidth = isMobile ? 720 : 1280;
+    const idealHeight = isMobile ? 1280 : 720;
+    const hdVideoConstraints: MediaTrackConstraints = {
+      facingMode: currentFacing,
+      width: { ideal: idealWidth, min: 480 },
+      height: { ideal: idealHeight, min: 480 },
+      frameRate: { ideal: 30, min: 24 },
+      aspectRatio: { ideal: isMobile ? 9 / 16 : 16 / 9 },
+    };
+
+    if (type === "video") {
+      // 1. Try unified acquisition with HD video + studio audio in a single atomic prompt
       try {
-        audioStream = await navigator.mediaDevices.getUserMedia({ audio: FALLBACK_AUDIO_CONSTRAINTS, video: false });
-      } catch {
-        audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: PRODUCTION_AUDIO_CONSTRAINTS,
+          video: hdVideoConstraints,
+        });
+        stream.getAudioTracks().forEach((t) => (t.enabled = true));
+        stream.getVideoTracks().forEach((t) => (t.enabled = true));
+        return stream;
+      } catch (hdErr) {
+        console.warn("[WebRTC] HD unified acquisition failed, falling back to standard video:", hdErr);
+      }
+
+      // 2. Fallback to basic video + standard audio in a single prompt
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: FALLBACK_AUDIO_CONSTRAINTS,
+          video: { facingMode: currentFacing },
+        });
+        stream.getAudioTracks().forEach((t) => (t.enabled = true));
+        stream.getVideoTracks().forEach((t) => (t.enabled = true));
+        return stream;
+      } catch (videoErr: any) {
+        console.warn("[WebRTC] Video hardware unavailable, falling back to voice-only channel:", videoErr);
+        if (onCameraErrorRef.current) {
+          onCameraErrorRef.current(videoErr?.name || "CameraError");
+        }
       }
     }
 
-    if (type === "audio") return audioStream;
-
-    const currentFacing = facingModeRef.current;
-    const videoConstraints = { facingMode: currentFacing, width: { ideal: 1280, max: 1280 }, height: { ideal: 720, max: 720 }, frameRate: { ideal: 30, max: 30 } };
-
+    // Audio-only acquisition (for voice calls, or graceful fallback if camera is unavailable)
     try {
-      const videoStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
-      const videoTrack = videoStream.getVideoTracks()[0];
-      if (videoTrack) audioStream.addTrack(videoTrack);
+      const audioStream = await navigator.mediaDevices.getUserMedia({
+        audio: PRODUCTION_AUDIO_CONSTRAINTS,
+        video: false,
+      });
+      audioStream.getAudioTracks().forEach((t) => (t.enabled = true));
       return audioStream;
-    } catch (err: any) {
-      console.warn("[WebRTC] Ideal video constraints failed, trying basic video:", err);
+    } catch (err) {
+      console.warn("[WebRTC] Production audio constraints rejected, trying fallback:", err);
       try {
-        const fbVideoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: currentFacing } });
-        const fbTrack = fbVideoStream.getVideoTracks()[0];
-        if (fbTrack) audioStream.addTrack(fbTrack);
-        return audioStream;
-      } catch (videoErr: any) {
-        console.error("[WebRTC] Video acquisition failed:", videoErr);
-        if (onCameraErrorRef.current) onCameraErrorRef.current(videoErr.name || "CameraError");
-        return audioStream;
+        const fbAudio = await navigator.mediaDevices.getUserMedia({
+          audio: FALLBACK_AUDIO_CONSTRAINTS,
+          video: false,
+        });
+        fbAudio.getAudioTracks().forEach((t) => (t.enabled = true));
+        return fbAudio;
+      } catch {
+        const basicAudio = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        basicAudio.getAudioTracks().forEach((t) => (t.enabled = true));
+        return basicAudio;
       }
     }
   }, []);
@@ -637,11 +721,13 @@ export function useWebRTC({
           if (!pc || (pc.signalingState as string) === "closed") return;
           await flushPendingCandidates(pc);
           const answer = await pc.createAnswer();
+          const optAnswerSdp = optimizeSdp(answer.sdp || "");
+          const finalAnswer = new RTCSessionDescription({ type: answer.type || "answer", sdp: optAnswerSdp });
           if (!pc || (pc.signalingState as string) === "closed") return;
-          await pc.setLocalDescription(answer);
-          if (answer?.sdp && cid) {
+          await pc.setLocalDescription(finalAnswer);
+          if (finalAnswer?.sdp && cid) {
             await updateDoc(doc(db, "calls", cid), {
-              "renegotiation.answer": { sdp: answer.sdp, type: answer.type || "answer" },
+              "renegotiation.answer": { sdp: finalAnswer.sdp, type: finalAnswer.type || "answer" },
               "renegotiation.answeredBy": myId,
             }).catch((e) => console.warn("[WebRTC] Renegotiation answer write notice:", e));
           }
@@ -728,7 +814,9 @@ export function useWebRTC({
       };
 
       const offerDesc = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
-      await pc.setLocalDescription(offerDesc);
+      const optimizedOfferSdp = optimizeSdp(offerDesc.sdp || "");
+      const finalOffer = new RTCSessionDescription({ type: offerDesc.type, sdp: optimizedOfferSdp });
+      await pc.setLocalDescription(finalOffer);
 
       await setDoc(callDocRef, {
         callerId: myId,
@@ -736,7 +824,7 @@ export function useWebRTC({
         type,
         status: "ringing",
         [`cam_${myId}`]: type === "video",
-        offer: { sdp: offerDesc.sdp, type: offerDesc.type },
+        offer: { sdp: finalOffer.sdp, type: finalOffer.type },
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -855,6 +943,24 @@ export function useWebRTC({
       return;
     }
 
+    // If document is in background/hidden (e.g. focused from mobile notification click),
+    // wait a brief moment for document visibility to avoid NotAllowedError on mobile
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      await new Promise<void>((resolve) => {
+        const onVisible = () => {
+          if (document.visibilityState === "visible") {
+            document.removeEventListener("visibilitychange", onVisible);
+            resolve();
+          }
+        };
+        document.addEventListener("visibilitychange", onVisible);
+        setTimeout(() => {
+          document.removeEventListener("visibilitychange", onVisible);
+          resolve();
+        }, 800);
+      });
+    }
+
     // Verify the call is still ringing before answering
     try {
       const callDocRef = doc(db, "calls", incomingCallId);
@@ -911,13 +1017,15 @@ export function useWebRTC({
       await flushPendingCandidates(pc);
 
       const answerDesc = await pc.createAnswer();
-      await pc.setLocalDescription(answerDesc);
+      const optimizedAnswerSdp = optimizeSdp(answerDesc.sdp || "");
+      const finalAnswer = new RTCSessionDescription({ type: answerDesc.type, sdp: optimizedAnswerSdp });
+      await pc.setLocalDescription(finalAnswer);
 
       await updateDoc(callDocRef, {
         status: "active",
         answeredAt: serverTimestamp(),
         [`cam_${myId}`]: type === "video",
-        answer: { sdp: answerDesc.sdp, type: answerDesc.type },
+        answer: { sdp: finalAnswer.sdp, type: finalAnswer.type },
       });
 
       setCallState("active");
@@ -972,13 +1080,14 @@ export function useWebRTC({
     } catch (err) {
       console.error("[WebRTC] Failed to answer call:", err);
       stopAllCallSounds();
+      // Never mark status as "declined" on technical/media failure — mark failed so caller knows it was an error
       try {
         await updateDoc(doc(db, "calls", incomingCallId), {
-          status: "declined",
+          status: "failed",
           endedAt: serverTimestamp(),
         });
       } catch {}
-      cleanUp();
+      cleanUp("failed");
     }
   }, [db, myId, partnerId, getLocalStream, setupPeerConnection, logCallOutcome, cleanUp, clearRingTimeout, dismissCallNotification, addCandidateSafe, flushPendingCandidates, handleRenegotiationSnapshot, isTerminal]);
 
@@ -1109,8 +1218,15 @@ export function useWebRTC({
     }
 
     // Audio → Video mid-call upgrade
+    const isMobile = typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     const currentFacing = facingModeRef.current;
-    const videoConstraints = { facingMode: currentFacing, width: { ideal: 1280, max: 1280 }, height: { ideal: 720, max: 720 }, frameRate: { ideal: 30, max: 30 } };
+    const videoConstraints: MediaTrackConstraints = {
+      facingMode: currentFacing,
+      width: { ideal: isMobile ? 720 : 1280, min: 480 },
+      height: { ideal: isMobile ? 1280 : 720, min: 480 },
+      frameRate: { ideal: 30, min: 24 },
+      aspectRatio: { ideal: isMobile ? 9 / 16 : 16 / 9 },
+    };
 
     let newStream: MediaStream;
     try {
@@ -1156,14 +1272,16 @@ export function useWebRTC({
 
     try {
       const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
+      const optOfferSdp = optimizeSdp(offer.sdp || "");
+      const finalOffer = new RTCSessionDescription({ type: offer.type || "offer", sdp: optOfferSdp });
+      await pc.setLocalDescription(finalOffer);
       const version = Date.now();
       lastRenegotiationAtRef.current = version;
-      if (offer?.sdp) {
+      if (finalOffer?.sdp) {
         await updateDoc(doc(db, "calls", cid), {
           type: "video",
           [`cam_${myId}`]: true,
-          renegotiation: { offer: { sdp: offer.sdp, type: offer.type || "offer" }, from: myId, version },
+          renegotiation: { offer: { sdp: finalOffer.sdp, type: finalOffer.type || "offer" }, from: myId, version },
         }).catch((e) => console.warn("[WebRTC] Video upgrade update notice:", e));
       }
     } catch (renegErr) {
@@ -1177,8 +1295,15 @@ export function useWebRTC({
     const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
     if (!oldVideoTrack) return;
 
+    const isMobile = typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     const nextFacing = facingModeRef.current === "user" ? "environment" : "user";
-    const videoConstraints = { facingMode: nextFacing, width: { ideal: 1280, max: 1280 }, height: { ideal: 720, max: 720 }, frameRate: { ideal: 30, max: 30 } };
+    const videoConstraints: MediaTrackConstraints = {
+      facingMode: nextFacing,
+      width: { ideal: isMobile ? 720 : 1280, min: 480 },
+      height: { ideal: isMobile ? 1280 : 720, min: 480 },
+      frameRate: { ideal: 30, min: 24 },
+      aspectRatio: { ideal: isMobile ? 9 / 16 : 16 / 9 },
+    };
 
     let newStream: MediaStream;
     try {

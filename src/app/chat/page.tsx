@@ -2237,8 +2237,12 @@ export default function ChatPage() {
     const urlParams = new URLSearchParams(window.location.search);
     const answerParam = urlParams.get("answer");
     const declineParam = urlParams.get("decline");
+    const callIdParam = urlParams.get("callId");
     if (answerParam || declineParam) {
       handleAction(answerParam, declineParam);
+    } else if (callIdParam) {
+      window.history.replaceState({}, "", "/chat");
+      setIncomingCallInfo((prev) => prev || { id: callIdParam, type: "audio" });
     }
 
     const handleSwMessage = (event: MessageEvent) => {
@@ -2250,8 +2254,14 @@ export default function ChatPage() {
       } else if (event.data.type === "DECLINE_CALL" && event.data.callId) {
         setIncomingCallInfo(null);
         declineCall(event.data.callId);
+      } else if (event.data.type === "OPEN_INCOMING_CALL" && event.data.callId) {
+        // User tapped incoming call notification — ensure incoming call screen is active
+        setIncomingCallInfo({
+          id: event.data.callId,
+          type: (event.data.callType as "audio" | "video") || "audio",
+        });
       } else if (
-        (event.data.type === "NOTIFICATION_CLICK" || event.data.type === "CALL_CANCELLED" || event.data.type === "CALL_ENDED") &&
+        (event.data.type === "CALL_CANCELLED" || event.data.type === "CALL_ENDED") &&
         event.data.callId
       ) {
         // Caller cancelled or call ended — dismiss incoming call UI
@@ -3264,8 +3274,8 @@ export default function ChatPage() {
         {/* Top Header */}
         <header
           className={`px-3 sm:px-4 pb-3 flex items-end justify-between border-b transition-colors duration-300 min-h-[65px] backdrop-blur-md ${isMobile && selectedMobileMessage
-              ? `z-[80] ${c("bg-white border-gray-200", "bg-[#1f2c34] border-[#2a3942]")}`
-              : `z-20 ${c("bg-[#F6F5F0]/85 border-gray-200/80", "bg-[#18181A]/85 border-zinc-800/80")}`
+            ? `z-[80] ${c("bg-white border-gray-200", "bg-[#1f2c34] border-[#2a3942]")}`
+            : `z-20 ${c("bg-[#F6F5F0]/85 border-gray-200/80", "bg-[#18181A]/85 border-zinc-800/80")}`
             }`}
           style={{ paddingTop: isMobile ? "max(0.75rem, env(safe-area-inset-top))" : "0.75rem" }}
         >
@@ -3382,8 +3392,8 @@ export default function ChatPage() {
                     <span className="text-red-500 text-xs flex-shrink-0">❤️</span>
                   </h1>
                   <span className={`text-[11px] font-medium truncate mt-0.5 ${otherIsTyping
-                      ? "text-emerald-500 font-semibold"
-                      : c("text-gray-500", "text-gray-400")
+                    ? "text-emerald-500 font-semibold"
+                    : c("text-gray-500", "text-gray-400")
                     }`}>
                     {otherIsTyping ? "typing..." : partnerPresence?.online ? "Online" : "Offline"}
                   </span>
@@ -3958,8 +3968,8 @@ export default function ChatPage() {
                             setDesktopMenuCoords(null);
                           }}
                           className={`w-9 h-9 flex items-center justify-center rounded-full transition-all hover:scale-110 active:scale-95 shadow-md ${activeReactionMenu === msg.id
-                              ? c("bg-[#d9fdd3] text-gray-800 shadow-sm", "bg-[#005c4b] text-white shadow-sm")
-                              : c("bg-white text-gray-700 hover:text-gray-900 hover:bg-gray-50 shadow-gray-400/30", "bg-zinc-700 text-gray-100 hover:text-white hover:bg-zinc-600 shadow-black/40")
+                            ? c("bg-[#d9fdd3] text-gray-800 shadow-sm", "bg-[#005c4b] text-white shadow-sm")
+                            : c("bg-white text-gray-700 hover:text-gray-900 hover:bg-gray-50 shadow-gray-400/30", "bg-zinc-700 text-gray-100 hover:text-white hover:bg-zinc-600 shadow-black/40")
                             }`}
                           title="React"
                         >
@@ -4051,9 +4061,8 @@ export default function ChatPage() {
                     aria-hidden="true"
                   >
                     <div className={`flex-1 h-px ${c("bg-gray-200/70", "bg-zinc-700/60")}`} />
-                    <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full uppercase tracking-wide ${
-                      c("text-gray-400 bg-gray-100/90", "text-gray-500 bg-zinc-800/90")
-                    }`}>
+                    <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full uppercase tracking-wide ${c("text-gray-400 bg-gray-100/90", "text-gray-500 bg-zinc-800/90")
+                      }`}>
                       {getDayLabel(msgDate)}
                     </span>
                     <div className={`flex-1 h-px ${c("bg-gray-200/70", "bg-zinc-700/60")}`} />
@@ -4092,16 +4101,15 @@ export default function ChatPage() {
                         className="flex justify-center w-full my-1.5 select-none"
                       >
                         <div
-                          className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-[12.5px] font-semibold shadow-sm border ${
-                            c(
-                              isMissedOrDeclined
-                                ? "bg-red-50 border-red-100 text-red-600"
-                                : "bg-gray-100/90 border-gray-200/80 text-gray-600",
-                              isMissedOrDeclined
-                                ? "bg-red-950/30 border-red-900/40 text-red-400"
-                                : "bg-zinc-800/80 border-zinc-700/60 text-gray-400"
-                            )
-                          }`}
+                          className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-[12.5px] font-semibold shadow-sm border ${c(
+                            isMissedOrDeclined
+                              ? "bg-red-50 border-red-100 text-red-600"
+                              : "bg-gray-100/90 border-gray-200/80 text-gray-600",
+                            isMissedOrDeclined
+                              ? "bg-red-950/30 border-red-900/40 text-red-400"
+                              : "bg-zinc-800/80 border-zinc-700/60 text-gray-400"
+                          )
+                            }`}
                         >
                           {isAudio ? (
                             <Phone className="w-3.5 h-3.5 shrink-0" strokeWidth={2.5} />
@@ -4131,628 +4139,623 @@ export default function ChatPage() {
                         if (debouncedSearchQuery.trim()) scrollToMessage(msg.id);
                       }}
                     >
-                    {/* Swipe-to-reply reveal icon for partner messages (revealed on left as avatar & bubble slide right) */}
-                    {!isMe && swipingMsgState?.id === msg.id && (
-                      <div
-                        className="absolute left-1 top-1/2 -translate-y-1/2 z-0 flex items-center justify-center pointer-events-none"
-                        style={{
-                          transform: `translateY(-50%) scale(${Math.min(1.2, 0.65 + (Math.max(0, swipingMsgState.deltaX) / 50) * 0.55)})`,
-                          opacity: Math.min(1, Math.max(0, swipingMsgState.deltaX) / 25),
-                        }}
-                      >
+                      {/* Swipe-to-reply reveal icon for partner messages (revealed on left as avatar & bubble slide right) */}
+                      {!isMe && swipingMsgState?.id === msg.id && (
                         <div
-                          className={`w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-colors ${
-                            swipingMsgState.triggered
-                              ? "bg-[#0084ff] text-white ring-2 ring-[#0084ff]/30"
-                              : c("bg-gray-200 text-gray-700", "bg-zinc-700 text-gray-200")
-                          }`}
+                          className="absolute left-1 top-1/2 -translate-y-1/2 z-0 flex items-center justify-center pointer-events-none"
+                          style={{
+                            transform: `translateY(-50%) scale(${Math.min(1.2, 0.65 + (Math.max(0, swipingMsgState.deltaX) / 50) * 0.55)})`,
+                            opacity: Math.min(1, Math.max(0, swipingMsgState.deltaX) / 25),
+                          }}
                         >
-                          <CornerUpLeft className="w-4 h-4 stroke-[2.5]" />
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Partner Avatar for incoming messages — smoothly slides right with bubble on swipe */}
-                    {!isMe && (
-                      <div
-                        className="w-8 flex-shrink-0 mr-2 flex flex-col justify-end pb-1 self-end relative z-10"
-                        style={{
-                          transform: swipingMsgState?.id === msg.id && !isMe ? `translateX(${swipingMsgState.deltaX}px)` : undefined,
-                          transition: swipingMsgState?.id === msg.id ? "none" : "transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1)",
-                        }}
-                      >
-                        {isLastInGroup || (swipingMsgState?.id === msg.id && !isMe) ? (
-                          <img
-                            src={partnerAvatar}
-                            alt={finalPartnerName}
-                            className="w-8 h-8 rounded-full object-cover shadow-sm border border-white/10 bg-black pointer-events-none"
-                          />
-                        ) : (
-                          <div className="w-8 h-8" />
-                        )}
-                      </div>
-                    )}
-
-                    {/* Swipe-to-reply reveal icon for own messages (revealed on right as bubble slides left) */}
-                    {isMe && swipingMsgState?.id === msg.id && (
-                      <div
-                        className="absolute right-1 top-1/2 -translate-y-1/2 z-0 flex items-center justify-center pointer-events-none"
-                        style={{
-                          transform: `translateY(-50%) scale(${Math.min(1.2, 0.65 + (Math.abs(swipingMsgState.deltaX) / 50) * 0.55)})`,
-                          opacity: Math.min(1, Math.abs(swipingMsgState.deltaX) / 25),
-                        }}
-                      >
-                        <div
-                          className={`w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-colors ${
-                            swipingMsgState.triggered
-                              ? "bg-[#0084ff] text-white ring-2 ring-[#0084ff]/30"
-                              : c("bg-gray-200 text-gray-700", "bg-zinc-700 text-gray-200")
-                          }`}
-                        >
-                          <CornerUpLeft className="w-4 h-4 stroke-[2.5]" />
-                        </div>
-                      </div>
-                    )}
-
-                    <div className={`relative flex items-center overflow-visible max-w-[85%] sm:max-w-[75%] md:max-w-[65%] lg:max-w-[55%] xl:max-w-[520px] ${isMsgSelectedOnMobile ? "overflow-visible z-[61]" : ""
-                      }`}>
-                      {isMe && actionButtons}
-
-                      <div
-                        onTouchStart={(e) => {
-                          if (!isMobile) return;
-                          touchStartPosRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-                          didLongPressRef.current = false;
-                          didSwipeRef.current = false;
-                          swipeVibratedRef.current = false;
-                          if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-                          longPressTimerRef.current = setTimeout(() => {
-                            didLongPressRef.current = true;
-                            if (typeof window !== "undefined" && window.navigator?.vibrate) {
-                              try { window.navigator.vibrate(45); } catch { }
-                            }
-                            selectMobileMsg(msg);
-                            setActiveReactionMenu(null);
-                            setActiveMessageMenu(null);
-                            setActiveFullEmojiPicker(null);
-                          }, 350);
-                        }}
-                        onTouchMove={(e) => {
-                          if (!touchStartPosRef.current) return;
-                          const rawDeltaX = e.touches[0].clientX - touchStartPosRef.current.x;
-                          const rawDeltaY = e.touches[0].clientY - touchStartPosRef.current.y;
-                          const absX = Math.abs(rawDeltaX);
-                          const absY = Math.abs(rawDeltaY);
-
-                          if (absX > 15 || absY > 15) {
-                            if (longPressTimerRef.current) {
-                              clearTimeout(longPressTimerRef.current);
-                              longPressTimerRef.current = null;
-                            }
-                          }
-
-                          // Swipe-to-reply:
-                          // - Partner message (!isMe): swipe RIGHT to reply, profile & bubble slide right
-                          // - Own message (isMe): swipe LEFT to reply, bubble slides left
-                          if (isMe) {
-                            if (rawDeltaX < -8 && absX > absY * 1.1) {
-                              const deltaX = Math.max(-64, rawDeltaX * 0.55); // negative value
-                              const triggered = rawDeltaX <= -50;
-
-                              if (triggered && !swipeVibratedRef.current) {
-                                swipeVibratedRef.current = true;
-                                if (typeof window !== "undefined" && window.navigator?.vibrate) {
-                                  try { window.navigator.vibrate(15); } catch { }
-                                }
-                              } else if (!triggered && swipeVibratedRef.current) {
-                                swipeVibratedRef.current = false;
-                              }
-
-                              setSwipingMsgState({ id: msg.id, deltaX, triggered });
-                            } else if (swipingMsgState?.id === msg.id && rawDeltaX >= -5) {
-                              setSwipingMsgState(null);
-                            }
-                          } else {
-                            if (rawDeltaX > 8 && absX > absY * 1.1) {
-                              const deltaX = Math.min(64, rawDeltaX * 0.55); // positive value
-                              const triggered = rawDeltaX >= 50;
-
-                              if (triggered && !swipeVibratedRef.current) {
-                                swipeVibratedRef.current = true;
-                                if (typeof window !== "undefined" && window.navigator?.vibrate) {
-                                  try { window.navigator.vibrate(15); } catch { }
-                                }
-                              } else if (!triggered && swipeVibratedRef.current) {
-                                swipeVibratedRef.current = false;
-                              }
-
-                              setSwipingMsgState({ id: msg.id, deltaX, triggered });
-                            } else if (swipingMsgState?.id === msg.id && rawDeltaX <= 5) {
-                              setSwipingMsgState(null);
-                            }
-                          }
-                        }}
-                        onTouchEnd={() => {
-                          if (longPressTimerRef.current) {
-                            clearTimeout(longPressTimerRef.current);
-                            longPressTimerRef.current = null;
-                          }
-                          if (swipingMsgState && swipingMsgState.id === msg.id) {
-                            if (swipingMsgState.triggered) {
-                              didSwipeRef.current = true;
-                              setReplyingTo(msg);
-                              inputRef.current?.focus();
-                              if (typeof window !== "undefined" && window.navigator?.vibrate) {
-                                try { window.navigator.vibrate(20); } catch { }
-                              }
-                            }
-                            setSwipingMsgState(null);
-                            swipeVibratedRef.current = false;
-                          }
-                        }}
-                        onTouchCancel={() => {
-                          if (longPressTimerRef.current) {
-                            clearTimeout(longPressTimerRef.current);
-                            longPressTimerRef.current = null;
-                          }
-                          if (swipingMsgState && swipingMsgState.id === msg.id) {
-                            setSwipingMsgState(null);
-                            swipeVibratedRef.current = false;
-                          }
-                        }}
-                        onMouseDown={(e) => {
-                          if (!isMobile) return;
-                          touchStartPosRef.current = { x: e.clientX, y: e.clientY };
-                          didLongPressRef.current = false;
-                          didSwipeRef.current = false;
-                          if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-                          longPressTimerRef.current = setTimeout(() => {
-                            didLongPressRef.current = true;
-                            selectMobileMsg(msg);
-                            setActiveReactionMenu(null);
-                            setActiveMessageMenu(null);
-                            setActiveFullEmojiPicker(null);
-                          }, 350);
-                        }}
-                        onMouseMove={(e) => {
-                          if (!isMobile || !touchStartPosRef.current) return;
-                          const deltaX = Math.abs(e.clientX - touchStartPosRef.current.x);
-                          const deltaY = Math.abs(e.clientY - touchStartPosRef.current.y);
-                          if (deltaX > 20 || deltaY > 20) {
-                            if (longPressTimerRef.current) {
-                              clearTimeout(longPressTimerRef.current);
-                              longPressTimerRef.current = null;
-                            }
-                          }
-                        }}
-                        onMouseUp={() => {
-                          if (longPressTimerRef.current) {
-                            clearTimeout(longPressTimerRef.current);
-                            longPressTimerRef.current = null;
-                          }
-                        }}
-                        onContextMenu={(e) => {
-                          if (isMobile) {
-                            e.preventDefault();
-                          }
-                        }}
-                        onClick={(e) => {
-                          if (didLongPressRef.current) {
-                            didLongPressRef.current = false;
-                            return;
-                          }
-                          if (didSwipeRef.current) {
-                            didSwipeRef.current = false;
-                            return;
-                          }
-
-                          // Double-tap anywhere on a message bubble to quick-react ❤️
-                          const now = Date.now();
-                          if (
-                            lastTapRef.current &&
-                            lastTapRef.current.id === msg.id &&
-                            now - lastTapRef.current.time < 320
-                          ) {
-                            lastTapRef.current = null;
-                            e.stopPropagation();
-
-                            if (typeof window !== "undefined" && window.navigator?.vibrate) {
-                              try { window.navigator.vibrate(25); } catch { }
-                            }
-
-                            setHeartPopMessageId(msg.id);
-                            setTimeout(() => {
-                              setHeartPopMessageId((prev) => (prev === msg.id ? null : prev));
-                            }, 850);
-
-                            handleReact(msg.id, "❤️");
-                            return;
-                          }
-                          lastTapRef.current = { id: msg.id, time: now };
-
-                          if (isMobile) {
-                            if (selectedMobileMessage) {
-                              e.stopPropagation();
-                              if (selectedMobileMessage.id === msg.id) {
-                                selectMobileMsg(null);
-                              } else {
-                                selectMobileMsg(msg);
-                              }
-                            }
-                          } else if (!debouncedSearchQuery.trim()) {
-                            setTouchedMessageId(touchedMessageId === msg.id ? null : msg.id);
-                          }
-                        }}
-                        style={{
-                          WebkitTouchCallout: "none",
-                          touchAction: "pan-y",
-                          // deltaX is negative for left swipe — bubble slides left
-                          transform: swipingMsgState?.id === msg.id ? `translateX(${swipingMsgState.deltaX}px)` : undefined,
-                          transition: swipingMsgState?.id === msg.id ? "none" : "transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1)",
-                        }}
-
-                        className={cn(
-                          "chat-bubble-content relative w-full transition-all select-none overflow-visible",
-                          isSticker
-                            ? "bg-transparent border-none shadow-none px-0 py-0 flex flex-col items-end"
-                            : cn(
-                              "px-4 py-2.5 shadow-sm rounded-2xl",
-                              isMe ? "rounded-br-sm" : "rounded-bl-sm",
-                              isMe
-                                ? c("bg-[#D3F34B] text-[#1C1C1C]", "bg-[#c3e33e] text-[#1C1C1C]")
-                                : c("bg-white text-[#1C1C1C] border border-gray-100", "bg-[#242424] text-gray-100 border border-zinc-800")
-                            ),
-                          msg.isDeleted
-                            ? c("bg-transparent border border-gray-300 text-gray-500", "bg-transparent border border-zinc-700 text-gray-400")
-                            : ""
-                        )}
-                      >
-                        {/* Reply quote banner */}
-                        {(msg.replyTo || msg.replyToContent) && (
                           <div
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const targetId = msg.replyToId || (msg.replyTo as any)?.id;
-                              if (targetId) {
-                                scrollToMessage(targetId);
-                              }
-                            }}
-                            className={`mb-1.5 p-2 rounded-lg text-[13px] border-l-4 cursor-pointer hover:opacity-85 transition-opacity ${isMe
-                              ? "bg-black/10 border-[#1C1C1C]"
-                              : c("bg-gray-100 border-blue-500", "bg-zinc-800 border-gray-400")
+                            className={`w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-colors ${swipingMsgState.triggered
+                                ? "bg-[#0084ff] text-white ring-2 ring-[#0084ff]/30"
+                                : c("bg-gray-200 text-gray-700", "bg-zinc-700 text-gray-200")
                               }`}
-                            title="Click to view original message"
                           >
-                            <p className={`font-bold mb-0.5 text-xs flex items-center gap-1 ${isMe ? "text-[#1C1C1C]" : "text-blue-500"}`}>
-                              <CornerUpLeft className="w-3 h-3" />
-                              {msg.replyTo?.sender === "me" || msg.replyToSender === myName ? "You" : finalPartnerName}
-                            </p>
-                            <p className="opacity-90 line-clamp-2">{msg.replyTo?.text || msg.replyToContent}</p>
+                            <CornerUpLeft className="w-4 h-4 stroke-[2.5]" />
                           </div>
-                        )}
+                        </div>
+                      )}
 
-                        {/* Sticker / Image / Video / Audio / Text */}
-                        {msg.isDeleted ? (
-                          <p className={`text-[14px] leading-relaxed italic flex items-center gap-1.5 py-0.5 select-none ${isMe ? "text-black/60" : "text-gray-400"
-                            }`}>
-                            <Ban className="w-3.5 h-3.5 opacity-70 shrink-0" />
-                            <span>{isMe ? "You unsent a message" : "This message was unsent"}</span>
-                          </p>
-                        ) : isSticker ? (
-                          <div className="relative py-1 flex items-center justify-center select-none">
+                      {/* Partner Avatar for incoming messages — smoothly slides right with bubble on swipe */}
+                      {!isMe && (
+                        <div
+                          className="w-8 flex-shrink-0 mr-2 flex flex-col justify-end pb-1 self-end relative z-10"
+                          style={{
+                            transform: swipingMsgState?.id === msg.id && !isMe ? `translateX(${swipingMsgState.deltaX}px)` : undefined,
+                            transition: swipingMsgState?.id === msg.id ? "none" : "transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1)",
+                          }}
+                        >
+                          {isLastInGroup || (swipingMsgState?.id === msg.id && !isMe) ? (
                             <img
-                              src={msgContent}
-                              alt="Sticker"
-                              className="w-32 h-32 sm:w-40 sm:h-40 object-contain drop-shadow-xl hover:scale-105 active:scale-95 transition-transform"
-                              loading="lazy"
+                              src={partnerAvatar}
+                              alt={finalPartnerName}
+                              className="w-8 h-8 rounded-full object-cover shadow-sm border border-white/10 bg-black pointer-events-none"
                             />
-                          </div>
-                        ) : msg.type === "image" && msgContent ? (
+                          ) : (
+                            <div className="w-8 h-8" />
+                          )}
+                        </div>
+                      )}
+
+                      {/* Swipe-to-reply reveal icon for own messages (revealed on right as bubble slides left) */}
+                      {isMe && swipingMsgState?.id === msg.id && (
+                        <div
+                          className="absolute right-1 top-1/2 -translate-y-1/2 z-0 flex items-center justify-center pointer-events-none"
+                          style={{
+                            transform: `translateY(-50%) scale(${Math.min(1.2, 0.65 + (Math.abs(swipingMsgState.deltaX) / 50) * 0.55)})`,
+                            opacity: Math.min(1, Math.abs(swipingMsgState.deltaX) / 25),
+                          }}
+                        >
                           <div
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (isMobile && selectedMobileMessage) {
-                                selectMobileMsg(selectedMobileMessage.id === msg.id ? null : msg);
-                              } else {
-                                setActiveMediaViewerSrc(msgContent);
+                            className={`w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-colors ${swipingMsgState.triggered
+                                ? "bg-[#0084ff] text-white ring-2 ring-[#0084ff]/30"
+                                : c("bg-gray-200 text-gray-700", "bg-zinc-700 text-gray-200")
+                              }`}
+                          >
+                            <CornerUpLeft className="w-4 h-4 stroke-[2.5]" />
+                          </div>
+                        </div>
+                      )}
+
+                      <div className={`relative flex items-center overflow-visible max-w-[85%] sm:max-w-[75%] md:max-w-[65%] lg:max-w-[55%] xl:max-w-[520px] ${isMsgSelectedOnMobile ? "overflow-visible z-[61]" : ""
+                        }`}>
+                        {isMe && actionButtons}
+
+                        <div
+                          onTouchStart={(e) => {
+                            if (!isMobile) return;
+                            touchStartPosRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                            didLongPressRef.current = false;
+                            didSwipeRef.current = false;
+                            swipeVibratedRef.current = false;
+                            if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+                            longPressTimerRef.current = setTimeout(() => {
+                              didLongPressRef.current = true;
+                              if (typeof window !== "undefined" && window.navigator?.vibrate) {
+                                try { window.navigator.vibrate(45); } catch { }
                               }
-                            }}
-                            className="mb-1 rounded-xl overflow-hidden max-w-sm cursor-pointer hover:opacity-95 active:scale-[0.99] transition-all"
-                            title="Click to view image"
-                          >
-                            <img src={msgContent} alt="Uploaded" className="w-full h-auto max-h-72 object-cover" />
-                          </div>
-                        ) : msg.type === "video" && msgContent ? (
-                          <div className="mb-1 rounded-xl overflow-hidden max-w-sm">
-                            <video src={msgContent} controls className="w-full h-auto max-h-72" />
-                          </div>
-                        ) : (msg.type === "file" || (msg as any).fileName) && msgContent ? (
-                          (() => {
-                            const fileName = (msg as any).fileName || "Document";
-                            const fileSize = (msg as any).fileSize;
-                            const fileSizeStr = fileSize ? `${(fileSize / 1024).toFixed(1)} KB` : "";
-                            const isPdf = fileName.toLowerCase().endsWith(".pdf");
-                            const isZip = fileName.toLowerCase().endsWith(".zip") || fileName.toLowerCase().endsWith(".rar");
-                            const isDoc = fileName.toLowerCase().endsWith(".doc") || fileName.toLowerCase().endsWith(".docx") || fileName.toLowerCase().endsWith(".txt");
+                              selectMobileMsg(msg);
+                              setActiveReactionMenu(null);
+                              setActiveMessageMenu(null);
+                              setActiveFullEmojiPicker(null);
+                            }, 350);
+                          }}
+                          onTouchMove={(e) => {
+                            if (!touchStartPosRef.current) return;
+                            const rawDeltaX = e.touches[0].clientX - touchStartPosRef.current.x;
+                            const rawDeltaY = e.touches[0].clientY - touchStartPosRef.current.y;
+                            const absX = Math.abs(rawDeltaX);
+                            const absY = Math.abs(rawDeltaY);
 
-                            return (
-                              <a
-                                href={msgContent}
-                                download={fileName}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                className={`my-1 p-3 rounded-xl border flex items-center gap-3 transition-all hover:opacity-95 active:scale-[0.98] select-none ${
-                                  isMe
-                                    ? "bg-black/10 border-black/15 text-[#1C1C1C]"
-                                    : c("bg-gray-50 border-gray-200 text-gray-900", "bg-zinc-800/90 border-zinc-700 text-gray-100")
-                                }`}
-                                title={`Download ${fileName}`}
-                              >
-                                <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 shadow-xs ${
-                                  isPdf
-                                    ? "bg-red-500/20 text-red-600 dark:text-red-400"
-                                    : isZip
-                                    ? "bg-amber-500/20 text-amber-600 dark:text-amber-400"
-                                    : isDoc
-                                    ? "bg-blue-500/20 text-blue-600 dark:text-blue-400"
-                                    : isMe
-                                    ? "bg-black/15 text-[#1C1C1C]"
-                                    : "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
-                                }`}>
-                                  {isPdf ? (
-                                    <FileText className="w-5 h-5 stroke-[2.2]" />
-                                  ) : isZip ? (
-                                    <FolderArchive className="w-5 h-5 stroke-[2.2]" />
-                                  ) : (
-                                    <File className="w-5 h-5 stroke-[2.2]" />
-                                  )}
-                                </div>
-
-                                <div className="flex flex-col min-w-0 flex-1 leading-tight">
-                                  <span className="text-[13.5px] font-bold truncate max-w-[180px] sm:max-w-[240px]">
-                                    {fileName}
-                                  </span>
-                                  <div className="flex items-center gap-1.5 mt-1 text-[11px] opacity-70 font-medium">
-                                    {fileSizeStr && <span>{fileSizeStr}</span>}
-                                    {fileSizeStr && <span>•</span>}
-                                    <span>Download</span>
-                                  </div>
-                                </div>
-
-                                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-transform hover:scale-110 ${
-                                  isMe ? "bg-black/10 text-[#1C1C1C]" : c("bg-gray-200/80 text-gray-700", "bg-zinc-700/80 text-gray-200")
-                                }`}>
-                                  <Download className="w-4 h-4" />
-                                </div>
-                              </a>
-                            );
-                          })()
-                        ) : (msg.type === "location" || (typeof msgContent === "string" && (msgContent.includes("Shared Location") || msgContent.includes("maps.google.com")))) ? (
-                          // ── Location Card ──────────────────────────────────────
-                          (() => {
-                            // Prefer structured lat/lng; fall back to parsing old text-format messages
-                            let lat: number | undefined = msg.latitude;
-                            let lng: number | undefined = msg.longitude;
-                            if (lat == null || lng == null) {
-                              const m = msgContent.match(/q=([-\d.]+),([-\d.]+)/) || msgContent.match(/([-\d.]+),([-\d.]+)/);
-                              if (m) { lat = parseFloat(m[1]); lng = parseFloat(m[2]); }
+                            if (absX > 15 || absY > 15) {
+                              if (longPressTimerRef.current) {
+                                clearTimeout(longPressTimerRef.current);
+                                longPressTimerRef.current = null;
+                              }
                             }
-                            const mapsUrl = lat != null && lng != null
-                              ? `https://maps.google.com/?q=${lat},${lng}`
-                              : "https://maps.google.com";
-                            // Official OpenStreetMap live raster tile
-                            const zoom = 15;
-                            let staticMapUrl: string | null = null;
-                            if (lat != null && lng != null) {
-                              const x = Math.floor(((lng + 180) / 360) * Math.pow(2, zoom));
-                              const y = Math.floor(
-                                ((1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2) *
-                                Math.pow(2, zoom)
-                              );
-                              staticMapUrl = `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
+
+                            // Swipe-to-reply:
+                            // - Partner message (!isMe): swipe RIGHT to reply, profile & bubble slide right
+                            // - Own message (isMe): swipe LEFT to reply, bubble slides left
+                            if (isMe) {
+                              if (rawDeltaX < -8 && absX > absY * 1.1) {
+                                const deltaX = Math.max(-64, rawDeltaX * 0.55); // negative value
+                                const triggered = rawDeltaX <= -50;
+
+                                if (triggered && !swipeVibratedRef.current) {
+                                  swipeVibratedRef.current = true;
+                                  if (typeof window !== "undefined" && window.navigator?.vibrate) {
+                                    try { window.navigator.vibrate(15); } catch { }
+                                  }
+                                } else if (!triggered && swipeVibratedRef.current) {
+                                  swipeVibratedRef.current = false;
+                                }
+
+                                setSwipingMsgState({ id: msg.id, deltaX, triggered });
+                              } else if (swipingMsgState?.id === msg.id && rawDeltaX >= -5) {
+                                setSwipingMsgState(null);
+                              }
+                            } else {
+                              if (rawDeltaX > 8 && absX > absY * 1.1) {
+                                const deltaX = Math.min(64, rawDeltaX * 0.55); // positive value
+                                const triggered = rawDeltaX >= 50;
+
+                                if (triggered && !swipeVibratedRef.current) {
+                                  swipeVibratedRef.current = true;
+                                  if (typeof window !== "undefined" && window.navigator?.vibrate) {
+                                    try { window.navigator.vibrate(15); } catch { }
+                                  }
+                                } else if (!triggered && swipeVibratedRef.current) {
+                                  swipeVibratedRef.current = false;
+                                }
+
+                                setSwipingMsgState({ id: msg.id, deltaX, triggered });
+                              } else if (swipingMsgState?.id === msg.id && rawDeltaX <= 5) {
+                                setSwipingMsgState(null);
+                              }
                             }
-                            return (
-                              <a
-                                href={mapsUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                className="block -mx-4 -mt-2.5 rounded-xl overflow-hidden cursor-pointer hover:opacity-90 active:opacity-80 transition-opacity select-none"
-                              >
-                                {/* Map tile preview */}
-                                <div className="relative w-full overflow-hidden bg-[#e5e3df] dark:bg-[#2b3543]" style={{ aspectRatio: "16/9", minHeight: 130 }}>
-                                  {staticMapUrl ? (
-                                    <img
-                                      src={staticMapUrl}
-                                      alt="Map preview"
-                                      className="w-full h-full object-cover scale-125 transition-transform"
-                                      loading="lazy"
-                                      onError={(e) => {
-                                        // Hide broken image icon if offline
-                                        (e.currentTarget as HTMLElement).style.display = "none";
-                                      }}
-                                    />
-                                  ) : null}
-                                  {/* Subtle map grid pattern (fallback / background) */}
-                                  <div className="absolute inset-0 pointer-events-none opacity-20 bg-[radial-gradient(#4b5563_1px,transparent_1px)] [background-size:14px_14px]" />
-                                  {/* Red pin overlay centered */}
-                                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-                                    <div className="flex flex-col items-center -mt-4 drop-shadow-md">
-                                      <div className="w-9 h-9 rounded-full border-[3px] border-white shadow-xl flex items-center justify-center bg-red-500">
-                                        <MapPin className="w-4 h-4 text-white fill-white" />
-                                      </div>
-                                      <div className="w-2 h-2 rounded-full bg-red-500/40 mt-0.5" />
-                                    </div>
-                                  </div>
-                                  {/* Gradient fade at bottom */}
-                                  <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-black/20 to-transparent pointer-events-none z-10" />
-                                </div>
-                                {/* Label bar */}
-                                <div className={`px-3 py-2 flex items-center gap-2 ${isMe
-                                    ? "bg-[#c3de38]/40"
-                                    : c("bg-gray-50 border-t border-gray-100", "bg-zinc-800/90 border-t border-zinc-700/50")
-                                  }`}>
-                                  <MapPin className="w-4 h-4 text-red-500 shrink-0" />
-                                  <div className="flex flex-col min-w-0 flex-1">
-                                    <span className="text-[13px] font-bold leading-tight">Shared Location</span>
-                                    {lat != null && lng != null && (
-                                      <span className="text-[11px] opacity-60 font-mono tabular-nums">{lat.toFixed(4)}, {lng.toFixed(4)}</span>
-                                    )}
-                                  </div>
-                                  <ExternalLink className="w-3.5 h-3.5 opacity-40 shrink-0" />
-                                </div>
-                              </a>
-                            );
-                          })()
-                        ) : (msg.type === "audio" && msgContent) || (msg.type !== "image" && msg.type !== "video" && msg.type !== "sticker" && typeof msgContent === "string" && msgContent.startsWith("data:audio/")) ? (
-                          // Voice note player — custom styled, no raw browser widget
-                          <ChatAudioMessage
-                            src={msgContent}
-                            isMe={isMe}
-                            waveform={msg.waveform}
-                          />
-                        ) : (
-                          <p className="text-[15px] leading-[1.4] whitespace-pre-wrap font-medium break-words">
-                            {renderWithLinks(msgContent, debouncedSearchQuery)}
-                          </p>
-                        )}
+                          }}
+                          onTouchEnd={() => {
+                            if (longPressTimerRef.current) {
+                              clearTimeout(longPressTimerRef.current);
+                              longPressTimerRef.current = null;
+                            }
+                            if (swipingMsgState && swipingMsgState.id === msg.id) {
+                              if (swipingMsgState.triggered) {
+                                didSwipeRef.current = true;
+                                setReplyingTo(msg);
+                                inputRef.current?.focus();
+                                if (typeof window !== "undefined" && window.navigator?.vibrate) {
+                                  try { window.navigator.vibrate(20); } catch { }
+                                }
+                              }
+                              setSwipingMsgState(null);
+                              swipeVibratedRef.current = false;
+                            }
+                          }}
+                          onTouchCancel={() => {
+                            if (longPressTimerRef.current) {
+                              clearTimeout(longPressTimerRef.current);
+                              longPressTimerRef.current = null;
+                            }
+                            if (swipingMsgState && swipingMsgState.id === msg.id) {
+                              setSwipingMsgState(null);
+                              swipeVibratedRef.current = false;
+                            }
+                          }}
+                          onMouseDown={(e) => {
+                            if (!isMobile) return;
+                            touchStartPosRef.current = { x: e.clientX, y: e.clientY };
+                            didLongPressRef.current = false;
+                            didSwipeRef.current = false;
+                            if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+                            longPressTimerRef.current = setTimeout(() => {
+                              didLongPressRef.current = true;
+                              selectMobileMsg(msg);
+                              setActiveReactionMenu(null);
+                              setActiveMessageMenu(null);
+                              setActiveFullEmojiPicker(null);
+                            }, 350);
+                          }}
+                          onMouseMove={(e) => {
+                            if (!isMobile || !touchStartPosRef.current) return;
+                            const deltaX = Math.abs(e.clientX - touchStartPosRef.current.x);
+                            const deltaY = Math.abs(e.clientY - touchStartPosRef.current.y);
+                            if (deltaX > 20 || deltaY > 20) {
+                              if (longPressTimerRef.current) {
+                                clearTimeout(longPressTimerRef.current);
+                                longPressTimerRef.current = null;
+                              }
+                            }
+                          }}
+                          onMouseUp={() => {
+                            if (longPressTimerRef.current) {
+                              clearTimeout(longPressTimerRef.current);
+                              longPressTimerRef.current = null;
+                            }
+                          }}
+                          onContextMenu={(e) => {
+                            if (isMobile) {
+                              e.preventDefault();
+                            }
+                          }}
+                          onClick={(e) => {
+                            if (didLongPressRef.current) {
+                              didLongPressRef.current = false;
+                              return;
+                            }
+                            if (didSwipeRef.current) {
+                              didSwipeRef.current = false;
+                              return;
+                            }
 
-                        {/* Rich Link Preview (never show on stickers, deleted messages, or location messages) */}
-                        {!isSticker && !msg.isDeleted && msg.linkPreview && msg.type !== "location" && !(typeof msgContent === "string" && (msgContent.includes("Shared Location") || msgContent.includes("maps.google.com"))) && (
-                          <a
-                            href={msg.linkPreview.url.startsWith("http") ? msg.linkPreview.url : `https://${msg.linkPreview.url}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className={`mt-1.5 mb-1.5 rounded-xl border overflow-hidden cursor-pointer block hover:opacity-90 active:scale-[0.98] transition-all ${c(
-                              "bg-gray-50 border-gray-200",
-                              "bg-[#1E1E1E] border-zinc-700"
-                            )}`}
-                          >
-                            {/* Thumbnail image — shown only when available */}
-                            {msg.linkPreview.image && (
-                              <div className="w-full overflow-hidden" style={{ maxHeight: "160px" }}>
-                                <img
-                                  src={msg.linkPreview.image}
-                                  alt={msg.linkPreview.title}
-                                  className="w-full object-cover"
-                                  style={{ maxHeight: "160px" }}
-                                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-                                  loading="lazy"
-                                />
-                              </div>
-                            )}
-                            <div className="p-2.5 space-y-0.5">
-                              {/* Site name badge */}
-                              <p className="text-[10px] font-bold uppercase tracking-wide text-blue-500 truncate">
-                                {msg.linkPreview.siteName || new URL(msg.linkPreview.url.startsWith("http") ? msg.linkPreview.url : `https://${msg.linkPreview.url}`).hostname.replace("www.", "")}
-                              </p>
-                              {/* Title */}
-                              <h4 className={`text-[13px] font-semibold leading-snug line-clamp-2 ${c("text-gray-900", "text-gray-100")}`}>
-                                {msg.linkPreview.title}
-                              </h4>
-                              {/* Description — shown only when available */}
-                              {msg.linkPreview.description && (
-                                <p className={`text-[11px] leading-relaxed line-clamp-2 ${c("text-gray-500", "text-gray-400")}`}>
-                                  {msg.linkPreview.description}
-                                </p>
-                              )}
-                            </div>
-                          </a>
-                        )}
+                            // Double-tap anywhere on a message bubble to quick-react ❤️
+                            const now = Date.now();
+                            if (
+                              lastTapRef.current &&
+                              lastTapRef.current.id === msg.id &&
+                              now - lastTapRef.current.time < 320
+                            ) {
+                              lastTapRef.current = null;
+                              e.stopPropagation();
 
-                        {/* Time & Read Status */}
-                        {(() => {
-                          const computedStatus = isMe && !msg.isDeleted ? getMessageStatus(msg) : null;
-                          return (
-                            <div
-                              className={`flex items-center justify-end gap-1 mt-1 -mb-0.5 select-none ${isSticker
-                                ? "bg-black/50 backdrop-blur-md px-2 py-0.5 rounded-full text-white/90 text-[10px] ml-auto w-fit shadow-sm"
-                                : msg.isDeleted
-                                  ? "text-gray-400"
-                                  : isMe
-                                    ? "text-emerald-950/60"
-                                    : "text-gray-400"
-                                }`}
-                            >
-                              <span className="text-[10px] font-semibold tracking-wide">{timeStr}</span>
-                              {isMe && !msg.isDeleted && (
-                                <span className="flex items-center">
-                                  {computedStatus === "seen" ? (
-                                    <CheckCheck className="w-3.5 h-3.5 text-blue-500" strokeWidth={2.5} />
-                                  ) : computedStatus === "delivered" ? (
-                                    <CheckCheck className={`w-3.5 h-3.5 ${isSticker ? "text-emerald-400" : "text-emerald-950/50"}`} strokeWidth={2.5} />
-                                  ) : (
-                                    <svg className={`w-3.5 h-3.5 ${isSticker ? "text-white/70" : "text-emerald-950/50"}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                      <polyline points="20 6 9 17 4 12" />
-                                    </svg>
-                                  )}
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })()}
+                              if (typeof window !== "undefined" && window.navigator?.vibrate) {
+                                try { window.navigator.vibrate(25); } catch { }
+                              }
 
-                        {/* Reactions Badge — Clicking opens Messenger-style details */}
-                        {hasReactions && msg.reactions && (() => {
-                          const uniqueReactions = Array.from(new Set(msg.reactions));
-                          const isSingle = msg.reactions.length === 1;
-                          return (
+                              setHeartPopMessageId(msg.id);
+                              setTimeout(() => {
+                                setHeartPopMessageId((prev) => (prev === msg.id ? null : prev));
+                              }, 850);
+
+                              handleReact(msg.id, "❤️");
+                              return;
+                            }
+                            lastTapRef.current = { id: msg.id, time: now };
+
+                            if (isMobile) {
+                              if (selectedMobileMessage) {
+                                e.stopPropagation();
+                                if (selectedMobileMessage.id === msg.id) {
+                                  selectMobileMsg(null);
+                                } else {
+                                  selectMobileMsg(msg);
+                                }
+                              }
+                            } else if (!debouncedSearchQuery.trim()) {
+                              setTouchedMessageId(touchedMessageId === msg.id ? null : msg.id);
+                            }
+                          }}
+                          style={{
+                            WebkitTouchCallout: "none",
+                            touchAction: "pan-y",
+                            // deltaX is negative for left swipe — bubble slides left
+                            transform: swipingMsgState?.id === msg.id ? `translateX(${swipingMsgState.deltaX}px)` : undefined,
+                            transition: swipingMsgState?.id === msg.id ? "none" : "transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1)",
+                          }}
+
+                          className={cn(
+                            "chat-bubble-content relative w-full transition-all select-none overflow-visible",
+                            isSticker
+                              ? "bg-transparent border-none shadow-none px-0 py-0 flex flex-col items-end"
+                              : cn(
+                                "px-4 py-2.5 shadow-sm rounded-2xl",
+                                isMe ? "rounded-br-sm" : "rounded-bl-sm",
+                                isMe
+                                  ? c("bg-[#D3F34B] text-[#1C1C1C]", "bg-[#c3e33e] text-[#1C1C1C]")
+                                  : c("bg-white text-[#1C1C1C] border border-gray-100", "bg-[#242424] text-gray-100 border border-zinc-800")
+                              ),
+                            msg.isDeleted
+                              ? c("bg-transparent border border-gray-300 text-gray-500", "bg-transparent border border-zinc-700 text-gray-400")
+                              : ""
+                          )}
+                        >
+                          {/* Reply quote banner */}
+                          {(msg.replyTo || msg.replyToContent) && (
                             <div
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setViewingReactionsMsg(msg);
-                                setReactionDetailFilter("all");
+                                const targetId = msg.replyToId || (msg.replyTo as any)?.id;
+                                if (targetId) {
+                                  scrollToMessage(targetId);
+                                }
                               }}
-                              className={`absolute -bottom-2.5 -right-1 flex items-center justify-center rounded-full cursor-pointer z-20 transition-all hover:scale-110 active:scale-95 select-none ${isSingle ? "w-[24px] h-[24px]" : "h-[24px] px-1.5 gap-1"
-                                } ${c(
-                                  "bg-white border-2 border-white text-gray-800 shadow-[0_2px_6px_rgba(0,0,0,0.18)]",
-                                  "bg-[#202c33] border-2 border-[#18181A] text-white shadow-[0_2px_6px_rgba(0,0,0,0.35)]"
-                                )}`}
-                              title="View reactions"
+                              className={`mb-1.5 p-2 rounded-lg text-[13px] border-l-4 cursor-pointer hover:opacity-85 transition-opacity ${isMe
+                                ? "bg-black/10 border-[#1C1C1C]"
+                                : c("bg-gray-100 border-blue-500", "bg-zinc-800 border-gray-400")
+                                }`}
+                              title="Click to view original message"
                             >
-                              <div className="flex items-center justify-center -space-x-1">
-                                {uniqueReactions.map((r, i) => (
-                                  <span key={i} className="text-[13px] leading-none flex items-center justify-center">
-                                    {r}
-                                  </span>
-                                ))}
-                              </div>
-                              {!isSingle && (
-                                <span className="text-[10px] font-bold opacity-80 tabular-nums">
-                                  {msg.reactions.length}
-                                </span>
-                              )}
+                              <p className={`font-bold mb-0.5 text-xs flex items-center gap-1 ${isMe ? "text-[#1C1C1C]" : "text-blue-500"}`}>
+                                <CornerUpLeft className="w-3 h-3" />
+                                {msg.replyTo?.sender === "me" || msg.replyToSender === myName ? "You" : finalPartnerName}
+                              </p>
+                              <p className="opacity-90 line-clamp-2">{msg.replyTo?.text || msg.replyToContent}</p>
                             </div>
-                          );
-                        })()}
-
-                        {/* Floating Pop Heart Animation on Double Tap */}
-                        <AnimatePresence>
-                          {heartPopMessageId === msg.id && (
-                            <motion.div
-                              initial={{ scale: 0.2, opacity: 0, y: 0 }}
-                              animate={{
-                                scale: [0.2, 1.45, 1.2, 1],
-                                opacity: [0, 1, 1, 0],
-                                y: [0, -12, -24, -36],
-                              }}
-                              exit={{ opacity: 0 }}
-                              transition={{ duration: 0.8, ease: "easeOut" }}
-                              className="absolute inset-0 pointer-events-none z-50 flex items-center justify-center select-none"
-                            >
-                              <span className="text-4xl filter drop-shadow-[0_4px_14px_rgba(239,68,68,0.65)]">
-                                ❤️
-                              </span>
-                            </motion.div>
                           )}
-                        </AnimatePresence>
-                      </div>
 
-                      {!isMe && actionButtons}
+                          {/* Sticker / Image / Video / Audio / Text */}
+                          {msg.isDeleted ? (
+                            <p className={`text-[14px] leading-relaxed italic flex items-center gap-1.5 py-0.5 select-none ${isMe ? "text-black/60" : "text-gray-400"
+                              }`}>
+                              <Ban className="w-3.5 h-3.5 opacity-70 shrink-0" />
+                              <span>{isMe ? "You unsent a message" : "This message was unsent"}</span>
+                            </p>
+                          ) : isSticker ? (
+                            <div className="relative py-1 flex items-center justify-center select-none">
+                              <img
+                                src={msgContent}
+                                alt="Sticker"
+                                className="w-32 h-32 sm:w-40 sm:h-40 object-contain drop-shadow-xl hover:scale-105 active:scale-95 transition-transform"
+                                loading="lazy"
+                              />
+                            </div>
+                          ) : msg.type === "image" && msgContent ? (
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (isMobile && selectedMobileMessage) {
+                                  selectMobileMsg(selectedMobileMessage.id === msg.id ? null : msg);
+                                } else {
+                                  setActiveMediaViewerSrc(msgContent);
+                                }
+                              }}
+                              className="mb-1 rounded-xl overflow-hidden max-w-sm cursor-pointer hover:opacity-95 active:scale-[0.99] transition-all"
+                              title="Click to view image"
+                            >
+                              <img src={msgContent} alt="Uploaded" className="w-full h-auto max-h-72 object-cover" />
+                            </div>
+                          ) : msg.type === "video" && msgContent ? (
+                            <div className="mb-1 rounded-xl overflow-hidden max-w-sm">
+                              <video src={msgContent} controls className="w-full h-auto max-h-72" />
+                            </div>
+                          ) : (msg.type === "file" || (msg as any).fileName) && msgContent ? (
+                            (() => {
+                              const fileName = (msg as any).fileName || "Document";
+                              const fileSize = (msg as any).fileSize;
+                              const fileSizeStr = fileSize ? `${(fileSize / 1024).toFixed(1)} KB` : "";
+                              const isPdf = fileName.toLowerCase().endsWith(".pdf");
+                              const isZip = fileName.toLowerCase().endsWith(".zip") || fileName.toLowerCase().endsWith(".rar");
+                              const isDoc = fileName.toLowerCase().endsWith(".doc") || fileName.toLowerCase().endsWith(".docx") || fileName.toLowerCase().endsWith(".txt");
+
+                              return (
+                                <a
+                                  href={msgContent}
+                                  download={fileName}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className={`my-1 p-3 rounded-xl border flex items-center gap-3 transition-all hover:opacity-95 active:scale-[0.98] select-none ${isMe
+                                      ? "bg-black/10 border-black/15 text-[#1C1C1C]"
+                                      : c("bg-gray-50 border-gray-200 text-gray-900", "bg-zinc-800/90 border-zinc-700 text-gray-100")
+                                    }`}
+                                  title={`Download ${fileName}`}
+                                >
+                                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 shadow-xs ${isPdf
+                                      ? "bg-red-500/20 text-red-600 dark:text-red-400"
+                                      : isZip
+                                        ? "bg-amber-500/20 text-amber-600 dark:text-amber-400"
+                                        : isDoc
+                                          ? "bg-blue-500/20 text-blue-600 dark:text-blue-400"
+                                          : isMe
+                                            ? "bg-black/15 text-[#1C1C1C]"
+                                            : "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+                                    }`}>
+                                    {isPdf ? (
+                                      <FileText className="w-5 h-5 stroke-[2.2]" />
+                                    ) : isZip ? (
+                                      <FolderArchive className="w-5 h-5 stroke-[2.2]" />
+                                    ) : (
+                                      <File className="w-5 h-5 stroke-[2.2]" />
+                                    )}
+                                  </div>
+
+                                  <div className="flex flex-col min-w-0 flex-1 leading-tight">
+                                    <span className="text-[13.5px] font-bold truncate max-w-[180px] sm:max-w-[240px]">
+                                      {fileName}
+                                    </span>
+                                    <div className="flex items-center gap-1.5 mt-1 text-[11px] opacity-70 font-medium">
+                                      {fileSizeStr && <span>{fileSizeStr}</span>}
+                                      {fileSizeStr && <span>•</span>}
+                                      <span>Download</span>
+                                    </div>
+                                  </div>
+
+                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-transform hover:scale-110 ${isMe ? "bg-black/10 text-[#1C1C1C]" : c("bg-gray-200/80 text-gray-700", "bg-zinc-700/80 text-gray-200")
+                                    }`}>
+                                    <Download className="w-4 h-4" />
+                                  </div>
+                                </a>
+                              );
+                            })()
+                          ) : (msg.type === "location" || (typeof msgContent === "string" && (msgContent.includes("Shared Location") || msgContent.includes("maps.google.com")))) ? (
+                            // ── Location Card ──────────────────────────────────────
+                            (() => {
+                              // Prefer structured lat/lng; fall back to parsing old text-format messages
+                              let lat: number | undefined = msg.latitude;
+                              let lng: number | undefined = msg.longitude;
+                              if (lat == null || lng == null) {
+                                const m = msgContent.match(/q=([-\d.]+),([-\d.]+)/) || msgContent.match(/([-\d.]+),([-\d.]+)/);
+                                if (m) { lat = parseFloat(m[1]); lng = parseFloat(m[2]); }
+                              }
+                              const mapsUrl = lat != null && lng != null
+                                ? `https://maps.google.com/?q=${lat},${lng}`
+                                : "https://maps.google.com";
+                              // Official OpenStreetMap live raster tile
+                              const zoom = 15;
+                              let staticMapUrl: string | null = null;
+                              if (lat != null && lng != null) {
+                                const x = Math.floor(((lng + 180) / 360) * Math.pow(2, zoom));
+                                const y = Math.floor(
+                                  ((1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2) *
+                                  Math.pow(2, zoom)
+                                );
+                                staticMapUrl = `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
+                              }
+                              return (
+                                <a
+                                  href={mapsUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="block -mx-4 -mt-2.5 rounded-xl overflow-hidden cursor-pointer hover:opacity-90 active:opacity-80 transition-opacity select-none"
+                                >
+                                  {/* Map tile preview */}
+                                  <div className="relative w-full overflow-hidden bg-[#e5e3df] dark:bg-[#2b3543]" style={{ aspectRatio: "16/9", minHeight: 130 }}>
+                                    {staticMapUrl ? (
+                                      <img
+                                        src={staticMapUrl}
+                                        alt="Map preview"
+                                        className="w-full h-full object-cover scale-125 transition-transform"
+                                        loading="lazy"
+                                        onError={(e) => {
+                                          // Hide broken image icon if offline
+                                          (e.currentTarget as HTMLElement).style.display = "none";
+                                        }}
+                                      />
+                                    ) : null}
+                                    {/* Subtle map grid pattern (fallback / background) */}
+                                    <div className="absolute inset-0 pointer-events-none opacity-20 bg-[radial-gradient(#4b5563_1px,transparent_1px)] [background-size:14px_14px]" />
+                                    {/* Red pin overlay centered */}
+                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                                      <div className="flex flex-col items-center -mt-4 drop-shadow-md">
+                                        <div className="w-9 h-9 rounded-full border-[3px] border-white shadow-xl flex items-center justify-center bg-red-500">
+                                          <MapPin className="w-4 h-4 text-white fill-white" />
+                                        </div>
+                                        <div className="w-2 h-2 rounded-full bg-red-500/40 mt-0.5" />
+                                      </div>
+                                    </div>
+                                    {/* Gradient fade at bottom */}
+                                    <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-black/20 to-transparent pointer-events-none z-10" />
+                                  </div>
+                                  {/* Label bar */}
+                                  <div className={`px-3 py-2 flex items-center gap-2 ${isMe
+                                    ? "bg-[#c3de38]/40"
+                                    : c("bg-gray-50 border-t border-gray-100", "bg-zinc-800/90 border-t border-zinc-700/50")
+                                    }`}>
+                                    <MapPin className="w-4 h-4 text-red-500 shrink-0" />
+                                    <div className="flex flex-col min-w-0 flex-1">
+                                      <span className="text-[13px] font-bold leading-tight">Shared Location</span>
+                                      {lat != null && lng != null && (
+                                        <span className="text-[11px] opacity-60 font-mono tabular-nums">{lat.toFixed(4)}, {lng.toFixed(4)}</span>
+                                      )}
+                                    </div>
+                                    <ExternalLink className="w-3.5 h-3.5 opacity-40 shrink-0" />
+                                  </div>
+                                </a>
+                              );
+                            })()
+                          ) : (msg.type === "audio" && msgContent) || (msg.type !== "image" && msg.type !== "video" && msg.type !== "sticker" && typeof msgContent === "string" && msgContent.startsWith("data:audio/")) ? (
+                            // Voice note player — custom styled, no raw browser widget
+                            <ChatAudioMessage
+                              src={msgContent}
+                              isMe={isMe}
+                              waveform={msg.waveform}
+                            />
+                          ) : (
+                            <p className="text-[15px] leading-[1.4] whitespace-pre-wrap font-medium break-words">
+                              {renderWithLinks(msgContent, debouncedSearchQuery)}
+                            </p>
+                          )}
+
+                          {/* Rich Link Preview (never show on stickers, deleted messages, or location messages) */}
+                          {!isSticker && !msg.isDeleted && msg.linkPreview && msg.type !== "location" && !(typeof msgContent === "string" && (msgContent.includes("Shared Location") || msgContent.includes("maps.google.com"))) && (
+                            <a
+                              href={msg.linkPreview.url.startsWith("http") ? msg.linkPreview.url : `https://${msg.linkPreview.url}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className={`mt-1.5 mb-1.5 rounded-xl border overflow-hidden cursor-pointer block hover:opacity-90 active:scale-[0.98] transition-all ${c(
+                                "bg-gray-50 border-gray-200",
+                                "bg-[#1E1E1E] border-zinc-700"
+                              )}`}
+                            >
+                              {/* Thumbnail image — shown only when available */}
+                              {msg.linkPreview.image && (
+                                <div className="w-full overflow-hidden" style={{ maxHeight: "160px" }}>
+                                  <img
+                                    src={msg.linkPreview.image}
+                                    alt={msg.linkPreview.title}
+                                    className="w-full object-cover"
+                                    style={{ maxHeight: "160px" }}
+                                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                                    loading="lazy"
+                                  />
+                                </div>
+                              )}
+                              <div className="p-2.5 space-y-0.5">
+                                {/* Site name badge */}
+                                <p className="text-[10px] font-bold uppercase tracking-wide text-blue-500 truncate">
+                                  {msg.linkPreview.siteName || new URL(msg.linkPreview.url.startsWith("http") ? msg.linkPreview.url : `https://${msg.linkPreview.url}`).hostname.replace("www.", "")}
+                                </p>
+                                {/* Title */}
+                                <h4 className={`text-[13px] font-semibold leading-snug line-clamp-2 ${c("text-gray-900", "text-gray-100")}`}>
+                                  {msg.linkPreview.title}
+                                </h4>
+                                {/* Description — shown only when available */}
+                                {msg.linkPreview.description && (
+                                  <p className={`text-[11px] leading-relaxed line-clamp-2 ${c("text-gray-500", "text-gray-400")}`}>
+                                    {msg.linkPreview.description}
+                                  </p>
+                                )}
+                              </div>
+                            </a>
+                          )}
+
+                          {/* Time & Read Status */}
+                          {(() => {
+                            const computedStatus = isMe && !msg.isDeleted ? getMessageStatus(msg) : null;
+                            return (
+                              <div
+                                className={`flex items-center justify-end gap-1 mt-1 -mb-0.5 select-none ${isSticker
+                                  ? "bg-black/50 backdrop-blur-md px-2 py-0.5 rounded-full text-white/90 text-[10px] ml-auto w-fit shadow-sm"
+                                  : msg.isDeleted
+                                    ? "text-gray-400"
+                                    : isMe
+                                      ? "text-emerald-950/60"
+                                      : "text-gray-400"
+                                  }`}
+                              >
+                                <span className="text-[10px] font-semibold tracking-wide">{timeStr}</span>
+                                {isMe && !msg.isDeleted && (
+                                  <span className="flex items-center">
+                                    {computedStatus === "seen" ? (
+                                      <CheckCheck className="w-3.5 h-3.5 text-blue-500" strokeWidth={2.5} />
+                                    ) : computedStatus === "delivered" ? (
+                                      <CheckCheck className={`w-3.5 h-3.5 ${isSticker ? "text-emerald-400" : "text-emerald-950/50"}`} strokeWidth={2.5} />
+                                    ) : (
+                                      <svg className={`w-3.5 h-3.5 ${isSticker ? "text-white/70" : "text-emerald-950/50"}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <polyline points="20 6 9 17 4 12" />
+                                      </svg>
+                                    )}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
+
+                          {/* Reactions Badge — Clicking opens Messenger-style details */}
+                          {hasReactions && msg.reactions && (() => {
+                            const uniqueReactions = Array.from(new Set(msg.reactions));
+                            const isSingle = msg.reactions.length === 1;
+                            return (
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setViewingReactionsMsg(msg);
+                                  setReactionDetailFilter("all");
+                                }}
+                                className={`absolute -bottom-2.5 -right-1 flex items-center justify-center rounded-full cursor-pointer z-20 transition-all hover:scale-110 active:scale-95 select-none ${isSingle ? "w-[24px] h-[24px]" : "h-[24px] px-1.5 gap-1"
+                                  } ${c(
+                                    "bg-white border-2 border-white text-gray-800 shadow-[0_2px_6px_rgba(0,0,0,0.18)]",
+                                    "bg-[#202c33] border-2 border-[#18181A] text-white shadow-[0_2px_6px_rgba(0,0,0,0.35)]"
+                                  )}`}
+                                title="View reactions"
+                              >
+                                <div className="flex items-center justify-center -space-x-1">
+                                  {uniqueReactions.map((r, i) => (
+                                    <span key={i} className="text-[13px] leading-none flex items-center justify-center">
+                                      {r}
+                                    </span>
+                                  ))}
+                                </div>
+                                {!isSingle && (
+                                  <span className="text-[10px] font-bold opacity-80 tabular-nums">
+                                    {msg.reactions.length}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
+
+                          {/* Floating Pop Heart Animation on Double Tap */}
+                          <AnimatePresence>
+                            {heartPopMessageId === msg.id && (
+                              <motion.div
+                                initial={{ scale: 0.2, opacity: 0, y: 0 }}
+                                animate={{
+                                  scale: [0.2, 1.45, 1.2, 1],
+                                  opacity: [0, 1, 1, 0],
+                                  y: [0, -12, -24, -36],
+                                }}
+                                exit={{ opacity: 0 }}
+                                transition={{ duration: 0.8, ease: "easeOut" }}
+                                className="absolute inset-0 pointer-events-none z-50 flex items-center justify-center select-none"
+                              >
+                                <span className="text-4xl filter drop-shadow-[0_4px_14px_rgba(239,68,68,0.65)]">
+                                  ❤️
+                                </span>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+
+                        {!isMe && actionButtons}
+                      </div>
                     </div>
-                  </div>
                   </Fragment>
                 );
               })
@@ -5145,17 +5148,16 @@ export default function ChatPage() {
                             setActiveDesktopPopup(activeDesktopPopup === "stickers" ? null : "stickers");
                             setShowInputEmojiPicker(false);
                           }}
-                          className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer shadow-xs active:scale-95 ${
-                            activeDesktopPopup === "stickers"
+                          className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer shadow-xs active:scale-95 ${activeDesktopPopup === "stickers"
                               ? c(
-                                  "bg-[#523cc0] text-white shadow-md ring-2 ring-[#523cc0]/30 scale-105",
-                                  "bg-[#9f8dff] text-zinc-950 shadow-md ring-2 ring-[#9f8dff]/40 scale-105"
-                                )
+                                "bg-[#523cc0] text-white shadow-md ring-2 ring-[#523cc0]/30 scale-105",
+                                "bg-[#9f8dff] text-zinc-950 shadow-md ring-2 ring-[#9f8dff]/40 scale-105"
+                              )
                               : c(
-                                  "bg-white/95 hover:bg-white text-[#523cc0] border border-gray-200/90 shadow-[0_1px_3px_rgba(0,0,0,0.08)] backdrop-blur-md hover:scale-105",
-                                  "bg-[#242424]/90 hover:bg-[#2c2c2c] text-[#b5a7ff] border border-zinc-800 shadow-xs backdrop-blur-md hover:scale-105"
-                                )
-                          }`}
+                                "bg-white/95 hover:bg-white text-[#523cc0] border border-gray-200/90 shadow-[0_1px_3px_rgba(0,0,0,0.08)] backdrop-blur-md hover:scale-105",
+                                "bg-[#242424]/90 hover:bg-[#2c2c2c] text-[#b5a7ff] border border-zinc-800 shadow-xs backdrop-blur-md hover:scale-105"
+                              )
+                            }`}
                           title="Choose a sticker"
                         >
                           <MessengerStickerIcon className="w-5 h-5" />
@@ -5193,17 +5195,16 @@ export default function ChatPage() {
                             setActiveDesktopPopup(activeDesktopPopup === "gifs" ? null : "gifs");
                             setShowInputEmojiPicker(false);
                           }}
-                          className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer shadow-xs active:scale-95 ${
-                            activeDesktopPopup === "gifs"
+                          className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer shadow-xs active:scale-95 ${activeDesktopPopup === "gifs"
                               ? c(
-                                  "bg-[#523cc0] text-white shadow-md ring-2 ring-[#523cc0]/30 scale-105",
-                                  "bg-[#9f8dff] text-zinc-950 shadow-md ring-2 ring-[#9f8dff]/40 scale-105"
-                                )
+                                "bg-[#523cc0] text-white shadow-md ring-2 ring-[#523cc0]/30 scale-105",
+                                "bg-[#9f8dff] text-zinc-950 shadow-md ring-2 ring-[#9f8dff]/40 scale-105"
+                              )
                               : c(
-                                  "bg-white/95 hover:bg-white text-[#523cc0] border border-gray-200/90 shadow-[0_1px_3px_rgba(0,0,0,0.08)] backdrop-blur-md hover:scale-105",
-                                  "bg-[#242424]/90 hover:bg-[#2c2c2c] text-[#b5a7ff] border border-zinc-800 shadow-xs backdrop-blur-md hover:scale-105"
-                                )
-                          }`}
+                                "bg-white/95 hover:bg-white text-[#523cc0] border border-gray-200/90 shadow-[0_1px_3px_rgba(0,0,0,0.08)] backdrop-blur-md hover:scale-105",
+                                "bg-[#242424]/90 hover:bg-[#2c2c2c] text-[#b5a7ff] border border-zinc-800 shadow-xs backdrop-blur-md hover:scale-105"
+                              )
+                            }`}
                           title="Choose a GIF"
                         >
                           <MessengerGifIcon className="w-5 h-5" />
@@ -5354,8 +5355,8 @@ export default function ChatPage() {
                             }
                           }}
                           className={`w-6 h-6 rounded-full flex items-center justify-center transition-all cursor-pointer ${showInputEmojiPicker
-                              ? "text-[#00d2ff] scale-110"
-                              : "text-[#00d2ff] hover:scale-110 active:scale-90"
+                            ? "text-[#00d2ff] scale-110"
+                            : "text-[#00d2ff] hover:scale-110 active:scale-90"
                             }`}
                           title="Choose an emoji"
                         >
@@ -5373,8 +5374,8 @@ export default function ChatPage() {
                             setShowInputEmojiPicker(false);
                           }}
                           className={`w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer ${activeDesktopPopup === "emojis"
-                              ? c("text-white bg-[#523cc0] shadow-sm scale-105", "text-zinc-950 bg-[#9f8dff] shadow-sm scale-105")
-                              : c("text-[#523cc0] hover:text-[#412da7] hover:bg-black/5 active:scale-95", "text-[#9f8dff] hover:text-white hover:bg-white/10 active:scale-95")
+                            ? c("text-white bg-[#523cc0] shadow-sm scale-105", "text-zinc-950 bg-[#9f8dff] shadow-sm scale-105")
+                            : c("text-[#523cc0] hover:text-[#412da7] hover:bg-black/5 active:scale-95", "text-[#9f8dff] hover:text-white hover:bg-white/10 active:scale-95")
                             }`}
                           title="Choose an emoji"
                         >
@@ -5428,8 +5429,8 @@ export default function ChatPage() {
               <button
                 type="submit"
                 className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 transition-all ${isMobile
-                    ? "text-[#00d2ff] hover:scale-110 active:scale-90"
-                    : "bg-[#0084ff] hover:bg-[#0073e6] active:scale-95 text-white shadow-md"
+                  ? "text-[#00d2ff] hover:scale-110 active:scale-90"
+                  : "bg-[#0084ff] hover:bg-[#0073e6] active:scale-95 text-white shadow-md"
                   }`}
                 title="Send message"
               >
@@ -6521,8 +6522,8 @@ export default function ChatPage() {
                 zIndex: 200,
               }}
               className={`flex items-center gap-1 px-2.5 py-2 rounded-full shadow-2xl border animate-in fade-in zoom-in-95 duration-150 select-none ${darkMode
-                  ? "bg-[#2A2726] border-zinc-700"
-                  : "bg-white border-gray-200"
+                ? "bg-[#2A2726] border-zinc-700"
+                : "bg-white border-gray-200"
                 }`}
             >
               {quickReactions.slice(0, 6).map((emoji) => (
@@ -6565,8 +6566,8 @@ export default function ChatPage() {
                   setDesktopQuickReactionCoords(null);
                 }}
                 className={`w-9 h-9 flex items-center justify-center rounded-full transition-all hover:scale-110 active:scale-95 ${darkMode
-                    ? "bg-zinc-700 text-gray-200 hover:bg-zinc-600"
-                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  ? "bg-zinc-700 text-gray-200 hover:bg-zinc-600"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                   }`}
                 title="More emoji"
               >
@@ -6602,8 +6603,8 @@ export default function ChatPage() {
                 zIndex: 200,
               }}
               className={`w-48 rounded-xl shadow-2xl border py-1.5 animate-in fade-in zoom-in-95 duration-100 ${darkMode
-                  ? "bg-[#2A2726] border-zinc-700 text-gray-100"
-                  : "bg-white border-gray-200 text-gray-900"
+                ? "bg-[#2A2726] border-zinc-700 text-gray-100"
+                : "bg-white border-gray-200 text-gray-900"
                 }`}
             >
               {/* Reply */}
@@ -6717,8 +6718,8 @@ export default function ChatPage() {
               <div
                 style={{ left: `${desktopPickerCoords.caretLeft}px` }}
                 className={`absolute w-0 h-0 border-x-[8px] border-x-transparent pointer-events-none -translate-x-1/2 ${desktopPickerCoords.placement === "up"
-                    ? `-bottom-2 border-t-[8px] border-b-0 ${c("border-t-white", "border-t-[#202c33]")}`
-                    : `-top-2 border-b-[8px] border-t-0 ${c("border-b-white", "border-b-[#202c33]")}`
+                  ? `-bottom-2 border-t-[8px] border-b-0 ${c("border-t-white", "border-t-[#202c33]")}`
+                  : `-top-2 border-b-[8px] border-t-0 ${c("border-b-white", "border-b-[#202c33]")}`
                   }`}
               />
 

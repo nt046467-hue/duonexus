@@ -180,11 +180,19 @@ export function CallScreen({
     }
   }, [remoteStream, isPartnerShowingVideo]);
 
-  // Connect remote stream to dedicated audio element with autoplay guard
+  // Connect remote stream to dedicated audio element with auto-play on track arrival & global mobile tap unlock
   useEffect(() => {
-    if (remoteAudioRef.current && remoteStream) {
-      remoteAudioRef.current.srcObject = remoteStream;
-      const playPromise = remoteAudioRef.current.play();
+    const audioEl = remoteAudioRef.current;
+    if (!audioEl || !remoteStream) return;
+
+    if (audioEl.srcObject !== remoteStream) {
+      audioEl.srcObject = remoteStream;
+    }
+    audioEl.volume = 1.0;
+    audioEl.muted = false;
+
+    const playAudio = () => {
+      const playPromise = audioEl.play();
       if (playPromise !== undefined) {
         playPromise
           .then(() => {
@@ -195,7 +203,35 @@ export function CallScreen({
             setAudioAutoplayBlocked(true);
           });
       }
-    }
+    };
+
+    playAudio();
+
+    // Re-trigger play when tracks are dynamically added (e.g. peer begins audio transmission)
+    const handleTrackAdded = () => {
+      playAudio();
+    };
+    remoteStream.addEventListener("addtrack", handleTrackAdded);
+
+    // Global touch/click unlock for mobile: first interaction anywhere on screen unlocks audio
+    const handleInteractionUnlock = () => {
+      if (audioEl && audioEl.paused) {
+        audioEl
+          .play()
+          .then(() => setAudioAutoplayBlocked(false))
+          .catch(() => {});
+      }
+    };
+    window.addEventListener("pointerdown", handleInteractionUnlock);
+    window.addEventListener("touchstart", handleInteractionUnlock);
+    window.addEventListener("click", handleInteractionUnlock);
+
+    return () => {
+      remoteStream.removeEventListener("addtrack", handleTrackAdded);
+      window.removeEventListener("pointerdown", handleInteractionUnlock);
+      window.removeEventListener("touchstart", handleInteractionUnlock);
+      window.removeEventListener("click", handleInteractionUnlock);
+    };
   }, [remoteStream]);
 
   // Toggle microphone mute
@@ -348,8 +384,22 @@ export function CallScreen({
 
   return (
     <div className="fixed inset-0 z-[250] bg-zinc-950 flex flex-col justify-between text-white safe-top safe-bottom select-none">
-      {/* Hidden audio element — dedicated single audio output path */}
-      <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
+      {/* Dedicated audio element — kept in layout tree with position fixed so mobile WebKit/Blink engines never suspend playback */}
+      <audio
+        ref={remoteAudioRef}
+        autoPlay
+        playsInline
+        aria-hidden="true"
+        style={{
+          position: "fixed",
+          top: "-9999px",
+          left: "-9999px",
+          width: "1px",
+          height: "1px",
+          opacity: 0.01,
+          pointerEvents: "none",
+        }}
+      />
 
       {/* Autoplay restriction recovery banner */}
       {audioAutoplayBlocked && (

@@ -275,28 +275,28 @@ export function LoveSparksRitual({
   const isRevealed = sparkData?.revealed || (hasMyAnswer && hasPartnerAnswer);
 
   return (
-    <div className="w-full relative overflow-hidden rounded-3xl border border-pink-500/20 bg-gradient-to-br from-pink-500/10 via-purple-500/5 to-indigo-500/10 p-5 sm:p-6 backdrop-blur-xl shadow-xl">
+    <div className="w-full relative overflow-hidden rounded-3xl border border-pink-500/25 bg-gradient-to-br from-pink-500/10 via-purple-500/5 to-indigo-500/10 p-4 sm:p-6 backdrop-blur-xl shadow-xl">
       {/* Background ambient glow */}
       <div className="absolute -top-12 -right-12 w-44 h-44 rounded-full bg-pink-500/20 blur-3xl pointer-events-none" />
       <div className="absolute -bottom-12 -left-12 w-44 h-44 rounded-full bg-purple-500/20 blur-3xl pointer-events-none" />
 
       {/* Top Header */}
-      <div className="flex items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-2.5">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-500 to-purple-600 flex items-center justify-center text-white shadow-md shadow-pink-500/25">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-500 to-purple-600 flex items-center justify-center text-white shadow-md shadow-pink-500/25 shrink-0">
             <SparklesSvg className="w-5 h-5 animate-pulse" />
           </div>
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h3 className="font-headline font-bold text-base sm:text-lg text-foreground flex items-center gap-1.5">
+              <h3 className="font-headline font-bold text-base sm:text-lg text-foreground truncate">
                 Daily Love Spark
               </h3>
-              <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-pink-500/20 text-pink-400 border border-pink-500/30">
+              <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-pink-500/20 text-pink-400 border border-pink-500/30 shrink-0">
                 Daily Ritual
               </span>
             </div>
-            <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
-              <Calendar className="w-3.5 h-3.5" />
+            <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5 truncate">
+              <Calendar className="w-3.5 h-3.5 shrink-0" />
               {format(new Date(), "EEEE, MMMM d")}
             </p>
           </div>
@@ -304,26 +304,26 @@ export function LoveSparksRitual({
 
         {/* Status Pill */}
         {sparkData && (
-          <div className="text-xs font-semibold px-2.5 py-1 rounded-full flex items-center gap-1.5 shrink-0 bg-background/60 border border-border">
+          <div className="text-xs font-semibold px-2.5 py-1 rounded-full flex items-center gap-1.5 shrink-0 bg-background/80 border border-border shadow-xs">
             {isRevealed ? (
               <>
                 <Unlock className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="text-emerald-400">Revealed</span>
+                <span className="text-emerald-400 font-medium">Revealed ✨</span>
               </>
             ) : hasMyAnswer ? (
               <>
-                <Lock className="w-3.5 h-3.5 text-amber-400" />
-                <span className="text-amber-400">Waiting for {partnerName}</span>
+                <Lock className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                <span className="text-amber-400 font-medium">Waiting for {partnerName}</span>
               </>
             ) : hasPartnerAnswer ? (
               <>
-                <Clock className="w-3.5 h-3.5 text-blue-400" />
-                <span className="text-blue-400">{partnerName} answered!</span>
+                <Clock className="w-3.5 h-3.5 text-blue-400 animate-bounce" />
+                <span className="text-blue-400 font-medium">{partnerName} answered!</span>
               </>
             ) : (
               <>
                 <Clock className="w-3.5 h-3.5 text-pink-400" />
-                <span className="text-pink-400">Unanswered</span>
+                <span className="text-pink-400 font-medium">Unanswered</span>
               </>
             )}
           </div>
@@ -332,33 +332,42 @@ export function LoveSparksRitual({
 
       {/* STATE 1: No Spark generated yet today */}
       {!sparkData && (
-        <div className="text-center py-6 px-4 bg-background/40 rounded-2xl border border-pink-500/10 space-y-4">
-          <div className="w-14 h-14 mx-auto rounded-full bg-gradient-to-tr from-pink-500/20 to-purple-500/20 border border-pink-500/30 flex items-center justify-center text-pink-400">
-            <Heart className="w-7 h-7 fill-pink-400/40" />
+        <div className="text-center py-6 px-4 sm:px-6 bg-background/50 rounded-2xl border border-pink-500/15 shadow-sm space-y-4">
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-tr from-pink-500/20 via-rose-500/15 to-purple-500/20 border border-pink-500/30 flex items-center justify-center text-pink-400 shadow-inner">
+            <Heart className="w-7 h-7 fill-pink-400/40 animate-pulse" />
           </div>
           <div className="max-w-md mx-auto">
-            <h4 className="font-bold text-base text-foreground">
+            <h4 className="font-bold text-base sm:text-lg text-foreground">
               Today's Ritual Awaits 💕
             </h4>
-            <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-              Generate today's personalized conversation prompt. Both of you answer secretly before the answers are revealed together!
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1 leading-relaxed">
+              Generate today's personalized couple prompt. You both answer secretly — answers stay sealed until you both submit!
             </p>
           </div>
-          <Button
-            onClick={handleGenerateTodaySpark}
-            disabled={isGenerating}
-            className="rounded-xl px-6 h-11 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white font-bold shadow-lg shadow-pink-500/25 transition-all active:scale-95"
-          >
-            {isGenerating ? (
-              <span className="flex items-center gap-2">
-                <SparklesSvg className="w-4 h-4 animate-spin" /> Thinking of something romantic...
-              </span>
-            ) : (
-              <span className="flex items-center gap-2">
-                <SparklesSvg className="w-4 h-4" /> Start Today's Love Spark
-              </span>
-            )}
-          </Button>
+
+          <div className="pt-1 flex flex-col items-center gap-2 max-w-sm mx-auto w-full">
+            <Button
+              onClick={handleGenerateTodaySpark}
+              disabled={isGenerating}
+              className="w-full sm:w-auto min-h-[50px] h-auto py-3 px-6 rounded-2xl bg-gradient-to-r from-rose-500 via-pink-500 to-purple-600 hover:from-rose-600 hover:to-purple-700 text-white font-bold text-sm sm:text-base shadow-lg shadow-pink-500/30 hover:shadow-pink-500/40 active:scale-[0.98] transition-all flex items-center justify-center gap-2.5"
+            >
+              {isGenerating ? (
+                <>
+                  <SparklesSvg className="w-5 h-5 animate-spin shrink-0" />
+                  <span>Thinking of something romantic...</span>
+                </>
+              ) : (
+                <>
+                  <SparklesSvg className="w-5 h-5 shrink-0 animate-pulse" />
+                  <span>Start Today's Love Spark</span>
+                </>
+              )}
+            </Button>
+            <p className="text-[11px] text-muted-foreground/80 flex items-center justify-center gap-1.5">
+              <Lock className="w-3 h-3 text-pink-400 shrink-0" />
+              <span>Answers remain hidden until both submit</span>
+            </p>
+          </div>
         </div>
       )}
 
@@ -366,9 +375,9 @@ export function LoveSparksRitual({
       {sparkData && (
         <div className="space-y-4">
           {/* Question Card */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-background/70 border border-pink-500/20 shadow-sm relative overflow-hidden">
+          <div className="p-4 sm:p-5 rounded-2xl bg-background/80 border border-pink-500/25 shadow-sm relative overflow-hidden">
             <div className="flex items-start gap-3">
-              <span className="text-2xl select-none leading-none mt-0.5">💬</span>
+              <span className="text-2xl select-none leading-none mt-0.5 shrink-0">💬</span>
               <p className="text-base sm:text-lg font-medium text-foreground leading-relaxed">
                 {sparkData.question}
               </p>
@@ -383,14 +392,14 @@ export function LoveSparksRitual({
               animate={{ opacity: 1, scale: 1 }}
               className="space-y-3"
             >
-              <div className="flex items-center justify-between text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3.5 py-2 rounded-xl">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3.5 py-2.5 rounded-xl">
                 <span className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4" /> Both answered! Answers revealed & saved to Memories ✨
+                  <CheckCircle2 className="w-4 h-4 shrink-0" /> Both answered! Answers revealed ✨
                 </span>
                 {onOpenMemories && (
                   <button
                     onClick={onOpenMemories}
-                    className="hover:underline flex items-center gap-1 text-primary"
+                    className="hover:underline flex items-center gap-1 text-primary active:scale-95 transition-transform"
                   >
                     View in Memories <ChevronRight className="w-3.5 h-3.5" />
                   </button>
@@ -399,7 +408,7 @@ export function LoveSparksRitual({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 {/* My Answer */}
-                <div className="p-4 rounded-2xl bg-background/80 border border-primary/20 shadow-sm space-y-2">
+                <div className="p-4 rounded-2xl bg-background/85 border border-primary/25 shadow-sm space-y-2">
                   <div className="flex items-center gap-2.5">
                     <Avatar className="w-7 h-7 border border-primary/30">
                       <AvatarImage src={myAvatar} />
@@ -407,13 +416,13 @@ export function LoveSparksRitual({
                     </Avatar>
                     <span className="text-xs font-bold text-foreground">{myName} (You)</span>
                   </div>
-                  <p className="text-sm text-foreground/90 leading-relaxed font-sans italic pl-1 border-l-2 border-primary/40">
+                  <p className="text-sm text-foreground/90 leading-relaxed font-sans italic pl-2 border-l-2 border-primary/40">
                     "{myAnswer?.text}"
                   </p>
                 </div>
 
                 {/* Partner Answer */}
-                <div className="p-4 rounded-2xl bg-background/80 border border-pink-500/20 shadow-sm space-y-2">
+                <div className="p-4 rounded-2xl bg-background/85 border border-pink-500/25 shadow-sm space-y-2">
                   <div className="flex items-center gap-2.5">
                     <Avatar className="w-7 h-7 border border-pink-500/30">
                       <AvatarImage src={partnerAvatar} />
@@ -421,7 +430,7 @@ export function LoveSparksRitual({
                     </Avatar>
                     <span className="text-xs font-bold text-foreground">{partnerName}</span>
                   </div>
-                  <p className="text-sm text-foreground/90 leading-relaxed font-sans italic pl-1 border-l-2 border-pink-500/40">
+                  <p className="text-sm text-foreground/90 leading-relaxed font-sans italic pl-2 border-l-2 border-pink-500/40">
                     "{partnerAnswer?.text}"
                   </p>
                 </div>
@@ -433,7 +442,7 @@ export function LoveSparksRitual({
             </motion.div>
           ) : hasMyAnswer ? (
             /* YOU ANSWERED, WAITING FOR PARTNER */
-            <div className="p-5 rounded-2xl bg-background/60 border border-amber-500/20 text-center space-y-3">
+            <div className="p-5 rounded-2xl bg-background/70 border border-amber-500/25 text-center space-y-3.5">
               <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
                 <Lock className="w-6 h-6 animate-bounce" />
               </div>
@@ -441,15 +450,15 @@ export function LoveSparksRitual({
                 <h4 className="text-sm font-bold text-foreground">
                   Your Answer is Sealed 🔒
                 </h4>
-                <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+                <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto leading-relaxed">
                   {hasPartnerAnswer
                     ? `${partnerName} just answered! Revealing both answers now...`
-                    : `Waiting for ${partnerName} to submit their answer. Both answers will unlock simultaneously so you can read them together!`}
+                    : `Waiting for ${partnerName} to submit their answer. Both will unlock together so you can read them at the same time!`}
                 </p>
               </div>
 
               {/* Show preview of my own sealed answer */}
-              <div className="mt-3 p-3 bg-muted/30 rounded-xl max-w-md mx-auto text-left border border-border">
+              <div className="p-3 bg-muted/40 rounded-xl max-w-md mx-auto text-left border border-border/70">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-1">
                   Your submitted answer:
                 </span>
@@ -460,28 +469,28 @@ export function LoveSparksRitual({
             /* NOT YET ANSWERED BY YOU */
             <div className="space-y-3">
               {hasPartnerAnswer && (
-                <div className="text-xs font-semibold text-blue-400 bg-blue-500/10 border border-blue-500/20 px-3.5 py-2 rounded-xl flex items-center gap-2">
-                  <Unlock className="w-4 h-4" />
+                <div className="text-xs font-semibold text-blue-400 bg-blue-500/10 border border-blue-500/20 px-3.5 py-2.5 rounded-xl flex items-center gap-2">
+                  <Unlock className="w-4 h-4 shrink-0" />
                   <span>{partnerName} has already answered! Submit yours to reveal both 💕</span>
                 </div>
               )}
 
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 <Textarea
                   value={myAnswerText}
                   onChange={(e) => setMyAnswerText(e.target.value)}
                   placeholder={`Write your secret answer here... (Neither sees the other's answer until both submit)`}
-                  className="min-h-[90px] bg-background/80 rounded-2xl border-pink-500/20 focus-visible:ring-pink-500/30 text-sm resize-none"
+                  className="min-h-[96px] bg-background/90 rounded-2xl border-pink-500/25 focus-visible:ring-pink-500/30 text-base sm:text-sm resize-none p-3.5 leading-relaxed"
                 />
 
-                <div className="flex justify-between items-center pt-1">
+                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 pt-0.5">
                   <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                    <Lock className="w-3 h-3" /> Sealed until simultaneous reveal
+                    <Lock className="w-3 h-3 text-pink-400" /> Sealed until simultaneous reveal
                   </span>
                   <Button
                     onClick={handleSubmitAnswer}
                     disabled={!myAnswerText.trim() || isSubmitting}
-                    className="rounded-xl px-5 h-9 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white text-xs font-bold shadow-md shadow-pink-500/20 gap-1.5"
+                    className="w-full sm:w-auto rounded-xl px-5 h-11 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white text-xs sm:text-sm font-bold shadow-md shadow-pink-500/20 gap-1.5 active:scale-95 transition-all"
                   >
                     <Send className="w-3.5 h-3.5" />
                     {isSubmitting ? "Sealing..." : "Submit Answer"}

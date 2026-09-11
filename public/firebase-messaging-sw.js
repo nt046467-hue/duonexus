@@ -117,23 +117,38 @@ self.addEventListener('notificationclick', function(event) {
   const origin = self.location.origin;
   const callId = data.callId;
 
+  const isCall = data.type === "incoming_call" || Boolean(callId);
+  const isAccept = event.action === "accept";
+  const isDecline = event.action === "decline";
+
   let targetUrl = data.url || (origin + '/chat');
 
-  if (event.action === "accept" && callId) {
+  if (isAccept && callId) {
     targetUrl = `${origin}/chat?answer=${encodeURIComponent(callId)}`;
-  } else if (event.action === "decline" && callId) {
+  } else if (isDecline && callId) {
     targetUrl = `${origin}/chat?decline=${encodeURIComponent(callId)}`;
+  } else if (isCall && callId) {
+    targetUrl = `${origin}/chat?callId=${encodeURIComponent(callId)}`;
+  }
+
+  // Determine event type for active chat tab
+  let messageType = "NOTIFICATION_CLICK";
+  if (isAccept) {
+    messageType = "ACCEPT_CALL";
+  } else if (isDecline) {
+    messageType = "DECLINE_CALL";
+  } else if (isCall) {
+    messageType = "OPEN_INCOMING_CALL";
   }
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
       // If a chat tab is already open, focus it and postMessage WITHOUT navigating/reloading the tab!
-      // (client.navigate caused hard page reloads which fired beforeunload and destroyed WebRTC calls)
       for (let i = 0; i < clientList.length; i++) {
         let client = clientList[i];
         if (client.url && client.url.includes('/chat') && 'focus' in client) {
           client.postMessage({
-            type: event.action === "accept" ? "ACCEPT_CALL" : (event.action === "decline" ? "DECLINE_CALL" : "NOTIFICATION_CLICK"),
+            type: messageType,
             callId: callId,
             callType: data.callType,
             data: data
