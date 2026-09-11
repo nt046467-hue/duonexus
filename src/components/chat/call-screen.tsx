@@ -173,26 +173,79 @@ export function CallScreen({
     }
   }, [remoteStream]);
 
-  // ── Helper: Attach Remote Audio Stream ──────────────────────────────────────
-  // Only audio tracks go here — this is the single source of remote audio output.
+  // ── Helper: Capture Remote Audio Element ref ─────────────────────────────────
+  // Audio stream wiring is done by the live-subscription useEffect below.
+  // This callback ref only stores the DOM reference so the useEffect can use it.
   const attachRemoteAudio = useCallback((audioEl: HTMLAudioElement | null) => {
     remoteAudioRef.current = audioEl;
-    if (audioEl && remoteStream) {
-      // Strictly audio-only so there is zero chance of a second video-element
-      // rendering audio in parallel.
-      const audioOnlyStream = new MediaStream(remoteStream.getAudioTracks());
+    // Wire the live audio-only stream if it already exists (e.g. element remounts)
+    if (audioEl && audioOnlyStreamRef.current) {
+      audioEl.srcObject = audioOnlyStreamRef.current;
       audioEl.volume = 1.0;
       audioEl.muted = false;
-      audioEl.srcObject = audioOnlyStream;
-      const p = audioEl.play();
-      if (p !== undefined) {
-        p.then(() => setAudioAutoplayBlocked(false)).catch(() => {
-          setAudioAutoplayBlocked(true);
-        });
-      }
+      audioEl.play().catch(() => {});
     } else if (audioEl) {
       audioEl.srcObject = null;
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Live audio-only stream for the hidden <audio> element ──────────────────
+  // Instead of a snapshot, we keep a dedicated MediaStream that mirrors only
+  // the audio tracks from remoteStream. We subscribe to addtrack/removetrack
+  // events so that tracks arriving after the initial render (race condition on
+  // desktop) are automatically included. This is the single source of truth
+  // for remote audio — the <video> element carries zero audio tracks.
+  const audioOnlyStreamRef = useRef<MediaStream | null>(null);
+
+  useEffect(() => {
+    if (!remoteStream) {
+      // Clear the audio element if remoteStream disappears
+      if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+      audioOnlyStreamRef.current = null;
+      return;
+    }
+
+    // Reuse existing audio-only stream if we already created one for this remoteStream,
+    // otherwise create a fresh one.
+    const audioOnly = new MediaStream();
+    audioOnlyStreamRef.current = audioOnly;
+
+    // Populate with any already-present audio tracks
+    remoteStream.getAudioTracks().forEach((t) => audioOnly.addTrack(t));
+
+    // Keep it live: subscribe to future track additions/removals
+    const onAddTrack = (e: MediaStreamTrackEvent) => {
+      if (e.track.kind === "audio" && !audioOnly.getTrackById(e.track.id)) {
+        audioOnly.addTrack(e.track);
+        // Ensure the audio element plays the newly added track
+        const audioEl = remoteAudioRef.current;
+        if (audioEl && audioEl.paused) audioEl.play().catch(() => {});
+      }
+    };
+    const onRemoveTrack = (e: MediaStreamTrackEvent) => {
+      if (e.track.kind === "audio") audioOnly.removeTrack(e.track);
+    };
+
+    remoteStream.addEventListener("addtrack", onAddTrack);
+    remoteStream.addEventListener("removetrack", onRemoveTrack);
+
+    // Wire to the <audio> element
+    const audioEl = remoteAudioRef.current;
+    if (audioEl) {
+      audioEl.srcObject = audioOnly;
+      audioEl.volume = 1.0;
+      audioEl.muted = false;
+      const p = audioEl.play();
+      if (p !== undefined) {
+        p.then(() => setAudioAutoplayBlocked(false)).catch(() => setAudioAutoplayBlocked(true));
+      }
+    }
+
+    return () => {
+      remoteStream.removeEventListener("addtrack", onAddTrack);
+      remoteStream.removeEventListener("removetrack", onRemoveTrack);
+    };
   }, [remoteStream]);
 
   // Synchronize local preview whenever localStream, isCamOff, or callState changes
@@ -205,16 +258,11 @@ export function CallScreen({
     attachRemoteVideo(remoteVideoRef.current);
   }, [remoteStream, isPartnerShowingVideo, callState, attachRemoteVideo]);
 
-  // Synchronize remote audio whenever remoteStream or callState changes
-  useEffect(() => {
-    attachRemoteAudio(remoteAudioRef.current);
-  }, [remoteStream, callState, attachRemoteAudio]);
-
   // Global touch/click unlock for mobile audio autoplay
   useEffect(() => {
     const handleInteractionUnlock = () => {
       const audioEl = remoteAudioRef.current;
-      if (audioEl && audioEl.paused && remoteStream) {
+      if (audioEl && audioEl.paused && audioOnlyStreamRef.current) {
         audioEl
           .play()
           .then(() => setAudioAutoplayBlocked(false))

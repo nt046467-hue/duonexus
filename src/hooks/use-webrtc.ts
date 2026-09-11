@@ -650,21 +650,32 @@ export function useWebRTC({
         }
       }
 
-      // 3. Progressive fallback: basic video: true + audio: true
+      // 3. Progressive fallback: basic video: true + standard audio
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
+          audio: STANDARD_AUDIO_CONSTRAINTS,
           video: true,
         });
         stream.getAudioTracks().forEach((t) => (t.enabled = true));
         stream.getVideoTracks().forEach((t) => (t.enabled = true));
         return stream;
-      } catch (basicVideoErr: any) {
-        if (process.env.NODE_ENV === "development") {
-          console.warn("[WebRTC] Video hardware acquisition failed, falling back to voice channel:", basicVideoErr);
-        }
-        if (onCameraErrorRef.current) {
-          onCameraErrorRef.current(basicVideoErr?.name || "CameraError");
+      } catch {
+        // Final fallback: no video constraints, just AEC audio
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: STANDARD_AUDIO_CONSTRAINTS,
+            video: true,
+          });
+          stream.getAudioTracks().forEach((t) => (t.enabled = true));
+          stream.getVideoTracks().forEach((t) => (t.enabled = true));
+          return stream;
+        } catch (basicVideoErr: any) {
+          if (process.env.NODE_ENV === "development") {
+            console.warn("[WebRTC] Video hardware acquisition failed, falling back to voice channel:", basicVideoErr);
+          }
+          if (onCameraErrorRef.current) {
+            onCameraErrorRef.current(basicVideoErr?.name || "CameraError");
+          }
         }
       }
     }
