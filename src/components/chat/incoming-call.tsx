@@ -28,7 +28,7 @@ export function IncomingCall({
 }: IncomingCallProps) {
   const handledRef = useRef(false);
 
-  // ── Start incoming ringtone tied to this callId on mount ───────────────────
+  // Start incoming ringtone tied to this callId on mount
   useEffect(() => {
     startRingtone(callId);
     return () => {
@@ -36,8 +36,7 @@ export function IncomingCall({
     };
   }, [callId]);
 
-  // ── Callee-side 30-second timeout ──────────────────────────────────────────
-  // If the caller doesn't cancel in time and the callee doesn't act, dismiss UI.
+  // Callee-side 30-second timeout
   useEffect(() => {
     const timer = setTimeout(() => {
       if (!handledRef.current) {
@@ -69,7 +68,7 @@ export function IncomingCall({
       {/* Caller Info */}
       <div className="flex flex-col items-center gap-6 mt-12">
         <div className="relative">
-          {/* Elegant pulsing ring */}
+          {/* Pulsing ring animation */}
           <span className="absolute -inset-2 rounded-full bg-primary/20 animate-ping opacity-40 scale-110 pointer-events-none" />
           <Avatar className="w-28 h-28 border-4 border-primary/30 shadow-2xl">
             <AvatarImage src={partnerAvatar} className="object-cover" />
@@ -116,3 +115,4 @@ export function IncomingCall({
     </div>
   );
 }
+

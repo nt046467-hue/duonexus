@@ -2175,10 +2175,18 @@ export default function ChatPage() {
   );
 
   const handleCameraError = useCallback((errName: string) => {
+    let description = "Camera is unavailable right now.";
+    if (errName === "NotAllowedError" || errName === "PermissionDeniedError") {
+      description = "Camera permission is blocked. Allow camera access in your browser settings and try again.";
+    } else if (errName === "NotReadableError" || errName === "TrackStartError") {
+      description = "Camera is currently in use by another tab or app.";
+    } else if (errName === "NotFoundError" || errName === "DevicesNotFoundError") {
+      description = "No camera found on this device.";
+    }
     toast({
       variant: "destructive",
-      title: "Camera Permission",
-      description: errName === "NotReadableError" ? "Camera in use by another tab" : "Check camera permission.",
+      title: "Camera Issue",
+      description,
     });
   }, [toast]);
 

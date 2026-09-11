@@ -74,9 +74,6 @@ export function CallScreen({
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
   const [audioAutoplayBlocked, setAudioAutoplayBlocked] = useState(false);
 
-  // Speaker / Output device capabilities
-  const isSinkIdSupported = typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype;
-
   // Sync isCamOff with localStream video tracks and isVideoEnabled prop
   useEffect(() => {
     if (typeof isVideoEnabled === "boolean") {
@@ -97,18 +94,16 @@ export function CallScreen({
 
   const [activeFilter, setActiveFilter] = useState("none");
   const [showFilters, setShowFilters] = useState(false);
-  const [remoteHasVideo, setRemoteHasVideo] = useState(false);
+  const [remoteHasLiveVideo, setRemoteHasLiveVideo] = useState(false);
   const [sparkPrompt, setSparkPrompt] = useState<string | null>(null);
   const [isLoadingSpark, setIsLoadingSpark] = useState(false);
   const sparkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
-  // Dedicated single audio output path to guarantee zero duplicate audio or acoustic echo feedback
+  // Dedicated single audio output element to guarantee zero duplicate audio or acoustic echo feedback
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
 
-  // ── Outgoing call: Calling... state (ringing for caller) ─────────────────────
-  // During ringing state, the caller sees the Calling... screen
   const isOutgoingRinging = callState === "ringing";
   const isConnecting = callState === "connecting";
   const isMissedOrFailed = callState === "missed" || callState === "failed";
@@ -129,58 +124,75 @@ export function CallScreen({
     }
   }, [callState]);
 
-
-  // Dynamically check if remote peer has active/unmuted video track
+  // Dynamically check if remote peer has active, live video track
   useEffect(() => {
     if (!remoteStream) {
-      setRemoteHasVideo(false);
+      setRemoteHasLiveVideo(false);
       return;
     }
-    const checkVideo = () => {
-      const videoTrack = remoteStream.getVideoTracks()[0];
-      setRemoteHasVideo(!!videoTrack && videoTrack.enabled && videoTrack.readyState === "live" && !videoTrack.muted);
+
+    const checkVideoTrack = () => {
+      const vTracks = remoteStream.getVideoTracks();
+      const hasLive = vTracks.some((t) => t.enabled && t.readyState === "live");
+      setRemoteHasLiveVideo(hasLive);
     };
-    checkVideo();
+
+    checkVideoTrack();
 
     const tracks = remoteStream.getVideoTracks();
     tracks.forEach((track) => {
-      track.onmute = checkVideo;
-      track.onunmute = checkVideo;
-      track.onended = checkVideo;
+      track.onmute = checkVideoTrack;
+      track.onunmute = checkVideoTrack;
+      track.onended = checkVideoTrack;
     });
 
-    const interval = setInterval(checkVideo, 1000);
+    const handleAddTrack = () => checkVideoTrack();
+    const handleRemoveTrack = () => checkVideoTrack();
+    remoteStream.addEventListener("addtrack", handleAddTrack);
+    remoteStream.addEventListener("removetrack", handleRemoveTrack);
+
+    const pollInterval = setInterval(checkVideoTrack, 1500);
+
     return () => {
-      clearInterval(interval);
+      clearInterval(pollInterval);
       tracks.forEach((track) => {
         track.onmute = null;
         track.onunmute = null;
         track.onended = null;
       });
+      remoteStream.removeEventListener("addtrack", handleAddTrack);
+      remoteStream.removeEventListener("removetrack", handleRemoveTrack);
     };
   }, [remoteStream]);
 
+  // Authoritative remote video display determination:
+  // Render video if remote video track exists and is live, or if remote state explicitly indicates video
+  const isPartnerShowingVideo = remoteHasLiveVideo || (typeof isPartnerVideoEnabled === "boolean" && isPartnerVideoEnabled && !!remoteStream);
+
   // Connect local stream to local preview video element
   useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
+    const videoEl = localVideoRef.current;
+    if (videoEl && localStream && !isCamOff) {
+      if (videoEl.srcObject !== localStream) {
+        videoEl.srcObject = localStream;
+      }
+      videoEl.play().catch(() => {});
     }
   }, [localStream, isCamOff]);
 
-  const isPartnerShowingVideo =
-    typeof isPartnerVideoEnabled === "boolean"
-      ? isPartnerVideoEnabled
-      : (!!remoteStream && remoteHasVideo);
-
   // Connect remote stream to video element — strictly muted to avoid duplicate playback
   useEffect(() => {
-    if (remoteVideoRef.current && remoteStream && isPartnerShowingVideo) {
-      remoteVideoRef.current.muted = true;
-      remoteVideoRef.current.srcObject = remoteStream;
+    const videoEl = remoteVideoRef.current;
+    if (videoEl && remoteStream && isPartnerShowingVideo) {
+      videoEl.muted = true;
+      if (videoEl.srcObject !== remoteStream) {
+        videoEl.srcObject = remoteStream;
+      }
+      videoEl.play().catch(() => {});
     }
   }, [remoteStream, isPartnerShowingVideo]);
 
-  // Connect remote stream to dedicated audio element with auto-play on track arrival & global mobile tap unlock
+  // Connect remote stream to dedicated audio element with auto-play & unlock listeners
   useEffect(() => {
     const audioEl = remoteAudioRef.current;
     if (!audioEl || !remoteStream) return;
@@ -199,7 +211,9 @@ export function CallScreen({
             setAudioAutoplayBlocked(false);
           })
           .catch((err) => {
-            console.warn("[CallScreen] Remote audio autoplay blocked:", err);
+            if (process.env.NODE_ENV === "development") {
+              console.warn("[CallScreen] Remote audio autoplay blocked:", err);
+            }
             setAudioAutoplayBlocked(true);
           });
       }
@@ -207,13 +221,12 @@ export function CallScreen({
 
     playAudio();
 
-    // Re-trigger play when tracks are dynamically added (e.g. peer begins audio transmission)
     const handleTrackAdded = () => {
       playAudio();
     };
     remoteStream.addEventListener("addtrack", handleTrackAdded);
 
-    // Global touch/click unlock for mobile: first interaction anywhere on screen unlocks audio
+    // Global touch/click unlock for mobile
     const handleInteractionUnlock = () => {
       if (audioEl && audioEl.paused) {
         audioEl
@@ -244,7 +257,7 @@ export function CallScreen({
     }
   };
 
-  // Toggle camera (delegates to useWebRTC toggleVideo)
+  // Toggle camera
   const toggleCam = () => {
     if (onToggleVideo) {
       onToggleVideo();
@@ -256,19 +269,18 @@ export function CallScreen({
     }
   };
 
-  // Real Speaker Output Handling (using setSinkId where supported)
+  // Speaker toggle for audio calls
   const toggleSpeaker = async () => {
     if (!remoteAudioRef.current) return;
+    const isSinkIdSupported = typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype;
 
     if (isSinkIdSupported) {
       try {
         const audioEl = remoteAudioRef.current as any;
         if (isSpeakerOn) {
-          // Route to default or earpiece if supported
           await audioEl.setSinkId("");
           setIsSpeakerOn(false);
         } else {
-          // Find external speaker or default
           const devices = await navigator.mediaDevices.enumerateDevices();
           const outputDevices = devices.filter((d) => d.kind === "audiooutput");
           const targetDevice = outputDevices.find((d) => d.deviceId !== "default") || outputDevices[0];
@@ -277,12 +289,10 @@ export function CallScreen({
           }
           setIsSpeakerOn(true);
         }
-      } catch (err) {
-        console.warn("[CallScreen] setSinkId error:", err);
-        // Retain current state if hardware denied
+      } catch {
+        setIsSpeakerOn(!isSpeakerOn);
       }
     } else {
-      // Gracefully toggle state if browser handles audio routing natively
       setIsSpeakerOn(!isSpeakerOn);
     }
   };
@@ -330,7 +340,7 @@ export function CallScreen({
     }
   };
 
-  // ── Outgoing Ringing / No Answer screen ─────────────────────────────────
+  // ── Outgoing Ringing / Connecting / No Answer screen ────────────────────────
   if (isOutgoingRinging || isConnecting || isMissedOrFailed) {
     return (
       <div className="fixed inset-0 z-[250] bg-zinc-950 flex flex-col items-center justify-between py-24 px-6 text-white safe-top safe-bottom select-none animate-fade-in">
@@ -384,7 +394,7 @@ export function CallScreen({
 
   return (
     <div className="fixed inset-0 z-[250] bg-zinc-950 flex flex-col justify-between text-white safe-top safe-bottom select-none">
-      {/* Dedicated audio element — kept in layout tree with position fixed so mobile WebKit/Blink engines never suspend playback */}
+      {/* Dedicated audio element — kept in layout tree with position fixed so mobile engines never suspend playback */}
       <audio
         ref={remoteAudioRef}
         autoPlay
@@ -410,7 +420,7 @@ export function CallScreen({
           className="absolute top-16 left-1/2 -translate-x-1/2 z-50 bg-amber-500 text-zinc-950 px-4 py-1.5 rounded-full text-xs font-headline font-bold shadow-2xl flex items-center gap-2 hover:bg-amber-400 transition-all active:scale-95"
         >
           <Volume2 className="w-4 h-4" />
-          <span>Tap to enable remote audio</span>
+          <span>Tap to enable audio</span>
         </button>
       )}
 
@@ -575,7 +585,7 @@ export function CallScreen({
       )}
 
       {/* ── CALL CONTROLS BAR ── */}
-      <div className="absolute bottom-6 left-0 right-0 z-10 px-6 flex items-center justify-center gap-4">
+      <div className="absolute bottom-6 left-0 right-0 z-40 px-6 flex items-center justify-center gap-4">
         {/* Toggle Audio (Mute) */}
         <Button
           variant="ghost"
