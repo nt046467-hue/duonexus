@@ -139,43 +139,59 @@ export function CallScreen({
   const isShowingVideo = callType === "video" || !isCamOff || isPartnerShowingVideo;
 
   // ── Helper: Attach Local Stream ─────────────────────────────────────────────
+  // IMPORTANT: Only pass VIDEO tracks to the local <video> preview.
+  // Never put audio tracks in a <video> element — it would loop the mic back to the speaker.
   const attachLocalStream = useCallback((videoEl: HTMLVideoElement | null) => {
     localVideoRef.current = videoEl;
     if (videoEl && localStream && !isCamOff) {
-      if (videoEl.srcObject !== localStream) {
-        videoEl.srcObject = localStream;
-      }
+      // Strip audio so the local mic is NEVER audible on the local device
+      const videoOnlyStream = new MediaStream(localStream.getVideoTracks());
+      videoEl.srcObject = videoOnlyStream;
+      videoEl.muted = true;
+      videoEl.defaultMuted = true;
       videoEl.play().catch(() => {});
+    } else if (videoEl) {
+      videoEl.srcObject = null;
     }
   }, [localStream, isCamOff]);
 
   // ── Helper: Attach Remote Video Stream ──────────────────────────────────────
+  // CRITICAL: Only pass VIDEO tracks here. The full remoteStream contains both
+  // audio+video — assigning it to <video> even with muted=true can still cause
+  // mobile browsers (WebKit/Chrome) to decode and render audio, producing an echo
+  // when the dedicated <audio> element also plays the same audio track.
   const attachRemoteVideo = useCallback((videoEl: HTMLVideoElement | null) => {
     remoteVideoRef.current = videoEl;
     if (videoEl && remoteStream) {
+      const videoOnlyStream = new MediaStream(remoteStream.getVideoTracks());
       videoEl.muted = true;
-      if (videoEl.srcObject !== remoteStream) {
-        videoEl.srcObject = remoteStream;
-      }
+      videoEl.defaultMuted = true;
+      videoEl.srcObject = videoOnlyStream;
       videoEl.play().catch(() => {});
+    } else if (videoEl) {
+      videoEl.srcObject = null;
     }
   }, [remoteStream]);
 
   // ── Helper: Attach Remote Audio Stream ──────────────────────────────────────
+  // Only audio tracks go here — this is the single source of remote audio output.
   const attachRemoteAudio = useCallback((audioEl: HTMLAudioElement | null) => {
     remoteAudioRef.current = audioEl;
     if (audioEl && remoteStream) {
+      // Strictly audio-only so there is zero chance of a second video-element
+      // rendering audio in parallel.
+      const audioOnlyStream = new MediaStream(remoteStream.getAudioTracks());
       audioEl.volume = 1.0;
       audioEl.muted = false;
-      if (audioEl.srcObject !== remoteStream) {
-        audioEl.srcObject = remoteStream;
-      }
+      audioEl.srcObject = audioOnlyStream;
       const p = audioEl.play();
       if (p !== undefined) {
         p.then(() => setAudioAutoplayBlocked(false)).catch(() => {
           setAudioAutoplayBlocked(true);
         });
       }
+    } else if (audioEl) {
+      audioEl.srcObject = null;
     }
   }, [remoteStream]);
 

@@ -62,12 +62,30 @@ const MAX_CALL_AGE_MS = 35_000;
 
 /**
  * Capability-aware audio constraints: standard voice-processing features
- * without restrictive sample rates or channel limits that some hardware rejects.
+ * plus Chromium-specific vendor flags for hardware-level echo cancellation.
+ * Without these, mobile Chrome/WebKit relies on software AEC which is often
+ * insufficient when the speaker and mic are on the same device.
  */
 export const STANDARD_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,
   noiseSuppression: true,
   autoGainControl: true,
+  // Chromium / Chrome for Android vendor constraints
+  // These mirror the flags Chrome uses internally and are safely ignored
+  // by Firefox, WebKit, and any browser that does not recognise them.
+  ...({
+    googEchoCancellation: true,
+    googEchoCancellation2: true,
+    googNoiseSuppression: true,
+    googNoiseSuppression2: true,
+    googAutoGainControl: true,
+    googAutoGainControl2: true,
+    googHighpassFilter: true,
+    googTypingNoiseDetection: true,
+    // W3C draft — suppresses audio sent to the local speaker from
+    // leaking back into the captured mic stream (draft, Chrome 114+)
+    suppressLocalAudioPlayback: false,
+  } as any),
 };
 
 // ─── Sender Parameter Helpers ──────────────────────────────────────────────────
