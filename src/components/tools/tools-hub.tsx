@@ -41,7 +41,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { MobileSheet } from "@/components/ui/mobile-sheet";
-import { SparklesSvg } from "@/components/ui/sparkles-svg";
 import { toast } from "@/hooks/use-toast";
 
 interface ToolsHubProps {
@@ -491,7 +490,7 @@ export function ToolsHub({
             <div>
               <h3 className="font-bold text-sm text-foreground flex items-center gap-2">
                 Send a Gentle Nudge
-                <SparklesSvg className="w-4 h-4 text-pink-500" />
+                <Heart className="w-4 h-4 text-pink-500 fill-pink-500/20" />
               </h3>
               <p className="text-xs text-muted-foreground mt-0.5">
                 Lights up {partnerName}'s screen with hearts!
@@ -984,13 +983,25 @@ export function ToolsHub({
         }
       >
         <div className="flex items-center justify-center py-2">
-          <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 text-emerald-500 flex items-center justify-center">
-            <Unlock className="w-7 h-7 animate-bounce" />
+          {viewingCapsule && differenceInCalendarDays(parseISO(viewingCapsule.unlockDate), new Date()) <= 0 ? (
+            <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 text-emerald-500 flex items-center justify-center">
+              <Unlock className="w-7 h-7 animate-bounce" />
+            </div>
+          ) : (
+            <div className="w-14 h-14 rounded-2xl bg-pink-500/15 text-pink-500 flex items-center justify-center">
+              <Lock className="w-7 h-7" />
+            </div>
+          )}
+        </div>
+        {viewingCapsule && differenceInCalendarDays(parseISO(viewingCapsule.unlockDate), new Date()) <= 0 ? (
+          <div className="p-5 rounded-2xl bg-muted/40 border border-border/80 text-foreground font-serif leading-relaxed text-sm whitespace-pre-wrap italic">
+            "{viewingCapsule?.message}"
           </div>
-        </div>
-        <div className="p-5 rounded-2xl bg-muted/40 border border-border/80 text-foreground font-serif leading-relaxed text-sm whitespace-pre-wrap italic">
-          "{viewingCapsule?.message}"
-        </div>
+        ) : (
+          <div className="p-5 rounded-2xl bg-pink-500/10 border border-pink-500/30 text-pink-500 font-sans text-center text-sm font-semibold">
+            🔒 This time capsule is sealed with love until {viewingCapsule?.unlockDate}.
+          </div>
+        )}
       </MobileSheet>
     </div>
   );

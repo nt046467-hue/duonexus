@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useFirestore } from "@/firebase";
+import { useFirestore, useAuth } from "@/firebase";
 import {
   collection,
   doc,
@@ -29,28 +29,56 @@ export type CallType = "audio" | "video";
 
 /**
  * Authoritative single call state machine.
- * Only valid transitions are allowed — terminal states are irreversible.
+ * States:
+ * idle -> outgoing -> ringing -> connecting -> active -> reconnecting -> active/failed
+ * ringing -> declined / cancelled / missed
+ * active -> ended
  */
 export type CallState =
   | "idle"
-  | "ringing"      // caller: outgoing, callee: incoming (ringing)
-  | "connecting"   // callee accepted, establishing WebRTC
-  | "active"       // WebRTC media connected
-  | "ended"        // call completed normally
-  | "declined"     // callee explicitly declined
-  | "missed"       // nobody answered within timeout
-  | "failed";      // ICE/media error
+  | "outgoing"
+  | "ringing"
+  | "connecting"
+  | "active"
+  | "reconnecting"
+  | "declined"
+  | "cancelled"
+  | "missed"
+  | "failed"
+  | "ended";
 
 export type ConnectionQuality = "excellent" | "good" | "fair" | "poor";
 
-/** Terminal states — once here, no event can reactivate the call */
-const TERMINAL_STATES: ReadonlySet<CallState> = new Set([
+/** Terminal states — once reached, the call lifecycle cannot be reactivated */
+export const TERMINAL_CALL_STATES: ReadonlySet<CallState> = new Set([
   "ended",
   "declined",
+  "cancelled",
   "missed",
   "failed",
   "idle",
 ]);
+
+/** Valid transition map */
+const VALID_TRANSITIONS: Record<CallState, CallState[]> = {
+  idle: ["outgoing", "ringing"],
+  outgoing: ["ringing", "cancelled", "failed", "ended"],
+  ringing: ["connecting", "declined", "cancelled", "missed", "failed", "ended"],
+  connecting: ["active", "failed", "ended", "cancelled"],
+  active: ["reconnecting", "ended", "failed"],
+  reconnecting: ["active", "failed", "ended"],
+  declined: ["idle"],
+  cancelled: ["idle"],
+  missed: ["idle"],
+  failed: ["idle"],
+  ended: ["idle"],
+};
+
+export function canTransition(from: CallState, to: CallState): boolean {
+  if (from === to) return true;
+  if (to === "ended" || to === "idle") return true;
+  return VALID_TRANSITIONS[from]?.includes(to) ?? false;
+}
 
 /** 30-second ring timeout matching production calling apps */
 export const CALL_RING_TIMEOUT_MS = 30_000;
@@ -58,21 +86,12 @@ export const CALL_RING_TIMEOUT_MS = 30_000;
 /** Stale call protection: ignore calls older than this */
 const MAX_CALL_AGE_MS = 35_000;
 
-// ─── WebRTC Audio Constraints ─────────────────────────────────────────────────
+// ─── Audio Constraints ────────────────────────────────────────────────────────
 
-/**
- * Capability-aware audio constraints: standard voice-processing features
- * plus Chromium-specific vendor flags for hardware-level echo cancellation.
- * Without these, mobile Chrome/WebKit relies on software AEC which is often
- * insufficient when the speaker and mic are on the same device.
- */
 export const STANDARD_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,
   noiseSuppression: true,
   autoGainControl: true,
-  // Chromium / Chrome for Android vendor constraints
-  // These mirror the flags Chrome uses internally and are safely ignored
-  // by Firefox, WebKit, and any browser that does not recognise them.
   ...({
     googEchoCancellation: true,
     googEchoCancellation2: true,
@@ -82,17 +101,12 @@ export const STANDARD_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
     googAutoGainControl2: true,
     googHighpassFilter: true,
     googTypingNoiseDetection: true,
-    // W3C draft — suppresses audio sent to the local speaker from
-    // leaking back into the captured mic stream (draft, Chrome 114+)
     suppressLocalAudioPlayback: false,
   } as any),
 };
 
 // ─── Sender Parameter Helpers ──────────────────────────────────────────────────
 
-/**
- * Prioritize audio RTCRtpSender for clear voice channel.
- */
 export function applyAudioSenderParameters(sender: RTCRtpSender): Promise<void> {
   try {
     const params = sender.getParameters();
@@ -105,22 +119,12 @@ export function applyAudioSenderParameters(sender: RTCRtpSender): Promise<void> 
         (enc as any).networkPriority = "high";
       });
     }
-    return sender.setParameters(params).catch((err) => {
-      if (process.env.NODE_ENV === "development") {
-        console.warn("[WebRTC] Audio sender parameter notice:", err);
-      }
-    });
-  } catch (err) {
-    if (process.env.NODE_ENV === "development") {
-      console.warn("[WebRTC] Audio sender parameter error:", err);
-    }
+    return sender.setParameters(params).catch(() => {});
+  } catch {
     return Promise.resolve();
   }
 }
 
-/**
- * Apply adaptive parameters to video RTCRtpSender.
- */
 export function applyVideoSenderParameters(
   sender: RTCRtpSender,
   targetBitrate: number = 2_000_000,
@@ -136,15 +140,8 @@ export function applyVideoSenderParameters(
       (params.encodings[0] as any).networkPriority = "medium";
     }
     params.degradationPreference = degradation;
-    return sender.setParameters(params).catch((err) => {
-      if (process.env.NODE_ENV === "development") {
-        console.warn("[WebRTC] Video sender parameter notice:", err);
-      }
-    });
-  } catch (err) {
-    if (process.env.NODE_ENV === "development") {
-      console.warn("[WebRTC] Video sender parameter error:", err);
-    }
+    return sender.setParameters(params).catch(() => {});
+  } catch {
     return Promise.resolve();
   }
 }
@@ -158,7 +155,12 @@ interface UseWebRTCOptions {
   onCallEnded?: () => void;
   onCameraError?: (errorName: string) => void;
   /** Called once per call with outcome for chat persistence */
-  onCallMessage?: (callType: CallType, callStatus: "completed" | "declined" | "missed", duration?: number, callId?: string) => void;
+  onCallMessage?: (
+    callType: CallType,
+    callStatus: "completed" | "declined" | "cancelled" | "missed" | "failed",
+    duration?: number,
+    callId?: string
+  ) => void;
 }
 
 // ─── useWebRTC Hook ────────────────────────────────────────────────────────────
@@ -172,6 +174,7 @@ export function useWebRTC({
   onCallMessage,
 }: UseWebRTCOptions) {
   const db = useFirestore();
+  const auth = useAuth();
 
   // ── Reactive State ─────────────────────────────────────────────────────────
   const [callId, setCallId] = useState<string | null>(null);
@@ -184,7 +187,7 @@ export function useWebRTC({
   const [connectionQuality, setConnectionQuality] = useState<ConnectionQuality>("excellent");
   const [isCaller, setIsCaller] = useState(false);
 
-  // ── Refs (preserve state across async events) ──────────────────────────────
+  // ── Refs ───────────────────────────────────────────────────────────────────
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
@@ -198,7 +201,7 @@ export function useWebRTC({
   const lastRenegotiationAtRef = useRef<number>(0);
   const loggedCallIdsRef = useRef<Set<string>>(new Set());
 
-  // Finalization guard — prevents duplicate terminal transitions
+  // Finalization guard
   const finalizingRef = useRef<boolean>(false);
 
   // ICE candidate tracking & deduplication
@@ -207,6 +210,7 @@ export function useWebRTC({
 
   // Recovery & Stats timers
   const iceRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const iceRestartAttemptsRef = useRef<number>(0);
   const ringTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const statsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastQualityAdjustmentRef = useRef<number>(0);
@@ -217,7 +221,7 @@ export function useWebRTC({
   const unsubCandidatesCalleeRef = useRef<(() => void) | null>(null);
   const unsubIncomingCallDocRef = useRef<(() => void) | null>(null);
 
-  // Synchronize dynamic refs immediately
+  // Sync refs
   useEffect(() => { callStateRef.current = callState; }, [callState]);
   useEffect(() => { callIdRef.current = callId; }, [callId]);
   useEffect(() => { callTypeRef.current = callType; }, [callType]);
@@ -235,12 +239,31 @@ export function useWebRTC({
   const onCallMessageRef = useRef(onCallMessage);
   useEffect(() => { onCallMessageRef.current = onCallMessage; }, [onCallMessage]);
 
-  // ── Utility: Is state terminal ─────────────────────────────────────────────
   const isTerminal = useCallback((state: CallState): boolean => {
-    return TERMINAL_STATES.has(state);
+    return TERMINAL_CALL_STATES.has(state);
   }, []);
 
-  // ── Tab unload: mark call ended in Firestore ───────────────────────────────
+  // Safe state transition helper
+  const transitionTo = useCallback((nextState: CallState): boolean => {
+    const current = callStateRef.current;
+    if (current === nextState) return true;
+
+    if (isTerminal(current) && nextState !== "idle") {
+      console.warn(`[WebRTC] Rejected transition: already in terminal state "${current}" (cannot move to "${nextState}")`);
+      return false;
+    }
+
+    if (!canTransition(current, nextState)) {
+      console.warn(`[WebRTC] Invalid call state transition: "${current}" -> "${nextState}"`);
+      return false;
+    }
+
+    callStateRef.current = nextState;
+    setCallState(nextState);
+    return true;
+  }, [isTerminal]);
+
+  // ── Tab unload cleanup ─────────────────────────────────────────────────────
   useEffect(() => {
     const handleUnload = () => {
       const cid = callIdRef.current;
@@ -249,7 +272,7 @@ export function useWebRTC({
         updateDoc(doc(db, "calls", cid), {
           status: "ended",
           endedAt: serverTimestamp(),
-        }).catch(() => { });
+        }).catch(() => {});
       }
     };
     window.addEventListener("beforeunload", handleUnload);
@@ -316,13 +339,10 @@ export function useWebRTC({
             lastQualityAdjustmentRef.current = now;
           }
         }
-      } catch {
-        // Stats error during teardown
-      }
+      } catch {}
     }, 3000);
   }, [stopStatsMonitoring]);
 
-  // ── Ring Timeout Management ────────────────────────────────────────────────
   const clearRingTimeout = useCallback(() => {
     if (ringTimeoutRef.current) {
       clearTimeout(ringTimeoutRef.current);
@@ -330,24 +350,19 @@ export function useWebRTC({
     }
   }, []);
 
-  // ── Clean up browser notifications tied to a callId ───────────────────────
   const dismissCallNotification = useCallback((targetCallId: string) => {
     if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
     navigator.serviceWorker.ready.then((reg) => {
       reg.getNotifications({ tag: `call-${targetCallId}` }).then((notifications) => {
         notifications.forEach((n) => n.close());
-      }).catch(() => { });
-    }).catch(() => { });
+      }).catch(() => {});
+    }).catch(() => {});
   }, []);
 
   // ── Idempotent Cleanup ─────────────────────────────────────────────────────
   const cleanUp = useCallback((finalState: CallState = "idle") => {
     if (finalizingRef.current) return;
     finalizingRef.current = true;
-
-    if (process.env.NODE_ENV === "development") {
-      console.log(`[WebRTC] Cleanup triggered → final state: ${finalState}`);
-    }
 
     stopAllCallSounds();
     clearRingTimeout();
@@ -357,6 +372,7 @@ export function useWebRTC({
       clearTimeout(iceRecoveryTimerRef.current);
       iceRecoveryTimerRef.current = null;
     }
+    iceRestartAttemptsRef.current = 0;
 
     if (unsubCallRef.current) { unsubCallRef.current(); unsubCallRef.current = null; }
     if (unsubCandidatesCallerRef.current) { unsubCandidatesCallerRef.current(); unsubCandidatesCallerRef.current = null; }
@@ -368,13 +384,13 @@ export function useWebRTC({
       pcRef.current.onicecandidate = null;
       pcRef.current.oniceconnectionstatechange = null;
       pcRef.current.onconnectionstatechange = null;
-      try { pcRef.current.close(); } catch { }
+      try { pcRef.current.close(); } catch {}
       pcRef.current = null;
     }
 
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((t) => {
-        try { t.stop(); } catch { }
+        try { t.stop(); } catch {}
       });
       localStreamRef.current = null;
       setLocalStream(null);
@@ -382,7 +398,7 @@ export function useWebRTC({
 
     if (remoteStreamRef.current) {
       remoteStreamRef.current.getTracks().forEach((t) => {
-        try { t.stop(); } catch { }
+        try { t.stop(); } catch {}
       });
       remoteStreamRef.current = null;
       setRemoteStream(null);
@@ -410,11 +426,10 @@ export function useWebRTC({
     setConnectionQuality("excellent");
 
     setTimeout(() => { finalizingRef.current = false; }, 200);
-
     onCallEndedRef.current?.();
   }, [stopStatsMonitoring, clearRingTimeout, dismissCallNotification]);
 
-  // ── ICE Servers Configuration ──────────────────────────────────────────────
+  // ── ICE Servers Configuration (STUN + Multiple TURN UDP/TCP/TLS Fallbacks) ──
   const getIceConfiguration = useCallback((): RTCConfiguration => {
     const iceServers: RTCIceServer[] = [
       { urls: "stun:stun.l.google.com:19302" },
@@ -438,7 +453,6 @@ export function useWebRTC({
     return { iceServers, iceCandidatePoolSize: 10 };
   }, []);
 
-  // ── ICE Candidate Helpers ─────────────────────────────────────────────────
   const sanitizeCandidate = (candidate: RTCIceCandidate): Record<string, any> => {
     const json = candidate.toJSON();
     const res: Record<string, any> = {};
@@ -449,59 +463,50 @@ export function useWebRTC({
     return res;
   };
 
-  const addCandidateSafe = useCallback(async (pc: RTCPeerConnection, data: RTCIceCandidateInit) => {
-    if (!data || !data.candidate) return;
-    if (!pc || pc.signalingState === "closed") return;
-    const candKey = `${data.candidate}_${data.sdpMid}_${data.sdpMLineIndex}`;
+  const addCandidateSafe = useCallback(async (pc: RTCPeerConnection, candData: RTCIceCandidateInit) => {
+    if (!candData?.candidate) return;
+    const candKey = `${candData.candidate}_${candData.sdpMid ?? ""}_${candData.sdpMLineIndex ?? ""}`;
     if (seenCandidateIdsRef.current.has(candKey)) return;
     seenCandidateIdsRef.current.add(candKey);
 
-    if (!pc.remoteDescription) {
-      pendingCandidatesRef.current.push(data);
+    if (!pc.remoteDescription || !pc.remoteDescription.type) {
+      pendingCandidatesRef.current.push(candData);
       return;
     }
+
     try {
-      if ((pc.signalingState as string) === "closed") return;
-      await pc.addIceCandidate(new RTCIceCandidate(data));
-    } catch (err) {
-      if (process.env.NODE_ENV === "development") {
-        console.warn("[WebRTC] addIceCandidate notice:", err);
-      }
-    }
+      await pc.addIceCandidate(new RTCIceCandidate(candData));
+    } catch {}
   }, []);
 
   const flushPendingCandidates = useCallback(async (pc: RTCPeerConnection) => {
-    if (!pc || (pc.signalingState as string) === "closed") return;
+    if (!pc.remoteDescription || !pc.remoteDescription.type) return;
     const pending = [...pendingCandidatesRef.current];
     pendingCandidatesRef.current = [];
-    for (const data of pending) {
+    for (const c of pending) {
       try {
-        if ((pc.signalingState as string) === "closed") return;
-        await pc.addIceCandidate(new RTCIceCandidate(data));
-      } catch (err) {
-        if (process.env.NODE_ENV === "development") {
-          console.warn("[WebRTC] flush candidate notice:", err);
-        }
-      }
+        await pc.addIceCandidate(new RTCIceCandidate(c));
+      } catch {}
     }
   }, []);
 
-  // ── PeerConnection Setup ───────────────────────────────────────────────────
+  // ── Setup PeerConnection with Bounded ICE Recovery ─────────────────────────
   const setupPeerConnection = useCallback(() => {
-    const pc = new RTCPeerConnection(getIceConfiguration());
+    if (pcRef.current) {
+      try { pcRef.current.close(); } catch {}
+      pcRef.current = null;
+    }
+
+    const config = getIceConfiguration();
+    const pc = new RTCPeerConnection(config);
     pcRef.current = pc;
 
-    // Maintain a stable MediaStream instance for remote media
     const rStream = new MediaStream();
     remoteStreamRef.current = rStream;
     setRemoteStream(rStream);
 
     pc.ontrack = (event) => {
       const track = event.track;
-      if (process.env.NODE_ENV === "development") {
-        console.log(`[WebRTC] Remote track received: ${track.kind} (id: ${track.id}, readyState: ${track.readyState})`);
-      }
-
       if (event.streams && event.streams[0]) {
         event.streams[0].getTracks().forEach((t) => {
           if (!rStream.getTrackById(t.id)) {
@@ -514,23 +519,16 @@ export function useWebRTC({
         }
       }
 
-      // Track listeners for real-time video availability
       if (track.kind === "video") {
         setIsPartnerVideoEnabled(track.enabled && track.readyState === "live");
         track.onunmute = () => {
-          if (process.env.NODE_ENV === "development") console.log("[WebRTC] Remote video unmuted");
           setIsPartnerVideoEnabled(track.enabled && track.readyState === "live");
         };
-        track.onmute = () => {
-          if (process.env.NODE_ENV === "development") console.log("[WebRTC] Remote video muted");
-        };
         track.onended = () => {
-          if (process.env.NODE_ENV === "development") console.log("[WebRTC] Remote video ended");
           setIsPartnerVideoEnabled(false);
         };
       }
 
-      // Re-trigger state with current tracks
       setRemoteStream(new MediaStream(rStream.getTracks()));
     };
 
@@ -544,39 +542,44 @@ export function useWebRTC({
 
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState;
-      if (process.env.NODE_ENV === "development") {
-        console.log("[WebRTC] ICE Connection State:", state);
-      }
 
       if (state === "connected" || state === "completed") {
         if (iceRecoveryTimerRef.current) {
           clearTimeout(iceRecoveryTimerRef.current);
           iceRecoveryTimerRef.current = null;
         }
+        iceRestartAttemptsRef.current = 0;
         if (!callStartedAtRef.current) callStartedAtRef.current = Date.now();
-        setCallState("active");
-        callStateRef.current = "active";
+        transitionTo("active");
         stopAllCallSounds();
         startStatsMonitoring(pc);
       } else if (state === "disconnected") {
-        if (process.env.NODE_ENV === "development") {
-          console.warn("[WebRTC] ICE disconnected — waiting recovery window");
+        if (callStateRef.current === "active") {
+          transitionTo("reconnecting");
         }
         if (!iceRecoveryTimerRef.current) {
           iceRecoveryTimerRef.current = setTimeout(() => {
+            iceRecoveryTimerRef.current = null;
             if (pc.iceConnectionState === "disconnected") {
-              if (process.env.NODE_ENV === "development") {
-                console.warn("[WebRTC] Restarting ICE after disconnection timeout");
+              if (iceRestartAttemptsRef.current < 3) {
+                iceRestartAttemptsRef.current++;
+                try { pc.restartIce(); } catch {}
+              } else {
+                transitionTo("failed");
+                cleanUp("failed");
               }
-              try { pc.restartIce(); } catch { }
             }
-          }, 6000);
+          }, 4000);
         }
       } else if (state === "failed") {
-        if (process.env.NODE_ENV === "development") {
-          console.warn("[WebRTC] ICE failed — attempting restartIce()");
+        if (iceRestartAttemptsRef.current < 3) {
+          transitionTo("reconnecting");
+          iceRestartAttemptsRef.current++;
+          try { pc.restartIce(); } catch {}
+        } else {
+          transitionTo("failed");
+          cleanUp("failed");
         }
-        try { pc.restartIce(); } catch { }
       } else if (state === "closed") {
         if (!isTerminal(callStateRef.current)) cleanUp("ended");
       }
@@ -584,30 +587,26 @@ export function useWebRTC({
 
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
-      if (process.env.NODE_ENV === "development") {
-        console.log("[WebRTC] Peer Connection State:", state);
-      }
       if (state === "connected") {
         if (!callStartedAtRef.current) callStartedAtRef.current = Date.now();
-        setCallState("active");
-        callStateRef.current = "active";
+        transitionTo("active");
         stopAllCallSounds();
       } else if (state === "failed") {
-        if (process.env.NODE_ENV === "development") {
-          console.warn("[WebRTC] Peer connection failed");
+        if (iceRestartAttemptsRef.current >= 3) {
+          transitionTo("failed");
+          cleanUp("failed");
         }
       }
     };
 
     return pc;
-  }, [getIceConfiguration, cleanUp, startStatsMonitoring, isTerminal]);
+  }, [getIceConfiguration, cleanUp, startStatsMonitoring, isTerminal, transitionTo]);
 
-  // ── Capability-Aware Local Stream Acquisition ─────────────────────────────
+  // ── Local Stream Acquisition ───────────────────────────────────────────────
   const getLocalStream = useCallback(async (type: CallType): Promise<MediaStream> => {
     const isMobile = typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     const currentFacing = facingModeRef.current;
 
-    // Adaptive constraints without rigid min values that cause device rejections
     const videoConstraints: MediaTrackConstraints = {
       facingMode: { ideal: currentFacing },
       width: { ideal: isMobile ? 720 : 1280 },
@@ -616,7 +615,6 @@ export function useWebRTC({
     };
 
     if (type === "video") {
-      // 1. Try ideal video resolution + standard voice audio
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: STANDARD_AUDIO_CONSTRAINTS,
@@ -624,52 +622,32 @@ export function useWebRTC({
         });
         stream.getAudioTracks().forEach((t) => (t.enabled = true));
         stream.getVideoTracks().forEach((t) => (t.enabled = true));
-        if (process.env.NODE_ENV === "development") {
-          const vt = stream.getVideoTracks()[0];
-          console.log("[WebRTC] Ideal camera acquired:", vt?.getSettings());
-        }
         return stream;
-      } catch (idealErr) {
-        if (process.env.NODE_ENV === "development") {
-          console.warn("[WebRTC] Ideal camera acquisition failed, trying basic facingMode:", idealErr);
-        }
-      }
-
-      // 2. Progressive fallback: basic facingMode + standard audio
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: STANDARD_AUDIO_CONSTRAINTS,
-          video: { facingMode: currentFacing },
-        });
-        stream.getAudioTracks().forEach((t) => (t.enabled = true));
-        stream.getVideoTracks().forEach((t) => (t.enabled = true));
-        return stream;
-      } catch (facingErr) {
-        if (process.env.NODE_ENV === "development") {
-          console.warn("[WebRTC] FacingMode camera acquisition failed, trying basic video:", facingErr);
-        }
-      }
-
-      // 3. Progressive fallback: basic video: true + audio: true
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: true,
-        });
-        stream.getAudioTracks().forEach((t) => (t.enabled = true));
-        stream.getVideoTracks().forEach((t) => (t.enabled = true));
-        return stream;
-      } catch (basicVideoErr: any) {
-        if (process.env.NODE_ENV === "development") {
-          console.warn("[WebRTC] Video hardware acquisition failed, falling back to voice channel:", basicVideoErr);
-        }
-        if (onCameraErrorRef.current) {
-          onCameraErrorRef.current(basicVideoErr?.name || "CameraError");
+      } catch {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: STANDARD_AUDIO_CONSTRAINTS,
+            video: { facingMode: currentFacing },
+          });
+          stream.getAudioTracks().forEach((t) => (t.enabled = true));
+          stream.getVideoTracks().forEach((t) => (t.enabled = true));
+          return stream;
+        } catch {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+              audio: true,
+              video: true,
+            });
+            stream.getAudioTracks().forEach((t) => (t.enabled = true));
+            stream.getVideoTracks().forEach((t) => (t.enabled = true));
+            return stream;
+          } catch (basicVideoErr: any) {
+            onCameraErrorRef.current?.(basicVideoErr?.name || "CameraError");
+          }
         }
       }
     }
 
-    // Audio-only stream acquisition (voice call, or fallback when camera is unavailable)
     try {
       const audioStream = await navigator.mediaDevices.getUserMedia({
         audio: STANDARD_AUDIO_CONSTRAINTS,
@@ -686,7 +664,12 @@ export function useWebRTC({
 
   // ── Atomic Call Outcome Logger ─────────────────────────────────────────────
   const logCallOutcome = useCallback(
-    async (targetCallId: string | null, type: CallType, status: "completed" | "declined" | "missed", duration?: number) => {
+    async (
+      targetCallId: string | null,
+      type: CallType,
+      status: "completed" | "declined" | "cancelled" | "missed" | "failed",
+      duration?: number
+    ) => {
       if (!targetCallId || !db) {
         onCallMessageRef.current?.(type, status, duration, targetCallId || undefined);
         return;
@@ -711,17 +694,29 @@ export function useWebRTC({
         if (wonRace) {
           onCallMessageRef.current?.(type, status, duration, targetCallId);
         }
-      } catch (err) {
-        if (process.env.NODE_ENV === "development") {
-          console.error("[WebRTC] Call-log transaction notice:", err);
-        }
+      } catch {
         onCallMessageRef.current?.(type, status, duration, targetCallId);
       }
     },
     [db]
   );
 
-  // ── Renegotiation Handler ─────────────────────────────────────────────────
+  // ── Authenticated Push Trigger ─────────────────────────────────────────────
+  const sendPush = useCallback(async (payload: Record<string, string>) => {
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      fetch("/api/trigger-push", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      }).catch(() => {});
+    } catch {}
+  }, [auth]);
+
+  // ── Renegotiation Handler ──────────────────────────────────────────────────
   const handleRenegotiationSnapshot = useCallback(
     async (pc: RTCPeerConnection, cid: string, data: any) => {
       if (!data?.renegotiation || !db) return;
@@ -748,6 +743,7 @@ export function useWebRTC({
           await pc.setRemoteDescription(new RTCSessionDescription(data.renegotiation.offer));
           if (!pc || (pc.signalingState as string) === "closed") return;
           await flushPendingCandidates(pc);
+
           const answer = await pc.createAnswer();
           if (!pc || (pc.signalingState as string) === "closed") return;
           await pc.setLocalDescription(answer);
@@ -755,17 +751,9 @@ export function useWebRTC({
             await updateDoc(doc(db, "calls", cid), {
               "renegotiation.answer": { sdp: answer.sdp, type: answer.type || "answer" },
               "renegotiation.answeredBy": myId,
-            }).catch(() => { });
+            }).catch(() => {});
           }
-          const vSender = pc.getSenders().find((s) => s.track?.kind === "video");
-          if (vSender) applyVideoSenderParameters(vSender);
-          const aSender = pc.getSenders().find((s) => s.track?.kind === "audio");
-          if (aSender) applyAudioSenderParameters(aSender);
-        } catch (err) {
-          if (process.env.NODE_ENV === "development") {
-            console.warn("[WebRTC] Renegotiation offer notice:", err);
-          }
-        }
+        } catch {}
       }
 
       if (
@@ -778,41 +766,20 @@ export function useWebRTC({
           await pc.setRemoteDescription(new RTCSessionDescription(data.renegotiation.answer));
           if (!pc || (pc.signalingState as string) === "closed") return;
           await flushPendingCandidates(pc);
-          const vSender = pc.getSenders().find((s) => s.track?.kind === "video");
-          if (vSender) applyVideoSenderParameters(vSender);
-          const aSender = pc.getSenders().find((s) => s.track?.kind === "audio");
-          if (aSender) applyAudioSenderParameters(aSender);
-        } catch (err) {
-          if (process.env.NODE_ENV === "development") {
-            console.warn("[WebRTC] Renegotiation answer notice:", err);
-          }
-        }
+        } catch {}
       }
     },
     [db, myId, flushPendingCandidates, isTerminal]
   );
 
-  // ── Push Notification Trigger ─────────────────────────────────────────────
-  const sendPush = useCallback((payload: Record<string, string>) => {
-    fetch("/api/trigger-push", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }).catch(() => { });
-  }, []);
-
   // ── Start Outgoing Call ────────────────────────────────────────────────────
   const startCall = useCallback(async (type: CallType) => {
     if (!db || !myId || !partnerId) return;
     if (!isTerminal(callStateRef.current) && callStateRef.current !== "idle") {
-      if (process.env.NODE_ENV === "development") {
-        console.warn("[WebRTC] Cannot start call — current state:", callStateRef.current);
-      }
       return;
     }
 
-    setCallState("ringing");
-    callStateRef.current = "ringing";
+    transitionTo("outgoing");
     setCallType(type);
     setIsVideoEnabled(type === "video");
     isCallerRef.current = true;
@@ -831,7 +798,6 @@ export function useWebRTC({
       setCallId(newCallId);
       callIdRef.current = newCallId;
 
-      // Start outgoing ringback tone for caller
       startOutgoingTone(newCallId);
 
       const pc = setupPeerConnection();
@@ -839,7 +805,7 @@ export function useWebRTC({
       pc.onicecandidate = (event) => {
         if (event.candidate && event.candidate.candidate) {
           const cleanCand = sanitizeCandidate(event.candidate);
-          addDoc(collection(db, "calls", newCallId, "callerCandidates"), cleanCand).catch(() => { });
+          addDoc(collection(db, "calls", newCallId, "callerCandidates"), cleanCand).catch(() => {});
         }
       };
 
@@ -857,7 +823,9 @@ export function useWebRTC({
         updatedAt: serverTimestamp(),
       });
 
-      // FCM push notification to wake up recipient
+      transitionTo("ringing");
+
+      // Dispatch push notification
       sendPush({
         type: "incoming_call",
         recipientId: partnerId,
@@ -866,19 +834,25 @@ export function useWebRTC({
         callType: type,
       });
 
-      // 30-second ring timeout (caller side)
+      // 30-second ring timeout
       clearRingTimeout();
-      ringTimeoutRef.current = setTimeout(() => {
+      ringTimeoutRef.current = setTimeout(async () => {
         if (callStateRef.current === "ringing" && callIdRef.current === newCallId) {
-          if (process.env.NODE_ENV === "development") {
-            console.log("[WebRTC] Call timed out — marking missed");
-          }
           stopOutgoingTone(newCallId);
           logCallOutcome(newCallId, type, "missed");
-          updateDoc(doc(db, "calls", newCallId), {
-            status: "missed",
-            endedAt: serverTimestamp(),
-          }).catch(() => { });
+
+          try {
+            await runTransaction(db, async (tx) => {
+              const snap = await tx.get(doc(db, "calls", newCallId));
+              if (snap.exists() && snap.data().status === "ringing") {
+                tx.update(doc(db, "calls", newCallId), {
+                  status: "missed",
+                  endedAt: serverTimestamp(),
+                });
+              }
+            });
+          } catch {}
+
           sendPush({
             type: "missed_call",
             recipientId: partnerId,
@@ -886,11 +860,12 @@ export function useWebRTC({
             callId: newCallId,
             callType: type,
           });
+
           cleanUp("missed");
         }
       }, CALL_RING_TIMEOUT_MS);
 
-      // Listen for answer + partner updates
+      // Listen for callee response
       unsubCallRef.current = onSnapshot(callDocRef, async (snapshot) => {
         const data = snapshot.data();
         if (!data) return;
@@ -919,19 +894,14 @@ export function useWebRTC({
             cleanUp("missed");
           }
           return;
-        } else if (data.answer && pc.signalingState === "have-local-offer" && callStateRef.current === "ringing") {
+        } else if (data.answer && pc.signalingState === "have-local-offer" && (callStateRef.current === "ringing" || callStateRef.current === "outgoing")) {
           clearRingTimeout();
           stopOutgoingTone(newCallId);
-          setCallState("connecting");
-          callStateRef.current = "connecting";
+          transitionTo("connecting");
           try {
             await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
             await flushPendingCandidates(pc);
-          } catch (e) {
-            if (process.env.NODE_ENV === "development") {
-              console.warn("[WebRTC] setRemoteDescription notice:", e);
-            }
-          }
+          } catch {}
         }
 
         if (pc && pc.signalingState !== "closed" && !isTerminal(callStateRef.current)) {
@@ -939,7 +909,7 @@ export function useWebRTC({
         }
       });
 
-      // Inbound Callee ICE candidates
+      // Callee ICE candidates
       unsubCandidatesCalleeRef.current = onSnapshot(
         collection(db, "calls", newCallId, "calleeCandidates"),
         (snapshot) => {
@@ -951,85 +921,71 @@ export function useWebRTC({
         }
       );
     } catch (err) {
-      if (process.env.NODE_ENV === "development") {
-        console.error("[WebRTC] Failed to start call:", err);
-      }
+      console.error("[WebRTC] Failed to start call:", err);
       stopOutgoingTone();
-      cleanUp();
+      cleanUp("failed");
     }
-  }, [db, myId, partnerId, getLocalStream, setupPeerConnection, logCallOutcome, cleanUp, clearRingTimeout, addCandidateSafe, flushPendingCandidates, handleRenegotiationSnapshot, sendPush, isTerminal]);
+  }, [db, myId, partnerId, getLocalStream, setupPeerConnection, logCallOutcome, cleanUp, clearRingTimeout, addCandidateSafe, flushPendingCandidates, handleRenegotiationSnapshot, sendPush, isTerminal, transitionTo]);
 
-  // ── Answer Incoming Call ───────────────────────────────────────────────────
+  // ── Answer Incoming Call (with Atomic Transaction) ─────────────────────────
   const answerCall = useCallback(async (incomingCallId: string) => {
     if (!db) return;
 
     if (!isTerminal(callStateRef.current) && callStateRef.current !== "idle") {
-      if (process.env.NODE_ENV === "development") {
-        console.warn("[WebRTC] Cannot answer — already in state:", callStateRef.current);
-      }
       return;
     }
 
-    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-      await new Promise<void>((resolve) => {
-        const onVisible = () => {
-          if (document.visibilityState === "visible") {
-            document.removeEventListener("visibilitychange", onVisible);
-            resolve();
-          }
-        };
-        document.addEventListener("visibilitychange", onVisible);
-        setTimeout(() => {
-          document.removeEventListener("visibilitychange", onVisible);
-          resolve();
-        }, 800);
-      });
-    }
+    // Stop ringtone immediately
+    stopRingtone(incomingCallId);
+    dismissCallNotification(incomingCallId);
+    clearRingTimeout();
 
     try {
       const callDocRef = doc(db, "calls", incomingCallId);
-      const callSnap = await getDoc(callDocRef);
-      if (!callSnap.exists()) {
-        stopRingtone(incomingCallId);
-        dismissCallNotification(incomingCallId);
-        onCallEndedRef.current?.();
-        return;
-      }
-      const callData = callSnap.data();
-      if (callData.status !== "ringing" && callData.status !== "active") {
-        stopRingtone(incomingCallId);
-        dismissCallNotification(incomingCallId);
-        onCallEndedRef.current?.();
-        return;
-      }
 
-      // Stop incoming ringtone immediately on accept
-      stopRingtone(incomingCallId);
-      dismissCallNotification(incomingCallId);
-      clearRingTimeout();
+      // Atomic Transaction: ensure call is still ringing (prevents answering cancelled calls)
+      let initialCallData: any = null;
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(callDocRef);
+        if (!snap.exists()) {
+          throw new Error("Call no longer exists");
+        }
+        const data = snap.data();
+        if (data.status !== "ringing") {
+          throw new Error(`Call is in terminal state: ${data.status}`);
+        }
+
+        // Check server-authoritative age
+        const createdAt = data.createdAt?.toMillis?.() || 0;
+        if (createdAt > 0 && Date.now() - createdAt > MAX_CALL_AGE_MS) {
+          tx.update(callDocRef, { status: "missed", endedAt: serverTimestamp() });
+          throw new Error("Call timed out");
+        }
+
+        initialCallData = data;
+        tx.update(callDocRef, {
+          status: "connecting",
+          answeredAt: serverTimestamp(),
+        });
+      });
 
       setCallId(incomingCallId);
       callIdRef.current = incomingCallId;
-      setCallState("connecting");
-      callStateRef.current = "connecting";
+      transitionTo("connecting");
       isCallerRef.current = false;
       setIsCaller(false);
       finalizingRef.current = false;
       pendingCandidatesRef.current = [];
       seenCandidateIdsRef.current.clear();
 
-      const type = callData.type as CallType;
+      const type = initialCallData.type as CallType;
       setCallType(type);
       setIsVideoEnabled(type === "video");
 
-      // Robust local stream acquisition with fallback
       let stream: MediaStream;
       try {
         stream = await getLocalStream(type);
       } catch (streamErr) {
-        if (process.env.NODE_ENV === "development") {
-          console.warn("[WebRTC] Primary stream acquisition failed in answerCall, falling back to voice:", streamErr);
-        }
         if (type === "video") {
           setIsVideoEnabled(false);
           setCallType("audio");
@@ -1047,11 +1003,11 @@ export function useWebRTC({
       pc.onicecandidate = (event) => {
         if (event.candidate && event.candidate.candidate) {
           const cleanCand = sanitizeCandidate(event.candidate);
-          addDoc(collection(db, "calls", incomingCallId, "calleeCandidates"), cleanCand).catch(() => { });
+          addDoc(collection(db, "calls", incomingCallId, "calleeCandidates"), cleanCand).catch(() => {});
         }
       };
 
-      await pc.setRemoteDescription(new RTCSessionDescription(callData.offer));
+      await pc.setRemoteDescription(new RTCSessionDescription(initialCallData.offer));
       await flushPendingCandidates(pc);
 
       const answerDesc = await pc.createAnswer();
@@ -1059,13 +1015,11 @@ export function useWebRTC({
 
       await updateDoc(callDocRef, {
         status: "active",
-        answeredAt: serverTimestamp(),
         [`cam_${myId}`]: type === "video",
         answer: { sdp: answerDesc.sdp, type: answerDesc.type },
       });
 
-      setCallState("active");
-      callStateRef.current = "active";
+      transitionTo("active");
       if (!callStartedAtRef.current) callStartedAtRef.current = Date.now();
 
       unsubCallRef.current = onSnapshot(callDocRef, async (snapshot) => {
@@ -1082,10 +1036,16 @@ export function useWebRTC({
         if (status === "missed") {
           if (!isTerminal(callStateRef.current)) {
             logCallOutcome(incomingCallId, type, "missed");
-            cleanUp("ended");
+            cleanUp("missed");
           }
           return;
-        } else if (status === "ended" || status === "cancelled") {
+        } else if (status === "cancelled") {
+          if (!isTerminal(callStateRef.current)) {
+            logCallOutcome(incomingCallId, type, "cancelled");
+            cleanUp("cancelled");
+          }
+          return;
+        } else if (status === "ended") {
           if (!isTerminal(callStateRef.current)) {
             if (callStartedAtRef.current) {
               const durationSec = Math.round((Date.now() - callStartedAtRef.current) / 1000);
@@ -1101,7 +1061,7 @@ export function useWebRTC({
         }
       });
 
-      // Inbound Caller ICE candidates
+      // Caller ICE candidates
       unsubCandidatesCallerRef.current = onSnapshot(
         collection(db, "calls", incomingCallId, "callerCandidates"),
         (snapshot) => {
@@ -1113,21 +1073,13 @@ export function useWebRTC({
         }
       );
     } catch (err) {
-      if (process.env.NODE_ENV === "development") {
-        console.error("[WebRTC] Failed to answer call:", err);
-      }
+      console.warn("[WebRTC] Answer call aborted or failed:", err);
       stopAllCallSounds();
-      try {
-        await updateDoc(doc(db, "calls", incomingCallId), {
-          status: "failed",
-          endedAt: serverTimestamp(),
-        });
-      } catch { }
       cleanUp("failed");
     }
-  }, [db, myId, partnerId, getLocalStream, setupPeerConnection, logCallOutcome, cleanUp, clearRingTimeout, dismissCallNotification, addCandidateSafe, flushPendingCandidates, handleRenegotiationSnapshot, isTerminal]);
+  }, [db, myId, partnerId, getLocalStream, setupPeerConnection, logCallOutcome, cleanUp, clearRingTimeout, dismissCallNotification, addCandidateSafe, flushPendingCandidates, handleRenegotiationSnapshot, isTerminal, transitionTo]);
 
-  // ── Decline Incoming Call ──────────────────────────────────────────────────
+  // ── Decline Incoming Call (with Atomic Transaction) ────────────────────────
   const declineCall = useCallback(async (incomingCallId: string, incomingCallType?: CallType) => {
     if (!db) return;
 
@@ -1139,41 +1091,45 @@ export function useWebRTC({
     logCallOutcome(incomingCallId, logType, "declined");
 
     try {
-      await updateDoc(doc(db, "calls", incomingCallId), {
-        status: "declined",
-        endedAt: serverTimestamp(),
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(doc(db, "calls", incomingCallId));
+        if (snap.exists() && snap.data().status === "ringing") {
+          tx.update(doc(db, "calls", incomingCallId), {
+            status: "declined",
+            endedAt: serverTimestamp(),
+          });
+        }
       });
-    } catch (e) {
-      if (process.env.NODE_ENV === "development") {
-        console.error("[WebRTC] Decline call error:", e);
-      }
-    }
+    } catch {}
+
     cleanUp("declined");
   }, [db, cleanUp, clearRingTimeout, dismissCallNotification, logCallOutcome]);
 
-  // ── Cancel Outgoing Call (caller presses Cancel while ringing) ─────────────
+  // ── Cancel Outgoing Call (with Atomic Transaction) ─────────────────────────
   const cancelCall = useCallback(async () => {
     const cid = callIdRef.current;
-    if (!cid || !db) { cleanUp(); return; }
-
+    if (!cid || !db) { cleanUp("idle"); return; }
     if (isTerminal(callStateRef.current)) return;
 
-    if (process.env.NODE_ENV === "development") {
-      console.log("[WebRTC] Caller cancelled outgoing call");
-    }
     stopOutgoingTone(cid);
     clearRingTimeout();
+    logCallOutcome(cid, callTypeRef.current, "cancelled");
 
     try {
-      await updateDoc(doc(db, "calls", cid), {
-        status: "cancelled",
-        endedAt: serverTimestamp(),
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(doc(db, "calls", cid));
+        if (snap.exists()) {
+          const status = snap.data().status;
+          // Only update if call hasn't already been answered or declined
+          if (status === "ringing" || status === "outgoing") {
+            tx.update(doc(db, "calls", cid), {
+              status: "cancelled",
+              endedAt: serverTimestamp(),
+            });
+          }
+        }
       });
-    } catch (e) {
-      if (process.env.NODE_ENV === "development") {
-        console.warn("[WebRTC] Cancel call Firestore notice:", e);
-      }
-    }
+    } catch {}
 
     sendPush({
       type: "call_cancelled",
@@ -1183,29 +1139,34 @@ export function useWebRTC({
       callType: callTypeRef.current,
     });
 
-    cleanUp("ended");
-  }, [db, myId, partnerId, cleanUp, clearRingTimeout, sendPush, isTerminal]);
+    cleanUp("cancelled");
+  }, [db, myId, partnerId, cleanUp, clearRingTimeout, sendPush, isTerminal, logCallOutcome]);
 
-  // ── End Active Call ────────────────────────────────────────────────────────
+  // ── End Active Call (with Atomic Transaction) ──────────────────────────────
   const endCall = useCallback(async () => {
     const cid = callIdRef.current;
-
     if (isTerminal(callStateRef.current)) {
       cleanUp("idle");
       return;
     }
 
-    if (callStartedAtRef.current) {
+    if (callStartedAtRef.current && cid) {
       const durationSec = Math.round((Date.now() - callStartedAtRef.current) / 1000);
       logCallOutcome(cid, callTypeRef.current, "completed", durationSec);
     }
 
     if (db && cid) {
       try {
-        await updateDoc(doc(db, "calls", cid), {
-          status: "ended",
-          endedAt: serverTimestamp(),
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(doc(db, "calls", cid));
+          if (snap.exists() && !TERMINAL_CALL_STATES.has(snap.data().status)) {
+            tx.update(doc(db, "calls", cid), {
+              status: "ended",
+              endedAt: serverTimestamp(),
+            });
+          }
         });
+
         sendPush({
           type: "call_ended",
           recipientId: partnerId,
@@ -1213,18 +1174,13 @@ export function useWebRTC({
           senderName: myId === "nabin" ? "Nabin" : "Karu",
           callType: callTypeRef.current,
         });
-      } catch (e) {
-        if (process.env.NODE_ENV === "development") {
-          console.warn("[WebRTC] End call Firestore notice:", e);
-        }
-      }
+      } catch {}
     }
     cleanUp("ended");
   }, [db, myId, partnerId, cleanUp, logCallOutcome, sendPush, isTerminal]);
 
   // ── Camera Toggle ──────────────────────────────────────────────────────────
   const toggleVideo = useCallback(async () => {
-    const pc = pcRef.current;
     const cid = callIdRef.current;
     const existingVideoTrack = localStreamRef.current?.getVideoTracks()[0];
     const isCurrentlyActive = !!existingVideoTrack && existingVideoTrack.enabled && isVideoEnabledRef.current;
@@ -1233,7 +1189,7 @@ export function useWebRTC({
       existingVideoTrack.enabled = false;
       setIsVideoEnabled(false);
       if (cid && db) {
-        updateDoc(doc(db, "calls", cid), { [`cam_${myId}`]: false }).catch(() => { });
+        updateDoc(doc(db, "calls", cid), { [`cam_${myId}`]: false }).catch(() => {});
       }
       return;
     }
@@ -1242,105 +1198,30 @@ export function useWebRTC({
       existingVideoTrack.enabled = true;
       setIsVideoEnabled(true);
       if (cid && db) {
-        updateDoc(doc(db, "calls", cid), { [`cam_${myId}`]: true }).catch(() => { });
+        updateDoc(doc(db, "calls", cid), { [`cam_${myId}`]: true }).catch(() => {});
       }
       return;
     }
-
-    // Audio → Video mid-call upgrade
-    const isMobile = typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    const currentFacing = facingModeRef.current;
-    const videoConstraints: MediaTrackConstraints = {
-      facingMode: { ideal: currentFacing },
-      width: { ideal: isMobile ? 720 : 1280 },
-      height: { ideal: isMobile ? 1280 : 720 },
-      frameRate: { ideal: 30 },
-    };
-
-    let newStream: MediaStream;
-    try {
-      newStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: videoConstraints });
-    } catch {
-      try {
-        newStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: currentFacing } });
-      } catch (fallbackErr: any) {
-        if (process.env.NODE_ENV === "development") {
-          console.error("[WebRTC] toggleVideo camera acquisition failed:", fallbackErr);
-        }
-        if (onCameraErrorRef.current) onCameraErrorRef.current(fallbackErr?.name || "CameraError");
-        return;
-      }
-    }
-
-    const newVideoTrack = newStream.getVideoTracks()[0];
-    if (!newVideoTrack) return;
-
-    if (localStreamRef.current) {
-      localStreamRef.current.addTrack(newVideoTrack);
-      setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
-    } else {
-      const ms = new MediaStream([newVideoTrack]);
-      localStreamRef.current = ms;
-      setLocalStream(ms);
-    }
-
-    setCallType("video");
-    callTypeRef.current = "video";
-    setIsVideoEnabled(true);
-
-    if (!pc || !cid || !db) return;
-
-    const sender = pc.getSenders().find((s) => s.track?.kind === "video");
-    if (sender) {
-      try { await sender.replaceTrack(newVideoTrack); await applyVideoSenderParameters(sender); } catch { }
-    } else {
-      const newSender = pc.addTrack(newVideoTrack, localStreamRef.current!);
-      await applyVideoSenderParameters(newSender);
-    }
-
-    const audioSender = pc.getSenders().find((s) => s.track?.kind === "audio");
-    if (audioSender) await applyAudioSenderParameters(audioSender);
-
-    try {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      const version = Date.now();
-      lastRenegotiationAtRef.current = version;
-      if (offer?.sdp) {
-        await updateDoc(doc(db, "calls", cid), {
-          type: "video",
-          [`cam_${myId}`]: true,
-          renegotiation: { offer: { sdp: offer.sdp, type: offer.type || "offer" }, from: myId, version },
-        }).catch(() => { });
-      }
-    } catch (renegErr) {
-      if (process.env.NODE_ENV === "development") {
-        console.warn("[WebRTC] Renegotiation notice on video upgrade:", renegErr);
-      }
-    }
   }, [db, myId]);
 
-  // ── Camera Switch (Front ↔ Rear) ──────────────────────────────────────────
+  // ── Switch Front / Back Camera ─────────────────────────────────────────────
   const switchCamera = useCallback(async () => {
+    const nextFacing = facingModeRef.current === "user" ? "environment" : "user";
     if (!localStreamRef.current) return;
+
     const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
     if (!oldVideoTrack) return;
 
-    const isMobile = typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    const nextFacing = facingModeRef.current === "user" ? "environment" : "user";
-    const videoConstraints: MediaTrackConstraints = {
-      facingMode: { ideal: nextFacing },
-      width: { ideal: isMobile ? 720 : 1280 },
-      height: { ideal: isMobile ? 1280 : 720 },
-      frameRate: { ideal: 30 },
-    };
-
     let newStream: MediaStream;
     try {
-      newStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: videoConstraints });
+      newStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { exact: nextFacing } },
+      });
     } catch {
       try {
-        newStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: nextFacing } });
+        newStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: nextFacing },
+        });
       } catch {
         return;
       }
@@ -1381,7 +1262,7 @@ export function useWebRTC({
       where("status", "==", "ringing")
     );
 
-    const thirtyFiveSecondsAgo = new Date(Date.now() - MAX_CALL_AGE_MS);
+    const thirtyFiveSecondsAgo = Date.now() - MAX_CALL_AGE_MS;
 
     const unsub = onSnapshot(q, (snapshot) => {
       if (callStateRef.current !== "idle") return;
@@ -1390,46 +1271,43 @@ export function useWebRTC({
         if (change.type === "added") {
           const data = change.doc.data();
           const createdAt = data.createdAt?.toMillis?.() ?? 0;
-          if (createdAt > thirtyFiveSecondsAgo.getTime()) {
-            const incomingId = change.doc.id;
-            const incomingType = data.type as CallType;
 
-            if (process.env.NODE_ENV === "development") {
-              console.log("[WebRTC] Incoming call detected:", incomingId, incomingType);
-            }
-
-            if (unsubIncomingCallDocRef.current) {
-              unsubIncomingCallDocRef.current();
-              unsubIncomingCallDocRef.current = null;
-            }
-            unsubIncomingCallDocRef.current = onSnapshot(doc(db, "calls", incomingId), (callSnap) => {
-              if (callStateRef.current !== "idle" && callIdRef.current !== incomingId) {
-                unsubIncomingCallDocRef.current?.();
-                unsubIncomingCallDocRef.current = null;
-                return;
-              }
-              const callData = callSnap.data();
-              if (!callData) return;
-              const callStatus = callData.status;
-              if (
-                callStatus === "cancelled" ||
-                callStatus === "ended" ||
-                callStatus === "missed" ||
-                callStatus === "declined"
-              ) {
-                stopRingtone(incomingId);
-                dismissCallNotification(incomingId);
-                clearRingTimeout();
-                unsubIncomingCallDocRef.current?.();
-                unsubIncomingCallDocRef.current = null;
-                if (callStateRef.current === "idle") {
-                  onCallEndedRef.current?.();
-                }
-              }
-            });
-
-            onIncomingCallRef.current?.(incomingId, incomingType);
+          // Server-authoritative check: ignore if older than threshold
+          if (createdAt > 0 && createdAt < thirtyFiveSecondsAgo) {
+            return;
           }
+
+          const incomingId = change.doc.id;
+          const incomingType = data.type as CallType;
+
+          if (unsubIncomingCallDocRef.current) {
+            unsubIncomingCallDocRef.current();
+            unsubIncomingCallDocRef.current = null;
+          }
+
+          unsubIncomingCallDocRef.current = onSnapshot(doc(db, "calls", incomingId), (callSnap) => {
+            if (callStateRef.current !== "idle" && callIdRef.current !== incomingId) {
+              unsubIncomingCallDocRef.current?.();
+              unsubIncomingCallDocRef.current = null;
+              return;
+            }
+            const callData = callSnap.data();
+            if (!callData) return;
+            const callStatus = callData.status;
+
+            if (TERMINAL_CALL_STATES.has(callStatus)) {
+              stopRingtone(incomingId);
+              dismissCallNotification(incomingId);
+              clearRingTimeout();
+              unsubIncomingCallDocRef.current?.();
+              unsubIncomingCallDocRef.current = null;
+              if (callStateRef.current === "idle") {
+                onCallEndedRef.current?.();
+              }
+            }
+          });
+
+          onIncomingCallRef.current?.(incomingId, incomingType);
         }
       });
     });
@@ -1437,20 +1315,20 @@ export function useWebRTC({
     return () => unsub();
   }, [db, myId, clearRingTimeout, dismissCallNotification]);
 
-  // ── Visibility & Network Recovery ─────────────────────────────────────────
+  // ── Visibility & Network Recovery ──────────────────────────────────────────
   useEffect(() => {
     const handleVisibility = () => {
       if (document.visibilityState === "visible" && pcRef.current) {
         const ice = pcRef.current.iceConnectionState;
         if (ice === "disconnected" || ice === "failed") {
-          try { pcRef.current.restartIce(); } catch { }
+          try { pcRef.current.restartIce(); } catch {}
         }
       }
     };
 
     const handleOnline = () => {
       if (pcRef.current) {
-        try { pcRef.current.restartIce(); } catch { }
+        try { pcRef.current.restartIce(); } catch {}
       }
     };
 
@@ -1462,7 +1340,6 @@ export function useWebRTC({
     };
   }, []);
 
-  // ── Return Public API ──────────────────────────────────────────────────────
   return {
     startCall,
     answerCall,
@@ -1482,4 +1359,3 @@ export function useWebRTC({
     isCaller,
   };
 }
-

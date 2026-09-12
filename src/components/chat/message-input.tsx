@@ -97,21 +97,6 @@ function createWaveformSampler(stream: MediaStream): {
   };
 }
 
-const blobToBase64 = (blob: Blob): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      if (typeof reader.result === "string") {
-        resolve(reader.result);
-      } else {
-        reject(new Error("Failed to convert blob to base64"));
-      }
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-};
-
 const resizeAndCompressImage = (blob: Blob): Promise<Blob> => {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -454,35 +439,12 @@ export function MessageInput({
       );
       onSendMessage(url, type, waveform);
     } catch (err) {
-      console.warn(
-        "Cloudinary upload failed, attempting fallback to local base64:",
-        err
-      );
-
-      if (processedBlob.size > 800 * 1024) {
-        toast({
-          variant: "destructive",
-          title: "File too large",
-          description: `Cloudinary storage unavailable, and file is too large (${(
-            processedBlob.size /
-            1024 /
-            1024
-          ).toFixed(2)}MB). Max fallback size is 800KB.`,
-        });
-        return;
-      }
-
-      try {
-        const base64Url = await blobToBase64(processedBlob);
-        onSendMessage(base64Url, type, waveform);
-      } catch (fallbackErr) {
-        console.error("Base64 fallback failed:", fallbackErr);
-        toast({
-          variant: "destructive",
-          title: "Sending failed",
-          description: "Could not send the media file.",
-        });
-      }
+      console.error("Cloudinary upload failed:", err);
+      toast({
+        variant: "destructive",
+        title: "Media upload failed",
+        description: "Failed to upload file to cloud storage. Please check your connection and try again.",
+      });
     } finally {
       setIsUploading(false);
       setUploadProgress(null);

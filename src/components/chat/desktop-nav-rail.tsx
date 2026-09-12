@@ -10,8 +10,8 @@ import {
   Sun,
   Moon,
   Heart,
+  Flame,
 } from "lucide-react";
-import { SparklesSvg } from "@/components/ui/sparkles-svg";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -99,8 +99,8 @@ export function DesktopNavRail({
     },
     {
       id: "sparks",
-      label: "AI Love Sparks",
-      icon: SparklesSvg,
+      label: "Love Sparks",
+      icon: Flame,
       onClick: onGenerateSpark,
       loading: isGeneratingSpark,
     },

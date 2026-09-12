@@ -29,7 +29,6 @@ import {
   getDocs,
   Firestore,
 } from "firebase/firestore";
-import { SparklesSvg } from "@/components/ui/sparkles-svg";
 import { format } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -283,8 +282,8 @@ export function LoveSparksRitual({
       {/* Top Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-500 to-purple-600 flex items-center justify-center text-white shadow-md shadow-pink-500/25 shrink-0">
-            <SparklesSvg className="w-5 h-5 animate-pulse" />
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-500 to-rose-600 flex items-center justify-center text-white shadow-md shadow-pink-500/25 shrink-0">
+            <Flame className="w-5 h-5 fill-white text-white" />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
@@ -308,7 +307,7 @@ export function LoveSparksRitual({
             {isRevealed ? (
               <>
                 <Unlock className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="text-emerald-400 font-medium">Revealed ✨</span>
+                <span className="text-emerald-400 font-medium">Revealed</span>
               </>
             ) : hasMyAnswer ? (
               <>
@@ -353,12 +352,12 @@ export function LoveSparksRitual({
             >
               {isGenerating ? (
                 <>
-                  <SparklesSvg className="w-5 h-5 animate-spin shrink-0" />
+                  <Flame className="w-5 h-5 animate-spin shrink-0" />
                   <span>Thinking of something romantic...</span>
                 </>
               ) : (
                 <>
-                  <SparklesSvg className="w-5 h-5 shrink-0 animate-pulse" />
+                  <Flame className="w-5 h-5 shrink-0" />
                   <span>Start Today's Love Spark</span>
                 </>
               )}

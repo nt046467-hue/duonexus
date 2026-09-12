@@ -118,7 +118,6 @@ import {
   Download,
   Sun,
   Moon,
-  Sparkles,
   Palette,
   Volume2,
   VolumeX,
@@ -559,7 +558,7 @@ function RenderMessageSnippet({ msg, fallbackName }: { msg?: Message | null; fal
   if (preview.type === "sticker") {
     return (
       <span className="flex items-center gap-1.5 text-amber-500 dark:text-amber-400 font-medium">
-        <Sparkles className="w-3.5 h-3.5 shrink-0" />
+        <Smile className="w-3.5 h-3.5 shrink-0" />
         <span>Sticker</span>
       </span>
     );
@@ -667,23 +666,55 @@ export default function ChatPage() {
     receiveAudioRef.current = new Audio(RECEIVE_SOUND_URL);
   }, []);
 
-  // PRESENCE
+  // PRESENCE — heartbeat + inChat flag + proper listener cleanup
   useEffect(() => {
     if (!firestore || !myId || !user) return;
     const userPresenceRef = doc(firestore, "presence", myId);
-    const setOnlineStatus = (online: boolean) => {
-      setDoc(userPresenceRef, { online, lastSeen: serverTimestamp() }, { merge: true }).catch(() => { });
+
+    const writePresence = (online: boolean, inChat: boolean) => {
+      setDoc(
+        userPresenceRef,
+        { online, inChat, lastSeen: serverTimestamp() },
+        { merge: true }
+      ).catch(() => {});
     };
-    setOnlineStatus(true);
-    const handleVisibilityChange = () => setOnlineStatus(document.visibilityState === "visible");
+
+    const isChatView = () =>
+      (!isMobile && selectedConversation === "karu" && activeTab === "chat") ||
+      (isMobile && currentScreen === "chat");
+
+    writePresence(true, isChatView());
+
+    // Named handlers so they can be properly removed
+    const handleFocus = () => writePresence(true, isChatView());
+    const handleBlur = () => writePresence(false, false);
+    const handleVisibilityChange = () => {
+      const visible = document.visibilityState === "visible";
+      writePresence(visible, visible && isChatView());
+    };
+    const handleBeforeUnload = () => writePresence(false, false);
+
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("blur", handleBlur);
     window.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("focus", () => setOnlineStatus(true));
-    window.addEventListener("blur", () => setOnlineStatus(false));
-    window.addEventListener("beforeunload", () => setOnlineStatus(false));
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    // 60-second heartbeat keeps lastSeen fresh for server-side suppression
+    const heartbeat = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        writePresence(true, isChatView());
+      }
+    }, 60_000);
+
     return () => {
-      setOnlineStatus(false);
+      clearInterval(heartbeat);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("blur", handleBlur);
       window.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      writePresence(false, false);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [firestore, myId, user]);
 
   // READ RECEIPTS — write when chat screen is open
@@ -823,11 +854,34 @@ export default function ChatPage() {
 
   const { data: rawMessages, loading: messagesLoading } = useCollection(messagesQuery);
 
+  // Optimistic & Paginated Messages State
+  const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
+  const [olderMessages, setOlderMessages] = useState<any[]>([]);
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+
   // "Delete for me" version counter — must be declared BEFORE messages useMemo that reads it
   const [hiddenMsgVersion, setHiddenMsgVersion] = useState(0);
 
   const messages = useMemo(() => {
-    if (!rawMessages) return [];
+    const combined = [...olderMessages, ...(rawMessages || [])];
+    const seenIds = new Set<string>();
+    const deduplicated: any[] = [];
+
+    for (const m of combined) {
+      if (m?.id && !seenIds.has(m.id)) {
+        seenIds.add(m.id);
+        deduplicated.push(m);
+      }
+    }
+
+    // Append optimistic messages that haven't appeared in Firestore yet
+    for (const opt of optimisticMessages) {
+      if (opt?.id && !seenIds.has(opt.id)) {
+        deduplicated.push(opt);
+      }
+    }
+
     // Filter out messages hidden for current user ("delete for me" feature)
     const hiddenKey = `hidden_msgs_${myId}`;
     let localHiddenIds: string[] = [];
@@ -849,7 +903,7 @@ export default function ChatPage() {
       } catch { }
     }
 
-    return [...rawMessages]
+    return deduplicated
       .filter((m: any) => {
         if (hiddenIdsSet.has(m.id)) return false;
 
@@ -868,12 +922,20 @@ export default function ChatPage() {
         return true;
       })
       .sort((a: any, b: any) => {
-        const tA = (a.timestamp?.toMillis?.() ?? (a.timestamp?.seconds ?? 0) * 1000) || Date.now();
-        const tB = (b.timestamp?.toMillis?.() ?? (b.timestamp?.seconds ?? 0) * 1000) || Date.now();
+        const getMs = (val: any) => {
+          if (!val) return Date.now();
+          if (typeof val.toMillis === "function") return val.toMillis();
+          if (typeof val.seconds === "number") return val.seconds * 1000;
+          if (val instanceof Date) return val.getTime();
+          if (typeof val === "number") return val;
+          return Date.now();
+        };
+        const tA = getMs(a.timestamp);
+        const tB = getMs(b.timestamp);
         return tA - tB;
       }) as Message[];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawMessages, myId, user?.uid, finalMyName, myProfile?.hiddenMessages, hiddenMsgVersion]);
+  }, [rawMessages, olderMessages, optimisticMessages, myId, user?.uid, finalMyName, myProfile?.hiddenMessages, hiddenMsgVersion]);
 
   // Real Streak Calculation from messages & Firestore (no fake fallback 12)
   const { realStreak, longestStreak, chattedToday, isStreakLoaded } = useMemo(() => {
@@ -1310,11 +1372,78 @@ export default function ChatPage() {
   const [isCustomizingReactions, setIsCustomizingReactions] = useState(false);
   const [selectedCustomizeSlot, setSelectedCustomizeSlot] = useState<number>(0);
 
+  // Load older messages for scroll-based pagination
+  const loadOlderMessages = useCallback(async () => {
+    if (!firestore || !user || isLoadingOlder || !hasMoreOlder) return;
+
+    const allCurrent = [...olderMessages, ...(rawMessages || [])];
+    if (allCurrent.length === 0) return;
+
+    let oldestTimestamp: any = null;
+    let minTime = Infinity;
+
+    for (const m of allCurrent) {
+      const t = (m?.timestamp?.toMillis?.() ?? (m?.timestamp?.seconds ?? 0) * 1000) || null;
+      if (t && t < minTime && m?.timestamp) {
+        minTime = t;
+        oldestTimestamp = m.timestamp;
+      }
+    }
+
+    if (!oldestTimestamp) return;
+
+    setIsLoadingOlder(true);
+    const container = scrollContainerRef.current;
+    const prevScrollHeight = container?.scrollHeight ?? 0;
+    const prevScrollTop = container?.scrollTop ?? 0;
+
+    try {
+      const olderQuery = query(
+        collection(firestore, "messages"),
+        orderBy("timestamp", "desc"),
+        startAfter(oldestTimestamp),
+        limit(PAGE_SIZE)
+      );
+
+      const snap = await getDocs(olderQuery);
+      if (snap.empty) {
+        setHasMoreOlder(false);
+      } else {
+        if (snap.docs.length < PAGE_SIZE) {
+          setHasMoreOlder(false);
+        }
+        const fetched = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setOlderMessages((prev) => {
+          const existingIds = new Set(prev.map((p) => p.id));
+          const newUnique = fetched.filter((f) => !existingIds.has(f.id));
+          return [...prev, ...newUnique];
+        });
+
+        requestAnimationFrame(() => {
+          if (scrollContainerRef.current) {
+            const newScrollHeight = scrollContainerRef.current.scrollHeight;
+            scrollContainerRef.current.scrollTop = newScrollHeight - prevScrollHeight + prevScrollTop;
+          }
+        });
+      }
+    } catch (err) {
+      console.error("[Chat] Error fetching older messages:", err);
+    } finally {
+      setIsLoadingOlder(false);
+    }
+  }, [firestore, user, isLoadingOlder, hasMoreOlder, olderMessages, rawMessages]);
+
   const handleMessagesScroll = useCallback(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
     const isUp = el.scrollHeight - el.scrollTop - el.clientHeight > 150;
     setShowScrollToBottom((prev) => (prev !== isUp ? isUp : prev));
+
+    // Near top (< 80px) -> load older messages
+    if (el.scrollTop < 80 && !isLoadingOlder && hasMoreOlder && ((rawMessages?.length ?? 0) >= PAGE_SIZE || olderMessages.length > 0)) {
+      loadOlderMessages();
+    }
+
     setActiveFullEmojiPicker((prev) => {
       if (prev) setDesktopPickerCoords(null);
       return null;
@@ -1343,7 +1472,7 @@ export default function ChatPage() {
         }
       }
     }
-  }, [myId, selectedMobileMessage, selectMobileMsg, user?.uid]);
+  }, [myId, selectedMobileMessage, selectMobileMsg, user?.uid, isLoadingOlder, hasMoreOlder, rawMessages?.length, olderMessages.length, loadOlderMessages]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
     if (scrollContainerRef.current) {
@@ -1498,6 +1627,47 @@ export default function ChatPage() {
       }
     }
 
+    // Optimistic message immediate insertion
+    const tempOptId = `opt_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const optMsg: any = {
+      id: tempOptId,
+      senderUid: user?.uid || myId,
+      senderName: myName,
+      senderRole: myId,
+      sender: "me",
+      content: content.trim(),
+      text: content.trim(),
+      type,
+      timestamp: new Date(),
+      status: "sent",
+      reactions: [],
+      waveform,
+      linkPreview,
+      ...(fileMeta?.fileName ? { fileName: fileMeta.fileName } : {}),
+      ...(fileMeta?.fileSize ? { fileSize: fileMeta.fileSize } : {}),
+      ...(fileMeta?.fileType ? { fileType: fileMeta.fileType } : {}),
+      ...(replyingTo ? {
+        replyToId: replyingTo.id,
+        replyToContent: getCleanMessagePreview(replyingTo, finalPartnerName).text,
+        replyToSender: replyingTo.senderRole === myId ? myName : finalPartnerName,
+        replyToType: replyingTo.type || "text",
+        replyTo: {
+          sender: replyingTo.senderRole === myId ? "me" : "other",
+          text: getCleanMessagePreview(replyingTo, finalPartnerName).text,
+        }
+      } : {}),
+      isOptimistic: true,
+    };
+
+    setOptimisticMessages((prev) => [...prev, optMsg]);
+    setInputText("");
+    setReplyingTo(null);
+    stopMyTyping();
+    setActiveDesktopPopup(null);
+    setShowInputEmojiPicker(false);
+    setShowMobileLeftIcons(false);
+    lastSendWasMe.current = true;
+
     try {
       sendAudioRef.current?.play().catch(() => { });
 
@@ -1536,13 +1706,9 @@ export default function ChatPage() {
       }
 
       await addDoc(collection(firestore, "messages"), newMsgData);
-      setInputText("");
-      setReplyingTo(null);
-      stopMyTyping();
-      setActiveDesktopPopup(null);
-      setShowInputEmojiPicker(false);
-      setShowMobileLeftIcons(false);
-      lastSendWasMe.current = true;
+      
+      // Clean up optimistic message on successful persistence
+      setOptimisticMessages((prev) => prev.filter((m) => m.id !== tempOptId));
 
       // Send background FCM push notification to partner's registered devices
       let previewText = content.trim();
@@ -1555,18 +1721,22 @@ export default function ChatPage() {
       else if (type === "file") previewText = "📁 Sent a file";
       else if (previewText.length > 80) previewText = previewText.slice(0, 80) + "...";
 
-      fetch("/api/trigger-push", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "message",
-          recipientId: partnerId,
-          senderName: myName,
-          text: previewText,
-        }),
-      }).catch((pushErr) => {
-        console.warn("[Chat] Push notification dispatch warning:", pushErr);
-      });
+      // Send push — include Firebase ID token so the authenticated endpoint accepts the request
+      auth?.currentUser?.getIdToken().then((idToken) => {
+        fetch("/api/trigger-push", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            type: "message",
+            text: previewText,
+          }),
+        }).catch((pushErr) => {
+          console.warn("[Chat] Push notification dispatch warning:", pushErr);
+        });
+      }).catch(() => {});
 
       // Auto-update real streak in Firestore (TikTok-style daily tracking)
       try {
@@ -2154,7 +2324,7 @@ export default function ChatPage() {
    * Called by useWebRTC via the onCallMessage callback.
    */
   const writeCallMessage = useCallback(
-    (cType: "audio" | "video", cStatus: "completed" | "declined" | "missed", duration?: number, cId?: string) => {
+    (cType: "audio" | "video", cStatus: "completed" | "declined" | "missed" | "cancelled" | "failed", duration?: number, cId?: string) => {
       if (!firestore) return;
       addDoc(collection(firestore, "messages"), {
         senderUid: user?.uid || myId,
@@ -2929,7 +3099,7 @@ export default function ChatPage() {
               <div className="flex items-center justify-between py-1">
                 <div className="flex items-center gap-3 pr-2">
                   <div className="w-9 h-9 rounded-2xl bg-cyan-500/10 text-[#00d2ff] flex items-center justify-center shrink-0">
-                    <Sparkles className="w-4 h-4" />
+                    <ImageIcon className="w-4 h-4" />
                   </div>
                   <div>
                     <p className={`text-sm font-bold leading-snug ${c("text-gray-900", "text-white")}`}>
@@ -3868,6 +4038,12 @@ export default function ChatPage() {
               selectMobileMsg(null);
             }}
           >
+            {/* Top Loading Indicator for Paginated Older Messages */}
+            {isLoadingOlder && (
+              <div className="flex items-center justify-center py-2 animate-in fade-in">
+                <Loader2 className="w-5 h-5 animate-spin text-pink-500" />
+              </div>
+            )}
 
             {/* Empty state */}
             {messages.length === 0 && !messagesLoading && (
@@ -6154,7 +6330,7 @@ export default function ChatPage() {
             <div className={`flex items-center justify-between p-3.5 rounded-2xl border ${c("bg-gray-50 border-gray-100", "bg-zinc-900/60 border-zinc-800")}`}>
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-cyan-500/10 flex items-center justify-center text-[#00d2ff]">
-                  <Sparkles className="w-4 h-4" />
+                  <ImageIcon className="w-4 h-4" />
                 </div>
                 <div>
                   <p className="text-sm font-semibold">HD Media Default</p>

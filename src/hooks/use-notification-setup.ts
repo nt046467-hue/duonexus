@@ -23,7 +23,25 @@ export function useNotificationSetup({ userId, db, onTokenSaved }: UseNotificati
     }
   }, []);
 
-  // Save token to Firestore
+  // Helper to get or create a stable device ID
+  const getDeviceId = (): string => {
+    if (typeof window === "undefined") return "server_device";
+    try {
+      const KEY = "duonexus_device_id_v1";
+      let id = localStorage.getItem(KEY);
+      if (!id) {
+        id = typeof crypto !== "undefined" && crypto.randomUUID 
+          ? crypto.randomUUID() 
+          : `dev_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        localStorage.setItem(KEY, id);
+      }
+      return id;
+    } catch {
+      return "fallback_device_id";
+    }
+  };
+
+  // Save token to Firestore with device-aware metadata
   const saveTokenToFirestore = useCallback(
     async (fcmToken: string, targetUserId: string, targetDb: Firestore) => {
       if (!fcmToken || !targetUserId || !targetDb) return;
@@ -31,17 +49,27 @@ export function useNotificationSetup({ userId, db, onTokenSaved }: UseNotificati
 
       try {
         const userRef = doc(targetDb, "users", targetUserId);
+        const deviceId = getDeviceId();
+        const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "";
+        const isMobile = typeof window !== "undefined" && /Mobi|Android|iPhone|iPad/i.test(userAgent);
+
         await setDoc(
           userRef,
           {
             fcmTokens: arrayUnion(fcmToken),
+            [`devices.${deviceId}`]: {
+              token: fcmToken,
+              platform: isMobile ? "mobile" : "desktop",
+              userAgent: userAgent.substring(0, 200),
+              updatedAt: serverTimestamp(),
+            },
             lastActive: serverTimestamp(),
           },
           { merge: true }
         );
         registeredTokenRef.current = fcmToken;
         onTokenSaved?.(fcmToken);
-        console.log("[FCM] Device token registered successfully for user:", targetUserId);
+        console.log("[FCM] Device token registered successfully for user:", targetUserId, "device:", deviceId);
       } catch (err) {
         console.error("[FCM] Failed to store FCM token in Firestore:", err);
       }

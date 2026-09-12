@@ -17,14 +17,14 @@ import {
   WifiOff,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ConnectionQuality } from "@/hooks/use-webrtc";
+import type { ConnectionQuality, CallState } from "@/hooks/use-webrtc";
 
 interface CallScreenProps {
   partnerName: string;
   partnerAvatar: string;
   callType: "audio" | "video";
   /** Full authoritative call state from useWebRTC */
-  callState: "idle" | "ringing" | "connecting" | "active" | "ended" | "declined" | "missed" | "failed";
+  callState: CallState;
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
   connectionQuality?: ConnectionQuality;
@@ -102,10 +102,11 @@ export function CallScreen({
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  const isOutgoingRinging = callState === "ringing";
+  const isOutgoingRinging = callState === "ringing" || callState === "outgoing";
   const isConnecting = callState === "connecting";
-  const isMissedOrFailed = callState === "missed" || callState === "failed";
-  const isActive = callState === "active";
+  const isReconnecting = callState === "reconnecting";
+  const isMissedOrFailed = callState === "missed" || callState === "failed" || callState === "declined" || callState === "cancelled";
+  const isActive = callState === "active" || callState === "reconnecting";
 
   // Call duration timer (active call only)
   useEffect(() => {
@@ -380,10 +381,31 @@ export function CallScreen({
               {isConnecting && (
                 <p className="text-sm text-emerald-400/80 uppercase tracking-widest font-headline animate-pulse">Connecting…</p>
               )}
-              {isMissedOrFailed && (
+              {isReconnecting && (
+                <p className="text-sm text-amber-400/90 uppercase tracking-widest font-headline animate-pulse">Reconnecting…</p>
+              )}
+              {callState === "missed" && (
                 <>
                   <p className="text-sm text-red-400 font-headline font-semibold">No answer</p>
                   <p className="text-xs text-white/40 font-headline">Call ended</p>
+                </>
+              )}
+              {callState === "declined" && (
+                <>
+                  <p className="text-sm text-red-400 font-headline font-semibold">Declined</p>
+                  <p className="text-xs text-white/40 font-headline">Call declined</p>
+                </>
+              )}
+              {callState === "cancelled" && (
+                <>
+                  <p className="text-sm text-zinc-400 font-headline font-semibold">Cancelled</p>
+                  <p className="text-xs text-white/40 font-headline">Call cancelled</p>
+                </>
+              )}
+              {callState === "failed" && (
+                <>
+                  <p className="text-sm text-red-400 font-headline font-semibold">Connection failed</p>
+                  <p className="text-xs text-white/40 font-headline">Could not connect</p>
                 </>
               )}
             </div>

@@ -14,7 +14,6 @@ import {
   Flame,
   Heart,
   Trophy,
-  Sparkles,
   Check,
   Clock,
   Gift,
@@ -362,7 +361,7 @@ export function StreakModal({
             <div className="p-3.5 rounded-2xl bg-muted/30 border border-primary/10 space-y-2">
               <div className="flex justify-between items-center text-xs">
                 <span className="font-bold flex items-center gap-1.5 text-foreground">
-                  <Sparkles className="w-3.5 h-3.5 text-primary" />
+                  <Trophy className="w-3.5 h-3.5 text-amber-500" />
                   <span>Next Reward: {nextMilestone.title}</span>
                 </span>
                 <span className="text-primary font-bold text-xs">

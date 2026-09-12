@@ -1,17 +1,73 @@
 /* eslint-disable no-undef */
-// DuoNexus Service Worker & Firebase Cloud Messaging Worker
+// DuoNexus Production Service Worker & FCM Handler
 
-function handleIncomingCallNotification(payload) {
+const CACHE_NAME = "duonexus-cache-v2";
+const PRECACHE_ASSETS = [
+  "/manifest.json",
+  "/badge-72.png",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/favicon.png",
+];
+
+// ── Cache & Lifecycle ────────────────────────────────────────────────────────
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(PRECACHE_ASSETS);
+    }).then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) => {
+      return Promise.all(
+        keys.map((key) => {
+          if (key !== CACHE_NAME) {
+            return caches.delete(key);
+          }
+        })
+      );
+    }).then(() => self.clients.claim())
+  );
+});
+
+// Cache-first for static icons & manifest, network-first for pages & APIs
+self.addEventListener("fetch", (event) => {
+  const url = new URL(event.request.url);
+
+  // Skip non-GET requests, API routes, Firebase backend requests, and WebRTC signaling
+  if (
+    event.request.method !== "GET" ||
+    url.pathname.startsWith("/api/") ||
+    url.hostname.includes("firestore.googleapis.com") ||
+    url.hostname.includes("firebase") ||
+    url.hostname.includes("cloudinary.com")
+  ) {
+    return;
+  }
+
+  // Precached static icons
+  if (PRECACHE_ASSETS.includes(url.pathname)) {
+    event.respondWith(
+      caches.match(event.request).then((cached) => cached || fetch(event.request))
+    );
+  }
+});
+
+// ── Notification Handling ───────────────────────────────────────────────────
+function handleNotificationPayload(payload) {
   const data = payload.data || {};
   const notification = payload.notification || {};
   const origin = self.location.origin;
 
-  // 1. Silent cancellation/ended event: Dismiss any active ringing notification
+  // 1. Silent cancellation / call ended: dismiss active ringing notifications
   if (data.type === "call_ended" || data.type === "call_cancelled") {
-    const callTag = data.callId ? ('call-' + data.callId) : null;
-    return self.registration.getNotifications().then(function(notifications) {
-      notifications.forEach(function(n) {
-        if (!callTag || n.tag === callTag || n.tag.startsWith('call-')) {
+    const callTag = data.callId ? `call-${data.callId}` : null;
+    return self.registration.getNotifications().then((notifications) => {
+      notifications.forEach((n) => {
+        if (!callTag || n.tag === callTag || n.tag.startsWith("call-")) {
           n.close();
         }
       });
@@ -20,10 +76,9 @@ function handleIncomingCallNotification(payload) {
 
   // 2. Missed call notification
   if (data.type === "missed_call") {
-    // Clean up ringing notification first
-    return self.registration.getNotifications().then(function(notifications) {
-      const callTag = data.callId ? ('call-' + data.callId) : null;
-      notifications.forEach(function(n) {
+    return self.registration.getNotifications().then((notifications) => {
+      const callTag = data.callId ? `call-${data.callId}` : null;
+      notifications.forEach((n) => {
         if (callTag && n.tag === callTag) {
           n.close();
         }
@@ -31,52 +86,70 @@ function handleIncomingCallNotification(payload) {
 
       const isVideo = data.callType === "video";
       const title = isVideo ? "📹 Missed Video Call" : "📞 Missed Voice Call";
-      const body = data.senderName ? ("Missed call from " + data.senderName) : "Missed call";
+      const body = data.senderName ? `Missed call from ${data.senderName}` : "Missed call";
 
       return self.registration.showNotification(title, {
-        body: body,
-        icon: notification.icon || data.icon || (origin + '/icon-192.png'),
-        badge: origin + '/badge-72.png',
-        tag: 'missed-call-' + (data.callId || Date.now()),
+        body,
+        icon: notification.icon || data.icon || `${origin}/icon-192.png`,
+        badge: `${origin}/badge-72.png`,
+        tag: `missed-call-${data.callId || Date.now()}`,
         renotify: true,
         vibrate: [200, 100, 200],
         data: {
           ...data,
-          url: origin + '/chat'
-        }
+          url: `${origin}/chat`,
+        },
       });
     });
   }
 
-  // 3. Incoming call notification
+  // 3. Incoming call & chat message notification
   const isCall = data.type === "incoming_call";
   const isVideo = data.callType === "video";
-  const title = notification.title || data.title || (isCall ? (isVideo ? "📹 Incoming Video Call" : "📞 Incoming Voice Call") : "DuoNexus ❤️");
+  const title =
+    notification.title ||
+    data.title ||
+    (isCall
+      ? isVideo
+        ? "📹 Incoming Video Call"
+        : "📞 Incoming Voice Call"
+      : "DuoNexus ❤️");
+
+  const body =
+    notification.body ||
+    data.body ||
+    (isCall
+      ? `${data.senderName || "Partner"} is calling you...`
+      : "You have a new message 💕");
+
   const options = {
-    body: notification.body || data.body || (isCall ? ((data.senderName || "Partner") + " is calling you...") : "You have a new message!"),
-    icon: notification.icon || data.icon || (origin + '/icon-192.png'),
-    badge: origin + '/badge-72.png',
+    body,
+    icon: notification.icon || data.icon || `${origin}/icon-192.png`,
+    badge: `${origin}/badge-72.png`,
     image: notification.image || data.image || null,
-    tag: isCall ? ('call-' + (data.callId || 'active')) : (data.tag || 'duonexus-msg'),
+    tag: isCall ? `call-${data.callId || "active"}` : data.tag || "duonexus-msg",
     renotify: true,
     requireInteraction: isCall,
     vibrate: isCall ? [500, 250, 500, 250, 500, 250, 500] : [200, 100, 200],
     data: {
       ...data,
-      url: data.url || (isCall ? (origin + '/chat?callId=' + (data.callId || '')) : (origin + '/chat'))
+      url: data.url || (isCall ? `${origin}/chat?callId=${encodeURIComponent(data.callId || "")}` : `${origin}/chat`),
     },
-    actions: isCall ? [
-      { action: "accept", title: "✅ Accept" },
-      { action: "decline", title: "❌ Decline" }
-    ] : []
+    actions: isCall
+      ? [
+          { action: "accept", title: "✅ Accept" },
+          { action: "decline", title: "❌ Decline" },
+        ]
+      : [],
   };
 
   return self.registration.showNotification(title, options);
 }
 
+// Firebase Cloud Messaging compat script loading
 try {
-  importScripts('https://www.gstatic.com/firebasejs/11.9.1/firebase-app-compat.js');
-  importScripts('https://www.gstatic.com/firebasejs/11.9.1/firebase-messaging-compat.js');
+  importScripts("https://www.gstatic.com/firebasejs/11.9.1/firebase-app-compat.js");
+  importScripts("https://www.gstatic.com/firebasejs/11.9.1/firebase-messaging-compat.js");
 
   const firebaseConfig = {
     apiKey: "AIzaSyDfmozB3o0fS2INonOtliAzO4okLWE9Rsk",
@@ -84,21 +157,21 @@ try {
     projectId: "our-sweet-conversation",
     storageBucket: "our-sweet-conversation.firebasestorage.app",
     messagingSenderId: "561504998058",
-    appId: "1:561504998058:web:6f1819edd37adacdeaf6d3"
+    appId: "1:561504998058:web:6f1819edd37adacdeaf6d3",
   };
 
   firebase.initializeApp(firebaseConfig);
   const messaging = firebase.messaging();
 
-  messaging.onBackgroundMessage(function(payload) {
-    return handleIncomingCallNotification(payload);
+  messaging.onBackgroundMessage((payload) => {
+    return handleNotificationPayload(payload);
   });
 } catch (e) {
-  console.log('[SW] Firebase messaging script load skipped or failed (fallback to push listener):', e);
+  console.log("[SW] Firebase messaging compat load skipped, using push listener:", e);
 }
 
-// Standard push listener fallback (for custom web push or server-triggered FCM data payloads)
-self.addEventListener('push', function(event) {
+// Fallback standard web push event
+self.addEventListener("push", (event) => {
   let payload = {};
   if (event.data) {
     try {
@@ -107,11 +180,11 @@ self.addEventListener('push', function(event) {
       payload = { body: event.data.text() };
     }
   }
-  event.waitUntil(handleIncomingCallNotification(payload));
+  event.waitUntil(handleNotificationPayload(payload));
 });
 
-// Notification click & action handlers
-self.addEventListener('notificationclick', function(event) {
+// ── Notification Click & Call Routing ───────────────────────────────────────
+self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const data = event.notification.data || {};
   const origin = self.location.origin;
@@ -121,7 +194,7 @@ self.addEventListener('notificationclick', function(event) {
   const isAccept = event.action === "accept";
   const isDecline = event.action === "decline";
 
-  let targetUrl = data.url || (origin + '/chat');
+  let targetUrl = data.url || `${origin}/chat`;
 
   if (isAccept && callId) {
     targetUrl = `${origin}/chat?answer=${encodeURIComponent(callId)}`;
@@ -131,7 +204,6 @@ self.addEventListener('notificationclick', function(event) {
     targetUrl = `${origin}/chat?callId=${encodeURIComponent(callId)}`;
   }
 
-  // Determine event type for active chat tab
   let messageType = "NOTIFICATION_CLICK";
   if (isAccept) {
     messageType = "ACCEPT_CALL";
@@ -142,21 +214,20 @@ self.addEventListener('notificationclick', function(event) {
   }
 
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
-      // If a chat tab is already open, focus it and postMessage WITHOUT navigating/reloading the tab!
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      // If chat is already open, focus it and dispatch message without reloading
       for (let i = 0; i < clientList.length; i++) {
-        let client = clientList[i];
-        if (client.url && client.url.includes('/chat') && 'focus' in client) {
+        const client = clientList[i];
+        if (client.url && client.url.includes("/chat") && "focus" in client) {
           client.postMessage({
             type: messageType,
-            callId: callId,
+            callId,
             callType: data.callType,
-            data: data
+            data,
           });
           return client.focus();
         }
       }
-      // If no window is open, open the URL directly
       if (clients.openWindow) {
         return clients.openWindow(targetUrl);
       }

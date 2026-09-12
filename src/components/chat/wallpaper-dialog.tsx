@@ -14,7 +14,6 @@ import { Slider } from "@/components/ui/slider";
 import {
   Palette,
   Check,
-  Sparkles,
   RotateCcw,
   ImagePlus,
   RefreshCw,
@@ -470,7 +469,7 @@ export function WallpaperDialog({
     <div className="p-3 bg-muted/40 rounded-2xl space-y-2 border border-primary/10">
       <div className="flex justify-between items-center text-xs font-semibold">
         <span className="text-foreground flex items-center gap-1.5 font-bold">
-          <Sparkles className="w-3.5 h-3.5 text-primary" />
+          <SlidersHorizontal className="w-3.5 h-3.5 text-primary" />
           Framing & Fit Mode
         </span>
         <span className="text-[10px] text-muted-foreground font-medium">
@@ -490,7 +489,7 @@ export function WallpaperDialog({
           )}
         >
           <div className="flex items-center gap-1 font-bold text-[11px] text-foreground mb-0.5">
-            <Sparkles className="w-3 h-3 text-primary shrink-0" />
+            <SlidersHorizontal className="w-3 h-3 text-primary shrink-0" />
             <span>Smart Fit</span>
           </div>
           <p className="text-[9px] text-muted-foreground leading-tight">
@@ -606,7 +605,7 @@ export function WallpaperDialog({
 
       {generationMessage && (
         <p className="text-[11px] text-muted-foreground font-medium flex items-center gap-1.5">
-          <Sparkles className="w-3.5 h-3.5 text-primary" />
+          <Wand2 className="w-3.5 h-3.5 text-primary" />
           {generationMessage}
         </p>
       )}
@@ -628,7 +627,7 @@ export function WallpaperDialog({
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
-            <Sparkles className="w-3 h-3" />
+            <Palette className="w-3 h-3" />
             Generated
           </button>
           <button

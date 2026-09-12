@@ -1,38 +1,112 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb, adminMessaging } from "@/lib/firebase-admin";
+import { verifyServerAuth } from "@/lib/server-auth";
+import { getClientIp, checkRateLimit, recordFailedAttempt } from "@/lib/auth-security";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
+  const clientIp = getClientIp(req);
+
+  // 1. Rate limiting for notification triggers
+  const rateLimit = checkRateLimit(`push_${clientIp}`);
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { success: false, error: "Push notification rate limit reached. Please slow down." },
+      { status: 429 }
+    );
+  }
+
+  // 2. Authenticate requester via Firebase ID Token
+  const authUser = await verifyServerAuth(req);
+  if (!authUser) {
+    recordFailedAttempt(`push_${clientIp}`);
+    return NextResponse.json(
+      { success: false, error: "Unauthorized. Valid authentication required." },
+      { status: 401 }
+    );
+  }
+
   try {
-    const payload = await req.json();
+    const payload = await req.json().catch(() => ({}));
     const {
       type,
-      recipientId,
-      senderName,
       callId,
       callType,
       text,
       image,
     } = payload;
 
-    if (!recipientId || !type) {
-      return NextResponse.json({ success: false, message: "Missing recipientId or type" }, { status: 400 });
+    if (!type || typeof type !== "string") {
+      return NextResponse.json({ success: false, message: "Missing or invalid notification type" }, { status: 400 });
     }
 
-    // Retrieve recipient's registered device tokens
-    const userDocRef = adminDb.collection("users").doc(recipientId);
-    const userDoc = await userDocRef.get();
+    // Authoritative sender & recipient (client cannot forge sender or recipient)
+    const senderId = authUser.uid;
+    const senderName = authUser.name;
+    const recipientId = authUser.partnerId;
 
-    let tokens: string[] = [];
-    if (userDoc.exists) {
-      const data = userDoc.data();
-      if (Array.isArray(data?.fcmTokens)) {
-        tokens = data.fcmTokens.filter((t: any) => typeof t === "string" && t.length > 0);
+    // 3. Intelligent suppression for ordinary messages:
+    // If recipient is currently online and active in chat with sender, do NOT send message push
+    if (type === "message") {
+      try {
+        const presenceDoc = await adminDb.collection("presence").doc(recipientId).get();
+        if (presenceDoc.exists) {
+          const presence = presenceDoc.data();
+          const lastSeenDate = presence?.lastSeen?.toDate?.() || (presence?.lastSeen ? new Date(presence.lastSeen) : null);
+          const isRecentlySeen = lastSeenDate ? (Date.now() - lastSeenDate.getTime()) < 45_000 : false;
+          const isInChat = Boolean(presence?.inChat || presence?.activeConversation === senderId);
+
+          if (presence?.online && isInChat && isRecentlySeen) {
+            return NextResponse.json({
+              success: true,
+              suppressed: true,
+              message: "Notification suppressed: recipient is actively viewing the conversation.",
+            });
+          }
+        }
+      } catch (presenceErr) {
+        console.warn("[trigger-push] Failed to check presence suppression:", presenceErr);
       }
     }
 
+    // 4. Check recipient notification preferences if set
+    const userDocRef = adminDb.collection("users").doc(recipientId);
+    const userDoc = await userDocRef.get();
+    const userData = userDoc.exists ? userDoc.data() : null;
+
+    if (userData?.notificationSettings) {
+      const settings = userData.notificationSettings;
+      if (type === "message" && settings.messages === false) {
+        return NextResponse.json({ success: true, suppressed: true, message: "Recipient has message notifications disabled." });
+      }
+      if ((type === "incoming_call" || type === "missed_call") && settings.calls === false) {
+        return NextResponse.json({ success: true, suppressed: true, message: "Recipient has call notifications disabled." });
+      }
+    }
+
+    // 5. Retrieve recipient's registered device tokens (support both devices map and fcmTokens array)
+    const tokenSet = new Set<string>();
+
+    if (Array.isArray(userData?.fcmTokens)) {
+      userData.fcmTokens.forEach((t: any) => {
+        if (typeof t === "string" && t.length > 0) tokenSet.add(t);
+      });
+    }
+
+    if (userData?.devices && typeof userData.devices === "object") {
+      Object.values(userData.devices).forEach((device: any) => {
+        if (device?.token && typeof device.token === "string") {
+          tokenSet.add(device.token);
+        }
+      });
+    }
+
+    const tokens = Array.from(tokenSet);
+
     if (tokens.length === 0) {
-      console.log(`[trigger-push] No active FCM tokens found for recipient: ${recipientId}`);
-      return NextResponse.json({ success: true, delivered: false, message: "No tokens registered for recipient" });
+      return NextResponse.json({ success: true, delivered: false, message: "No active push tokens registered for recipient." });
     }
 
     const isIncomingCall = type === "incoming_call";
@@ -42,20 +116,20 @@ export async function POST(req: NextRequest) {
 
     const stringifiedData: Record<string, string> = {
       type,
-      recipientId: String(recipientId),
-      senderName: String(senderName || ""),
+      recipientId,
+      senderName,
     };
 
     if (callId) stringifiedData.callId = String(callId);
     if (callType) stringifiedData.callType = String(callType);
 
     if (isIncomingCall) {
-      stringifiedData.url = `/chat?callId=${callId}`;
+      stringifiedData.url = `/chat?callId=${encodeURIComponent(String(callId || ""))}`;
     } else {
       stringifiedData.url = "/chat";
     }
 
-    // If it's a silent cancellation/ended notice to close notifications
+    // 6. Silent cancellation/ended notice to dismiss ringing notifications across recipient devices
     if (isCallCancelledOrEnded) {
       const response = await adminMessaging.sendEachForMulticast({
         tokens,
@@ -65,6 +139,7 @@ export async function POST(req: NextRequest) {
         },
         android: { priority: "high" },
       });
+
       return NextResponse.json({
         success: true,
         delivered: response.successCount > 0,
@@ -73,15 +148,15 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    let title = `${senderName || "DuoNexus"} ❤️`;
-    let body = text || "Sent you a message 💕";
+    let title = `${senderName} ❤️`;
+    let body = typeof text === "string" && text.trim() ? text.trim() : "Sent you a message 💕";
 
     if (isIncomingCall) {
       title = isVideo ? "📹 Incoming Video Call" : "📞 Incoming Voice Call";
-      body = `${senderName || "Partner"} is calling you...`;
+      body = `${senderName} is calling you...`;
     } else if (isMissedCall) {
       title = isVideo ? "📹 Missed Video Call" : "📞 Missed Voice Call";
-      body = senderName ? `Missed call from ${senderName}` : "Missed call";
+      body = `Missed call from ${senderName}`;
     }
 
     const response = await adminMessaging.sendEachForMulticast({
@@ -89,7 +164,7 @@ export async function POST(req: NextRequest) {
       notification: {
         title,
         body,
-        imageUrl: image,
+        imageUrl: typeof image === "string" && image.startsWith("https://") ? image : undefined,
       },
       data: stringifiedData,
       webpush: {
@@ -100,7 +175,7 @@ export async function POST(req: NextRequest) {
           requireInteraction: isIncomingCall,
           badge: "/badge-72.png",
           icon: "/icon-192.png",
-          tag: isIncomingCall ? `call-${callId}` : isMissedCall ? `missed-call-${callId}` : undefined,
+          tag: isIncomingCall ? `call-${callId}` : isMissedCall ? `missed-call-${callId}` : "duonexus-msg",
         },
         fcmOptions: {
           link: stringifiedData.url,
@@ -111,12 +186,10 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    console.log(`[trigger-push] Sent push (${type}) to ${recipientId}: ${response.successCount} success, ${response.failureCount} failed.`);
-
-    // Clean up expired or invalid tokens if any failures occurred
+    // 7. Clean up expired or unregistered FCM tokens automatically
     if (response.failureCount > 0) {
       const invalidTokens: string[] = [];
-      response.responses.forEach((resp: any, idx: number) => {
+      response.responses.forEach((resp, idx) => {
         if (!resp.success && resp.error) {
           const code = resp.error.code;
           if (
@@ -129,8 +202,23 @@ export async function POST(req: NextRequest) {
       });
 
       if (invalidTokens.length > 0) {
-        const remaining = tokens.filter((t) => !invalidTokens.includes(t));
-        await userDocRef.set({ fcmTokens: remaining }, { merge: true }).catch(() => {});
+        const remainingTokens = tokens.filter((t) => !invalidTokens.includes(t));
+        const updates: Record<string, any> = { fcmTokens: remainingTokens };
+
+        // Also clean up from devices map if present
+        if (userData?.devices && typeof userData.devices === "object") {
+          const updatedDevices = { ...userData.devices };
+          for (const [devId, dev] of Object.entries(updatedDevices)) {
+            if (dev && typeof dev === "object" && invalidTokens.includes((dev as any).token)) {
+              delete updatedDevices[devId];
+            }
+          }
+          updates.devices = updatedDevices;
+        }
+
+        await userDocRef.set(updates, { merge: true }).catch((cleanErr) => {
+          console.warn("[trigger-push] Failed to clean up invalid tokens:", cleanErr);
+        });
       }
     }
 
@@ -141,7 +229,7 @@ export async function POST(req: NextRequest) {
       failureCount: response.failureCount,
     });
   } catch (error: any) {
-    console.error("[trigger-push] Failed to process push notification:", error);
-    return NextResponse.json({ success: false, error: error?.message || "Internal server error" }, { status: 500 });
+    console.error("[trigger-push] Notification error:", error);
+    return NextResponse.json({ success: false, error: "Failed to dispatch notification" }, { status: 500 });
   }
 }

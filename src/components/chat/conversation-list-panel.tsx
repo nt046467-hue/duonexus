@@ -14,7 +14,6 @@ import {
   Video,
   Smile,
   Phone,
-  Sparkles,
   X,
   Trash2,
 } from "lucide-react";
@@ -150,7 +149,7 @@ export function ConversationListPanel({
                 </span>
               </h1>
               <p className="text-[10px] text-muted-foreground font-headline tracking-wide mt-0.5">
-                Private & Encrypted
+                Private space for two
               </p>
             </div>
           </div>

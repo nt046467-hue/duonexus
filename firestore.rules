@@ -5,127 +5,173 @@ service cloud.firestore {
     // Only authenticated users with valid role claim ('nabin' or 'karu') minted via correct PIN
     function isAuthenticated() {
       return request.auth != null
-        && request.auth.token.role in ['nabin', 'karu'];
+        && (request.auth.token.role in ['nabin', 'karu'] || request.auth.uid in ['nabin', 'karu']);
     }
 
-    // Messages: anyone authenticated with role can read.
-    // Create: must be your own uid.
-    // Update: only allow changing status/reactions-adjacent fields on others' messages.
-    //         Sender can update all their own fields.
-    // Delete: only sender.
+    function isUser(userId) {
+      return isAuthenticated() && (
+        request.auth.uid == userId ||
+        request.auth.token.role == userId
+      );
+    }
+
+    function isCallParticipant(callData) {
+      return isAuthenticated() && (
+        request.auth.uid == callData.callerId ||
+        request.auth.uid == callData.calleeId ||
+        request.auth.token.role == callData.callerId ||
+        request.auth.token.role == callData.calleeId
+      );
+    }
+
+    // Messages: Authorized couple can read.
+    // Create: must be authentic sender UID or role.
+    // Update: Sender can update own message. Partner can only update delivery status or reactions.
+    // Delete: Sender only.
     match /messages/{messageId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated()
-        && request.resource.data.senderUid == request.auth.uid;
-      allow update: if isAuthenticated() && (
-        // Sender can update anything on their own message
-        resource.data.senderUid == request.auth.uid
-        ||
-        // Partner can only touch status field (delivered/seen)
-        (request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['status']))
+      allow create: if isAuthenticated() && (
+        request.resource.data.senderUid == request.auth.uid ||
+        request.resource.data.senderRole == request.auth.uid ||
+        request.resource.data.senderRole == request.auth.token.role
       );
-      allow delete: if isAuthenticated()
-        && resource.data.senderUid == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        resource.data.senderUid == request.auth.uid ||
+        resource.data.senderRole == request.auth.uid ||
+        resource.data.senderRole == request.auth.token.role ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'seenAt', 'deliveredAt', 'reactions', 'reactionsSummary'])
+      );
+      allow delete: if isAuthenticated() && (
+        resource.data.senderUid == request.auth.uid ||
+        resource.data.senderRole == request.auth.uid ||
+        resource.data.senderRole == request.auth.token.role
+      );
     }
 
-    // Calls & WebRTC Signaling: authenticated users with role can read/write calls & candidates
+    // Calls: Only caller and callee can participate.
     match /calls/{callId} {
-      allow read, write: if isAuthenticated();
-      match /{subcollection=**} {
+      allow read: if isAuthenticated() && (
+        resource == null || isCallParticipant(resource.data)
+      );
+      allow create: if isAuthenticated() && (
+        request.resource.data.callerId == request.auth.uid ||
+        request.resource.data.callerId == request.auth.token.role
+      );
+      allow update: if isAuthenticated() && isCallParticipant(resource.data);
+      allow delete: if isAuthenticated() && isCallParticipant(resource.data);
+
+      match /callerCandidates/{candId} {
+        allow read, write: if isAuthenticated();
+      }
+
+      match /calleeCandidates/{candId} {
         allow read, write: if isAuthenticated();
       }
     }
 
-    // Users & FCM tokens: authenticated users with role can read/write user documents
+    // Users & FCM tokens: User can only update their own record
     match /users/{userId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow write: if isUser(userId);
     }
 
-    // Profiles: anyone authenticated with role can read. Only write your own profile doc.
+    // Profiles: User can only write their own profile doc
     match /profiles/{userId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated()
-        && (
-          !exists(/databases/$(database)/documents/profiles/$(userId))
-          || resource.data.keys().hasAny(['lastActive'])  // allow self-update
-        );
+      allow write: if isUser(userId);
     }
 
-    // Presence: only write your own presence doc (doc ID = your role).
+    // Presence: User can only write their own presence
     match /presence/{userId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow write: if isUser(userId);
     }
 
-    // Typing: any authenticated user with role can write (needed for typing indicator).
+    // Typing indicators: User can only update their own typing state
     match /typing/{userId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow write: if isUser(userId);
     }
 
-    // Reactions: authenticated users with role can add/remove their own reactions.
+    // Read receipts: User can only update their own read receipt timestamp
+    match /readReceipts/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isUser(userId);
+    }
+
+    // Reactions: Authenticated users can add or remove their own reactions
     match /reactions/{reactionId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated()
-        && request.resource.data.userId == request.auth.uid;
-      allow delete: if isAuthenticated()
-        && resource.data.userId == request.auth.uid;
-      allow update: if false; // reactions are created/deleted, never updated
+      allow create: if isAuthenticated() && (
+        request.resource.data.userId == request.auth.uid ||
+        request.resource.data.userId == request.auth.token.role
+      );
+      allow delete: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.userId == request.auth.token.role
+      );
+      allow update: if false;
     }
 
-    // Memories: both can read/write (shared space).
+    // Shared Couple Collections
     match /memories/{memoryId} {
       allow read, write: if isAuthenticated();
     }
 
-    // Stats: authenticated users with role can read; write is controlled (streak logic).
     match /stats/{statId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
-    }
-
-    // Sparks: authenticated users with role can read/write (AI love sparks).
-    match /sparks/{sparkId} {
       allow read, write: if isAuthenticated();
     }
 
-    // Key dates: shared, both can manage.
-    match /keyDates/{docId} {
-      allow read, write: if isAuthenticated();
-    }
-
-    // Nudges (Thinking of You): authenticated users with role can read/write.
-    match /nudges/{docId} {
-      allow read, write: if isAuthenticated();
-    }
-
-    // Moods: authenticated users with role can read all; write only your own.
-    match /moods/{docId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated()
-        && request.resource.data.userId is string;
-      allow update, delete: if isAuthenticated()
-        && resource.data.userId is string;
-    }
-
-    // Global Stats (relationship statistics)
     match /global_stats/{statId} {
       allow read, write: if isAuthenticated();
     }
 
-    // Read Receipts
-    match /readReceipts/{userId} {
+    match /sparks/{sparkId} {
       allow read, write: if isAuthenticated();
     }
 
-    // Bucket List: shared checklist, both can manage
+    match /keyDates/{docId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /nudges/{docId} {
+      allow read, write: if isAuthenticated();
+    }
+
     match /bucketList/{docId} {
       allow read, write: if isAuthenticated();
     }
 
-    // Time Capsules: couple love letters with unlock dates
+    // Moods: User can only write their own mood
+    match /moods/{docId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (
+        request.resource.data.userId == request.auth.uid ||
+        request.resource.data.userId == request.auth.token.role
+      );
+      allow update, delete: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.userId == request.auth.token.role
+      );
+    }
+
+    // Time Capsules: Sealed love messages.
+    // Recipient cannot read until unlock time has arrived.
     match /timeCapsules/{docId} {
-      allow read, write: if isAuthenticated();
+      allow create: if isAuthenticated() && (
+        request.resource.data.senderId == request.auth.uid ||
+        request.resource.data.senderId == request.auth.token.role
+      );
+      allow update, delete: if isAuthenticated() && (
+        resource.data.senderId == request.auth.uid ||
+        resource.data.senderId == request.auth.token.role
+      );
+      allow read: if isAuthenticated() && (
+        resource == null ||
+        resource.data.senderId == request.auth.uid ||
+        resource.data.senderId == request.auth.token.role ||
+        (resource.data.unlockDate != null && string(request.time) >= resource.data.unlockDate)
+      );
     }
   }
 }

@@ -16,7 +16,6 @@ import {
   Lock,
   Unlock,
   Send,
-  Sparkles,
   Compass,
 } from "lucide-react";
 import {
@@ -34,7 +33,6 @@ import { differenceInCalendarDays, format, parseISO } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { SparklesSvg } from "@/components/ui/sparkles-svg";
 import { LoveSparksRitual } from "@/components/sparks/love-sparks-ritual";
 import { toast } from "@/hooks/use-toast";
 
@@ -147,9 +145,32 @@ export function HomeDashboard({
     return () => unsub();
   }, [firestore]);
 
+  const [isOnThisDay, setIsOnThisDay] = useState(false);
+
   useEffect(() => {
     if (memories && memories.length > 0 && !resurfacedMemory) {
-      setResurfacedMemory(memories[Math.floor(Math.random() * memories.length)]);
+      const today = new Date();
+      const onThisDay = memories.find((m) => {
+        if (!m.date) return false;
+        try {
+          const d = typeof m.date === "string" ? parseISO(m.date) : new Date(m.date);
+          return (
+            d.getMonth() === today.getMonth() &&
+            d.getDate() === today.getDate() &&
+            d.getFullYear() < today.getFullYear()
+          );
+        } catch {
+          return false;
+        }
+      });
+
+      if (onThisDay) {
+        setIsOnThisDay(true);
+        setResurfacedMemory(onThisDay);
+      } else {
+        setIsOnThisDay(false);
+        setResurfacedMemory(memories[Math.floor(Math.random() * memories.length)]);
+      }
     }
   }, [memories, resurfacedMemory]);
 
@@ -446,9 +467,11 @@ export function HomeDashboard({
               <div className="px-4 pt-4 pb-2 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-7 h-7 rounded-xl bg-purple-500/15 flex items-center justify-center">
-                    <SparklesSvg className="w-4 h-4 text-purple-400" />
+                    <Clock className="w-4 h-4 text-purple-400" />
                   </div>
-                  <span className="text-sm font-bold text-foreground">Cherished Memory</span>
+                  <span className="text-sm font-bold text-foreground">
+                    {isOnThisDay ? "On This Day" : "Cherished Memory"}
+                  </span>
                 </div>
                 <button
                   onClick={onOpenMemories}
