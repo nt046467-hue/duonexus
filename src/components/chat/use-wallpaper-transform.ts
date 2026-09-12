@@ -31,7 +31,7 @@ export function useWallpaperTransform({
 }: UseWallpaperTransformOptions) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [isInteracting, setIsInteracting] = useState(false);
-  const [naturalAspect, setNaturalAspect] = useState<number>(9 / 16); // sensible default portrait aspect
+  const [naturalAspect, setNaturalAspect] = useState<number>(9 / 16);
 
   // Keep latest props in refs for 60fps event loop
   const stateRef = useRef({ positionX, positionY, zoom, fit });
@@ -55,8 +55,6 @@ export function useWallpaperTransform({
   const pinchStartRef = useRef<{
     initialDist: number;
     initialZoom: number;
-    initialMidX: number;
-    initialMidY: number;
     initX: number;
     initY: number;
   } | null>(null);
@@ -72,7 +70,7 @@ export function useWallpaperTransform({
     if (!imageSrc) return;
     const img = new Image();
     img.src = imageSrc;
-    if (img.complete && img.naturalWidth > 0) {
+    if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
       setNaturalAspect(img.naturalWidth / img.naturalHeight);
     } else {
       img.onload = () => {
@@ -98,7 +96,7 @@ export function useWallpaperTransform({
     if (currentZ > 115) {
       onChangeRef.current({ zoom: 100 });
     } else {
-      onChangeRef.current({ zoom: 155 });
+      onChangeRef.current({ zoom: 150 });
     }
   }, []);
 
@@ -110,7 +108,6 @@ export function useWallpaperTransform({
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       const currentZ = stateRef.current.zoom;
-      // Normal wheel or trackpad pinch (ctrlKey is set during pinch gestures on trackpads)
       const delta = -e.deltaY;
       const step = e.ctrlKey ? delta * 1.5 : (delta > 0 ? 10 : -10);
       const nextZoom = Math.max(minZoom, Math.min(maxZoom, Math.round(currentZ + step)));
@@ -128,7 +125,6 @@ export function useWallpaperTransform({
 
   // Pointer Down (Mouse or Touch)
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    // Only handle primary mouse click or touch pointers
     if (e.button !== 0 && e.pointerType === "mouse") return;
 
     const target = e.currentTarget;
@@ -145,7 +141,7 @@ export function useWallpaperTransform({
     const lastTap = lastTapRef.current;
     const isDoubleTap =
       now - lastTap.time < 320 &&
-      Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 20;
+      Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 24;
 
     if (isDoubleTap && map.size === 1) {
       handleToggleZoom();
@@ -169,14 +165,10 @@ export function useWallpaperTransform({
       // 2 fingers: pinch start
       const points = Array.from(map.values());
       const dist = Math.hypot(points[0].clientX - points[1].clientX, points[0].clientY - points[1].clientY);
-      const midX = (points[0].clientX + points[1].clientX) / 2;
-      const midY = (points[0].clientY + points[1].clientY) / 2;
 
       pinchStartRef.current = {
         initialDist: Math.max(dist, 1),
         initialZoom: stateRef.current.zoom,
-        initialMidX: midX,
-        initialMidY: midY,
         initX: stateRef.current.positionX,
         initY: stateRef.current.positionY,
       };
@@ -240,31 +232,10 @@ export function useWallpaperTransform({
           Math.min(maxZoom, Math.round(pinchStartRef.current.initialZoom * ratio))
         );
 
-        // Also track translation while pinching
-        const midX = (p1.clientX + p2.clientX) / 2;
-        const midY = (p1.clientY + p2.clientY) / 2;
-        const dMidX = midX - pinchStartRef.current.initialMidX;
-        const dMidY = midY - pinchStartRef.current.initialMidY;
-
-        const renderedW = baseW * (nextZoom / 100);
-        const renderedH = baseH * (nextZoom / 100);
-        const panXRange = Math.max(0, renderedW - cWidth);
-        const panYRange = Math.max(0, renderedH - cHeight);
-
-        let nextX = pinchStartRef.current.initX;
-        let nextY = pinchStartRef.current.initY;
-
-        if (panXRange > 0) {
-          nextX = Math.max(0, Math.min(100, Math.round(pinchStartRef.current.initX - (dMidX / panXRange) * 100)));
-        }
-        if (panYRange > 0) {
-          nextY = Math.max(0, Math.min(100, Math.round(pinchStartRef.current.initY - (dMidY / panYRange) * 100)));
-        }
-
         onChangeRef.current({
           zoom: nextZoom,
-          positionX: nextX,
-          positionY: nextY,
+          positionX: pinchStartRef.current.initX,
+          positionY: pinchStartRef.current.initY,
         });
         return;
       }
@@ -275,29 +246,30 @@ export function useWallpaperTransform({
         const dy = e.clientY - dragStartRef.current.startY;
 
         const currentZ = stateRef.current.zoom;
-        const renderedW = baseW * (currentZ / 100);
-        const renderedH = baseH * (currentZ / 100);
+        const scale = Math.max(1, currentZ / 100);
+        const renderedW = baseW * scale;
+        const renderedH = baseH * scale;
 
-        const panXRange = Math.max(0, renderedW - cWidth);
-        const panYRange = Math.max(0, renderedH - cHeight);
+        const maxPanX = Math.max(0, renderedW - cWidth);
+        const maxPanY = Math.max(0, renderedH - cHeight);
 
         let newX = dragStartRef.current.initX;
         let newY = dragStartRef.current.initY;
 
-        if (panXRange > 0) {
-          const deltaX = - (dx / panXRange) * 100;
+        if (maxPanX > 0) {
+          // Dragging finger to the right (dx > 0) reveals left side of wallpaper (so positionX decreases)
+          const deltaX = - (dx / maxPanX) * 100;
           newX = Math.max(0, Math.min(100, Math.round(dragStartRef.current.initX + deltaX)));
         } else {
-          // If image width matches container, keep centered
-          newX = 50;
+          newX = 50; // Centered when no overflow
         }
 
-        if (panYRange > 0) {
-          const deltaY = - (dy / panYRange) * 100;
+        if (maxPanY > 0) {
+          // Dragging finger down (dy > 0) reveals top of wallpaper (so positionY decreases)
+          const deltaY = - (dy / maxPanY) * 100;
           newY = Math.max(0, Math.min(100, Math.round(dragStartRef.current.initY + deltaY)));
         } else {
-          // If image height matches container, keep standard subject position
-          newY = Math.max(0, Math.min(100, dragStartRef.current.initY));
+          newY = dragStartRef.current.initY;
         }
 
         onChangeRef.current({
@@ -349,3 +321,4 @@ export function useWallpaperTransform({
     positionY,
   };
 }
+

@@ -60,6 +60,7 @@ export function ProfileSheet({
       <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
         <SheetContent
           side="bottom"
+          hideCloseButton
           className="rounded-t-[2.5rem] border-t border-primary/10 bg-background/98 backdrop-blur-2xl p-0 max-h-[85dvh] overflow-y-auto focus:outline-none"
           onOpenAutoFocus={(e) => {
             e.preventDefault();
@@ -73,11 +74,12 @@ export function ProfileSheet({
             <SheetTitle>{mode === "own" ? "Your Profile" : `${displayName}'s Profile`}</SheetTitle>
           </SheetHeader>
 
-          {/* Drag handle + explicit close button row */}
+          {/* Drag handle + single clean close button row */}
           <div className="flex items-center justify-between px-4 pt-3 pb-1">
             <div className="w-8" />{/* spacer */}
             <div className="w-10 h-1 bg-muted-foreground/20 rounded-full" />
             <button
+              type="button"
               onClick={onClose}
               className="w-8 h-8 rounded-full bg-muted/60 hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors active:scale-90"
               aria-label="Close profile"

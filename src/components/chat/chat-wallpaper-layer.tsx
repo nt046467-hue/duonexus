@@ -1,6 +1,6 @@
-"useclient";
+"use client";
 
-import React, { useState, useEffect, useRef, useLayoutEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 
 export interface ChatWallpaperLayerProps {
@@ -59,11 +59,13 @@ export function ChatWallpaperLayer({
     if (!src) return;
     const img = new Image();
     img.src = src;
-    if (img.complete && img.naturalWidth > 0) {
+    if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
       setNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
     } else {
       img.onload = () => {
-        setNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
+        if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+          setNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
+        }
       };
     }
   }, [src]);
@@ -71,7 +73,7 @@ export function ChatWallpaperLayer({
   const opacityVal = (opacity ?? 85) / 100;
   const currentScale = Math.max(1, (zoom ?? 100) / 100);
 
-  // Geometric calculations to cover/contain without distortion
+  // Robust mathematical cover-fit calculation
   let transformStyle: React.CSSProperties = {};
   if (containerSize && naturalSize && naturalSize.width > 0 && naturalSize.height > 0) {
     const cWidth = containerSize.width;
@@ -91,7 +93,7 @@ export function ChatWallpaperLayer({
         baseW = cHeight * imgAspect;
       }
     } else {
-      // "cover" and "smart" fill screen
+      // "cover" and "smart" fill the entire screen viewport with zero empty gaps
       if (imgAspect > cAspect) {
         baseH = cHeight;
         baseW = cHeight * imgAspect;
@@ -101,33 +103,36 @@ export function ChatWallpaperLayer({
       }
     }
 
+    // Rendered dimensions after zoom
     const renderedW = baseW * currentScale;
     const renderedH = baseH * currentScale;
 
-    const panXRange = Math.max(0, renderedW - cWidth);
-    const panYRange = Math.max(0, renderedH - cHeight);
+    // Available overflow range
+    const maxPanX = Math.max(0, renderedW - cWidth);
+    const maxPanY = Math.max(0, renderedH - cHeight);
 
+    // Clamped normalized coordinates (0 to 100)
     const clampedX = Math.max(0, Math.min(100, positionX ?? 50));
     const clampedY = Math.max(0, Math.min(100, positionY ?? 35));
 
-    const shiftX = (0.5 - clampedX / 100) * panXRange;
-    const shiftY = (0.5 - clampedY / 100) * panYRange;
+    // Shift in pixels: shiftX in [-maxPanX, 0], shiftY in [-maxPanY, 0]
+    const shiftX = maxPanX > 0 ? - (clampedX / 100) * maxPanX : 0;
+    const shiftY = maxPanY > 0 ? - (clampedY / 100) * maxPanY : 0;
 
     transformStyle = {
-      width: `${baseW}px`,
-      height: `${baseH}px`,
       position: "absolute",
-      left: "50%",
-      top: "50%",
-      transform: `translate(-50%, -50%) translate3d(${shiftX}px, ${shiftY}px, 0) scale(${currentScale})`,
-      transformOrigin: "center center",
+      left: 0,
+      top: 0,
+      width: `${renderedW}px`,
+      height: `${renderedH}px`,
+      transform: `translate3d(${shiftX}px, ${shiftY}px, 0)`,
       objectFit: "cover",
       willChange: "transform",
       opacity: opacityVal,
       transition: "opacity 0.2s ease-out",
     };
   } else {
-    // Fallback before container / image dimensions are ready
+    // Immediate fallback before dimensions resolve: standard cover fill with 0 gaps
     transformStyle = {
       position: "absolute",
       inset: 0,
@@ -135,8 +140,6 @@ export function ChatWallpaperLayer({
       height: "100%",
       objectFit: fit === "contain" ? "contain" : "cover",
       objectPosition: `${positionX ?? 50}% ${positionY ?? 35}%`,
-      transform: currentScale > 1 ? `scale(${currentScale})` : "none",
-      transformOrigin: "center center",
       opacity: opacityVal,
     };
   }
@@ -161,7 +164,7 @@ export function ChatWallpaperLayer({
         }}
       />
 
-      {/* Layer 2: Crisp Wallpaper with accurate scale & transform */}
+      {/* Layer 2: Crisp Wallpaper with accurate scale & bounded translate */}
       <div
         ref={interactiveRef}
         className="absolute inset-0 pointer-events-none overflow-hidden"
@@ -189,3 +192,4 @@ export function ChatWallpaperLayer({
     </div>
   );
 }
+

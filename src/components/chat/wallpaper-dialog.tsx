@@ -17,7 +17,6 @@ import {
   RotateCcw,
   ImagePlus,
   RefreshCw,
-  Wand2,
   Eye,
   SlidersHorizontal,
   ArrowLeft,
@@ -31,6 +30,13 @@ import {
   X,
   ZoomIn,
   ChevronRight,
+  Camera,
+  Film,
+  Sunset,
+  Sun,
+  Aperture,
+  Moon,
+  Sliders,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useViewport } from "@/hooks/use-viewport";
@@ -107,36 +113,56 @@ export const PRESET_WALLPAPERS = [
   },
 ];
 
-const STYLE_OPTIONS: { id: WallpaperStyle; label: string; icon: string; desc: string }[] = [
+export interface StyleOption {
+  id: WallpaperStyle | "original";
+  label: string;
+  desc: string;
+  icon: React.ComponentType<{ className?: string }>;
+  iconColor: string;
+}
+
+const STYLE_OPTIONS: StyleOption[] = [
+  {
+    id: "original",
+    label: "Original Photo",
+    desc: "Authentic natural photo with zero filters",
+    icon: Camera,
+    iconColor: "text-blue-500",
+  },
   {
     id: "cinematic",
     label: "Cinematic",
-    icon: "ðŸŽ¬",
-    desc: "35mm warm tone, gentle anamorphic mood",
+    desc: "35mm warm tone & subtle film depth",
+    icon: Film,
+    iconColor: "text-amber-500",
   },
   {
     id: "golden_hour",
     label: "Golden Hour",
-    icon: "ðŸŒ…",
-    desc: "Warm amber glow & tender rim lighting",
+    desc: "Warm amber glow & sunset lighting",
+    icon: Sunset,
+    iconColor: "text-orange-500",
   },
   {
     id: "dreamy_soft",
     label: "Dreamy Glow",
-    icon: "ðŸŒ¸",
-    desc: "Soft daylight diffusion & romantic pastel tone",
+    desc: "Soft daylight diffusion & pastel tone",
+    icon: Sun,
+    iconColor: "text-pink-400",
   },
   {
     id: "clean_studio",
     label: "Clean Studio",
-    icon: "ðŸ“¸",
-    desc: "Crisp natural tones & calm neutral balance",
+    desc: "Crisp natural tones & calm balance",
+    icon: Aperture,
+    iconColor: "text-teal-400",
   },
   {
     id: "film_noir",
     label: "Velvet Noir",
-    icon: "ðŸ–¤",
     desc: "High tonal monochrome & velvety shadows",
+    icon: Moon,
+    iconColor: "text-zinc-300",
   },
 ];
 
@@ -173,13 +199,13 @@ export function WallpaperDialog({
 
   // Studio Mode State
   const [inStudioMode, setInStudioMode] = useState<boolean>(false);
-  const [selectedStyle, setSelectedStyle] = useState<WallpaperStyle>("cinematic");
+  const [selectedStyle, setSelectedStyle] = useState<WallpaperStyle | "original">("original");
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [previewTab, setPreviewTab] = useState<"generated" | "original">("generated");
   const [generationMessage, setGenerationMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Mobile wizard: 1=Choose source, 2=AI Style (custom photo only), 3=Preview, 4=Frame & Save
+  // Mobile wizard: 1=Choose source, 2=Photo Filter (custom photo only), 3=Preview, 4=Frame & Save
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4>(1);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -199,6 +225,9 @@ export function WallpaperDialog({
       setErrorMessage(null);
       setGenerationMessage(null);
       setWizardStep(1);
+      setSelectedStyle(
+        (currentConfig.styleName as WallpaperStyle | "original") || "original"
+      );
       if (typeof window !== "undefined") {
         setPreviewDevice(window.innerWidth < 768 ? "mobile" : "desktop");
       }
@@ -226,14 +255,14 @@ export function WallpaperDialog({
       setOriginalPhotoUrl(dataUrl);
       setCustomUrl(dataUrl);
       setSelectedId("custom");
+      setSelectedStyle("original");
 
       if (isMobile) {
-        // Go to Step 2 (Style) so user can pick AI mood before generating
+        // Go to Step 2 (Style & Enhancement)
         setWizardStep(2);
       } else {
         setInStudioMode(true);
-        setPreviewTab("generated");
-        await runGeneration(dataUrl, selectedStyle);
+        setPreviewTab("original");
       }
     };
     reader.readAsDataURL(file);
@@ -258,7 +287,7 @@ export function WallpaperDialog({
 
       if (aiResult.success && aiResult.wallpaperUrl && aiResult.wallpaperUrl !== photoBase64) {
         setCustomUrl(aiResult.wallpaperUrl);
-        setGenerationMessage(aiResult.message || "Wallpaper generated âœ¨");
+        setGenerationMessage(aiResult.message || "Wallpaper generated successfully");
       } else {
         setGenerationMessage(aiResult.message || "Photographic wallpaper ready");
       }
@@ -272,12 +301,23 @@ export function WallpaperDialog({
 
   const handleRegenerate = async () => {
     if (!originalPhotoUrl) return;
+    if (selectedStyle === "original") {
+      setCustomUrl(originalPhotoUrl);
+      setPreviewTab("original");
+      return;
+    }
     await runGeneration(originalPhotoUrl, selectedStyle);
   };
 
-  const handleStyleChange = async (style: WallpaperStyle) => {
+  const handleStyleChange = async (style: WallpaperStyle | "original") => {
     setSelectedStyle(style);
     if (!originalPhotoUrl) return;
+    if (style === "original") {
+      setCustomUrl(originalPhotoUrl);
+      setPreviewTab("original");
+      setGenerationMessage(null);
+      return;
+    }
     await runGeneration(originalPhotoUrl, style);
   };
 
@@ -578,6 +618,7 @@ export function WallpaperDialog({
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         {STYLE_OPTIONS.map((st) => {
           const isSelected = selectedStyle === st.id;
+          const Icon = st.icon;
           return (
             <button
               key={st.id}
@@ -585,13 +626,15 @@ export function WallpaperDialog({
               onClick={() => handleStyleChange(st.id)}
               disabled={isGenerating}
               className={cn(
-                "flex items-start gap-2 p-2 rounded-xl border text-left transition-all",
+                "flex items-start gap-2.5 p-2 rounded-xl border text-left transition-all",
                 isSelected
                   ? "border-primary bg-primary/10 ring-1 ring-primary/30"
                   : "border-border/60 hover:border-primary/40 bg-muted/20"
               )}
             >
-              <span className="text-base leading-none">{st.icon}</span>
+              <div className={cn("w-7 h-7 rounded-lg flex items-center justify-center shrink-0 bg-muted/60", st.iconColor)}>
+                <Icon className="w-3.5 h-3.5" />
+              </div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-bold truncate">{st.label}</p>
                 <p className="text-[9px] text-muted-foreground line-clamp-1">
@@ -605,14 +648,14 @@ export function WallpaperDialog({
 
       {generationMessage && (
         <p className="text-[11px] text-muted-foreground font-medium flex items-center gap-1.5">
-          <Wand2 className="w-3.5 h-3.5 text-primary" />
+          <SlidersHorizontal className="w-3.5 h-3.5 text-primary" />
           {generationMessage}
         </p>
       )}
     </div>
   );
 
-  // Top Bar for Right Preview (Tabs & Device Switcher)
+  // Top Bar for Right Preview (Tabs & Clean Header)
   const renderPreviewTopBar = () => (
     <div className="flex items-center justify-between w-full gap-2 mb-2">
       {inStudioMode ? (
@@ -645,42 +688,45 @@ export function WallpaperDialog({
           </button>
         </div>
       ) : (
-        <div className="flex items-center gap-1 text-xs font-bold text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground">
+          <Eye className="w-3.5 h-3.5 text-primary" />
           <span>Live Chat Preview</span>
         </div>
       )}
 
-      {/* Device Switcher (Desktop ðŸ’» vs Phone ðŸ“±) */}
-      <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-full border border-primary/10">
-        <button
-          type="button"
-          onClick={() => setPreviewDevice("desktop")}
-          className={cn(
-            "flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-all",
-            previewDevice === "desktop"
-              ? "bg-primary text-primary-foreground shadow-xs"
-              : "text-muted-foreground hover:text-foreground"
-          )}
-          title="Desktop Preview"
-        >
-          <Monitor className="w-3 h-3" />
-          Desktop
-        </button>
-        <button
-          type="button"
-          onClick={() => setPreviewDevice("mobile")}
-          className={cn(
-            "flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-all",
-            previewDevice === "mobile"
-              ? "bg-primary text-primary-foreground shadow-xs"
-              : "text-muted-foreground hover:text-foreground"
-          )}
-          title="Phone Preview"
-        >
-          <Smartphone className="w-3 h-3" />
-          Phone
-        </button>
-      </div>
+      {/* Device Switcher (Desktop vs Phone) */}
+      {!isMobile && (
+        <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-full border border-primary/10">
+          <button
+            type="button"
+            onClick={() => setPreviewDevice("desktop")}
+            className={cn(
+              "flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-all",
+              previewDevice === "desktop"
+                ? "bg-primary text-primary-foreground shadow-xs"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            title="Desktop Preview"
+          >
+            <Monitor className="w-3 h-3" />
+            Desktop
+          </button>
+          <button
+            type="button"
+            onClick={() => setPreviewDevice("mobile")}
+            className={cn(
+              "flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-all",
+              previewDevice === "mobile"
+                ? "bg-primary text-primary-foreground shadow-xs"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            title="Phone Preview"
+          >
+            <Smartphone className="w-3 h-3" />
+            Phone
+          </button>
+        </div>
+      )}
     </div>
   );
 
@@ -696,8 +742,8 @@ export function WallpaperDialog({
     const TOTAL_STEPS = 4;
     const wizardTitles: Record<number, string> = {
       1: "Choose Wallpaper",
-      2: "AI Style",
-      3: "Preview",
+      2: "Photo Filter & Mood",
+      3: "Preview Wallpaper",
       4: "Frame & Save",
     };
 
@@ -816,17 +862,18 @@ export function WallpaperDialog({
         );
       }
 
-      /* STEP 2 â€” AI Style (custom photo only) */
+      /* STEP 2 ── Photo Filter & Mood (custom photo only) */
       if (wizardStep === 2) {
         return (
           <div className="space-y-4">
             <p className="text-xs text-muted-foreground">
-              Choose a photographic mood â€” the AI will apply it to your photo.
+              Choose an AI photographic mood, or keep your natural photo.
             </p>
 
             <div className="grid grid-cols-2 gap-2.5">
               {STYLE_OPTIONS.map((st) => {
                 const isSelected = selectedStyle === st.id;
+                const Icon = st.icon;
                 return (
                   <button
                     key={st.id}
@@ -839,7 +886,9 @@ export function WallpaperDialog({
                         : "border-border/60 hover:border-primary/40 bg-muted/20"
                     )}
                   >
-                    <span className="text-2xl leading-none shrink-0">{st.icon}</span>
+                    <div className={cn("w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-muted/60", st.iconColor)}>
+                      <Icon className="w-4 h-4" />
+                    </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold truncate">{st.label}</p>
                       <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">{st.desc}</p>
@@ -929,35 +978,53 @@ export function WallpaperDialog({
       }
 
       if (wizardStep === 2) {
+        const isOriginal = selectedStyle === "original";
         return (
           <>
             <Button
               type="button"
               onClick={async () => {
-                if (originalPhotoUrl) {
+                if (!originalPhotoUrl) return;
+                if (isOriginal) {
+                  setCustomUrl(originalPhotoUrl);
+                  setPreviewTab("original");
+                  setWizardStep(3);
+                } else {
                   setPreviewTab("generated");
                   setWizardStep(3);
-                  await runGeneration(originalPhotoUrl, selectedStyle);
+                  await runGeneration(originalPhotoUrl, selectedStyle as WallpaperStyle);
                 }
               }}
               disabled={isGenerating || !originalPhotoUrl}
               className="w-full h-11 rounded-xl font-bold text-sm gap-2"
             >
-              <Wand2 className="w-4 h-4" />
-              Generate Wallpaper
+              {isOriginal ? (
+                <>
+                  <Check className="w-4 h-4" />
+                  Continue with Natural Photo
+                </>
+              ) : (
+                <>
+                  <Palette className="w-4 h-4" />
+                  Apply {STYLE_OPTIONS.find((s) => s.id === selectedStyle)?.label || "Style"} & Continue
+                </>
+              )}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                // Skip generation â€” use original photo as wallpaper
-                setPreviewTab("original");
-                setWizardStep(3);
-              }}
-              className="w-full h-11 rounded-xl text-sm"
-            >
-              Skip â€” Use Original Photo
-            </Button>
+            {!isOriginal && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setSelectedStyle("original");
+                  setCustomUrl(originalPhotoUrl);
+                  setPreviewTab("original");
+                  setWizardStep(3);
+                }}
+                className="w-full h-11 rounded-xl text-sm"
+              >
+                Use Natural Photo Directly
+              </Button>
+            )}
           </>
         );
       }
@@ -1242,16 +1309,16 @@ export function WallpaperDialog({
                 </button>
               )}
               <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-pink-500/20 to-purple-500/20 border border-pink-500/30 flex items-center justify-center text-pink-500 shadow-xs">
-                {inStudioMode ? <Wand2 className="w-4 h-4" /> : <Palette className="w-4 h-4" />}
+                {inStudioMode ? <SlidersHorizontal className="w-4 h-4" /> : <Palette className="w-4 h-4" />}
               </div>
               <div>
                 <DialogTitle className="text-base sm:text-lg font-bold">
-                  {inStudioMode ? "AI Wallpaper Studio" : "Chat Wallpaper"}
+                  {inStudioMode ? "Wallpaper Studio" : "Chat Wallpaper"}
                 </DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground line-clamp-1">
                   {inStudioMode
-                    ? "Personalize photo with realistic photorealistic styling"
-                    : "Drag to frame â€¢ Wheel/Pinch to zoom â€¢ Realistic chat preview"}
+                    ? "Personalize photo with photographic styling"
+                    : "Drag to frame • Wheel/Pinch to zoom • Realistic chat preview"}
                 </DialogDescription>
               </div>
             </div>
@@ -1263,7 +1330,7 @@ export function WallpaperDialog({
                 onClick={() => setInStudioMode(true)}
                 className="text-xs h-7 gap-1 px-2.5 rounded-full border-pink-500/30 text-pink-600 dark:text-pink-400 hover:bg-pink-500/10"
               >
-                <Wand2 className="w-3 h-3" />
+                <SlidersHorizontal className="w-3 h-3" />
                 Studio
               </Button>
             )}
@@ -1302,43 +1369,29 @@ export function WallpaperDialog({
                 {renderFitModes()}
                 {renderOpacityControl()}
 
-                {/* Quick Subject Framing Snaps */}
+                {/* Interactive Framing Info Card */}
                 <div className="p-3 bg-muted/40 rounded-2xl space-y-2 border border-primary/10">
                   <div className="flex justify-between items-center text-xs font-semibold">
                     <span className="text-muted-foreground flex items-center gap-1">
                       <ZoomIn className="w-3.5 h-3.5 text-primary" />
-                      Quick Framing Snaps
+                      Live Wallpaper Framing
                     </span>
-                    <span className="text-[10px] font-mono text-muted-foreground">
-                      X: {positionX}% Â· Y: {positionY}%
-                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPositionX(50);
+                        setPositionY(35);
+                        setZoom(100);
+                      }}
+                      className="text-[11px] font-semibold text-primary hover:underline flex items-center gap-1"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      Reset
+                    </button>
                   </div>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {[
-                      { label: "Top / Faces", x: 50, y: 15 },
-                      { label: "Subject", x: 50, y: 35 },
-                      { label: "Center", x: 50, y: 50 },
-                      { label: "Reset", x: 50, y: 35 },
-                    ].map((preset) => (
-                      <button
-                        key={preset.label}
-                        type="button"
-                        onClick={() => {
-                          setPositionX(preset.x);
-                          setPositionY(preset.y);
-                          if (preset.label === "Reset") setZoom(100);
-                        }}
-                        className={cn(
-                          "py-1 px-1 rounded-lg text-[11px] font-semibold border transition-all text-center",
-                          Math.abs(positionX - preset.x) <= 5 && Math.abs(positionY - preset.y) <= 5
-                            ? "border-primary bg-primary/15 text-primary ring-1 ring-primary/30"
-                            : "border-border/60 text-muted-foreground hover:bg-muted/40"
-                        )}
-                      >
-                        {preset.label}
-                      </button>
-                    ))}
-                  </div>
+                  <p className="text-[10px] text-muted-foreground leading-relaxed">
+                    Drag the preview to adjust position naturally. Pinch or scroll wheel to zoom without leaving empty edges.
+                  </p>
                 </div>
               </>
             )}
