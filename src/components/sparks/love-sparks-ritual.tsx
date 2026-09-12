@@ -89,6 +89,8 @@ export function LoveSparksRitual({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
 
+  const isArchivingRef = React.useRef(false);
+
   // Realtime subscription to today's spark document
   useEffect(() => {
     if (!firestore) return;
@@ -119,27 +121,36 @@ export function LoveSparksRitual({
           }
 
           // Auto-archive to memories if both answered and not yet saved
-          if (bothAnswered && !data.savedToMemories) {
+          if (bothAnswered && !data.savedToMemories && !isArchivingRef.current) {
+            isArchivingRef.current = true;
             try {
               await updateDoc(sparkRef, { savedToMemories: true });
-              await addDoc(collection(firestore, "memories"), {
-                title: `Love Spark: ${data.question.slice(0, 60)}...`,
-                date: todayDateStr,
-                type: "favorite",
-                photoURL: null,
-                sparkQuestion: data.question,
-                sparkAnswers: {
-                  [myName]: myAns,
-                  [partnerName]: partnerAns,
+              const memoryDocId = `spark_${todayDateStr}`;
+              await setDoc(
+                doc(firestore, "memories", memoryDocId),
+                {
+                  id: memoryDocId,
+                  title: `Love Spark: ${data.question.slice(0, 60)}...`,
+                  date: todayDateStr,
+                  type: "favorite",
+                  photoURL: null,
+                  sparkQuestion: data.question,
+                  sparkAnswers: {
+                    [myName]: myAns,
+                    [partnerName]: partnerAns,
+                  },
+                  createdAt: serverTimestamp(),
                 },
-                createdAt: serverTimestamp(),
-              });
+                { merge: true }
+              );
               toast({
                 title: "Spark Saved to Memories 💕",
                 description: "Your daily ritual answers are safely archived forever.",
               });
             } catch (err) {
               console.warn("Failed to auto-archive spark:", err);
+            } finally {
+              isArchivingRef.current = false;
             }
           }
         } else {

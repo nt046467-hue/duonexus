@@ -504,149 +504,149 @@ export function ChatHeader({
             >
               {/* Scrollable body */}
               <div className="overflow-y-auto flex-1 px-6 pt-7 pb-2">
-              <DialogHeader className="mb-4">
-                <DialogTitle className="font-headline text-xl tracking-tighter text-left">
-                  Profile Settings
-                </DialogTitle>
-                <DialogDescription className="text-xs text-muted-foreground text-left">
-                  Customize your DuoNexus presence.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="py-1 space-y-4">
-                <div className="flex flex-col items-center gap-2">
-                  <div
-                    className="relative group cursor-pointer"
-                    onClick={() => photoInputRef.current?.click()}
-                  >
-                    <Avatar className="h-20 w-20 border-4 border-primary/10 shadow-xl transition-transform active:scale-95">
-                      <AvatarImage key={newPhotoURL} src={newPhotoURL} className="object-cover" />
-                      <AvatarFallback className="bg-primary/5 text-primary">
-                        <UserIcon className="w-8 h-8" />
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Camera className="w-6 h-6 text-white" />
-                    </div>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      ref={photoInputRef}
-                      onChange={handlePhotoUpload}
-                    />
-                  </div>
-                  <div className="flex flex-col items-center gap-0.5">
-                    <p className="text-[10px] text-muted-foreground font-headline">Tap photo to change</p>
-                    <button
-                      onClick={() => { setIsSettingsOpen(false); setIsOwnProfileOpen(true); }}
-                      className="text-[10px] text-primary/70 hover:text-primary font-headline underline underline-offset-2 transition-colors"
+                <DialogHeader className="mb-4">
+                  <DialogTitle className="font-headline text-xl tracking-tighter text-left">
+                    Profile Settings
+                  </DialogTitle>
+                  <DialogDescription className="text-xs text-muted-foreground text-left">
+                    Customize your DuoNexus presence.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="py-1 space-y-4">
+                  <div className="flex flex-col items-center gap-2">
+                    <div
+                      className="relative group cursor-pointer"
+                      onClick={() => photoInputRef.current?.click()}
                     >
-                      View Profile →
-                    </button>
-                  </div>
-                </div>
-                <div className="space-y-4">
-                  {/* Duo Streak Card in Settings */}
-                  <div className="flex items-center justify-between p-4 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded-2xl border border-orange-500/20">
-                    <div className="flex items-center gap-3">
-                      <Flame className="w-5 h-5 fill-orange-500 text-orange-500 animate-pulse" />
-                      <div className="text-left">
-                        <p className="text-xs font-bold font-headline uppercase tracking-wide">Duo Streak</p>
-                        <p className="text-[9px] text-muted-foreground">Keep the connection active daily!</p>
+                      <Avatar className="h-20 w-20 border-4 border-primary/10 shadow-xl transition-transform active:scale-95">
+                        <AvatarImage key={newPhotoURL} src={newPhotoURL} className="object-cover" />
+                        <AvatarFallback className="bg-primary/5 text-primary">
+                          <UserIcon className="w-8 h-8" />
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Camera className="w-6 h-6 text-white" />
                       </div>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        ref={photoInputRef}
+                        onChange={handlePhotoUpload}
+                      />
                     </div>
-                    <span className="font-headline text-xl font-black pr-1">
-                      {isStreakLoaded ? streak : <span className="inline-block w-6 h-5 bg-orange-500/30 animate-pulse rounded" />}
-                    </span>
+                    <div className="flex flex-col items-center gap-0.5">
+                      <p className="text-[10px] text-muted-foreground font-headline">Tap photo to change</p>
+                      <button
+                        onClick={() => { setIsSettingsOpen(false); setIsOwnProfileOpen(true); }}
+                        className="text-[10px] text-primary/70 hover:text-primary font-headline underline underline-offset-2 transition-colors"
+                      >
+                        View Profile →
+                      </button>
+                    </div>
                   </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-[10px] uppercase tracking-widest font-headline text-primary/60 ml-1 font-bold">
-                      Display Name
-                    </Label>
-                    <Input
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                      className="bg-card border-primary/5 rounded-2xl h-12 px-5 text-sm"
-                    />
-                  </div>
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between p-4 bg-muted/30 rounded-[1.8rem] border border-primary/5">
+                  <div className="space-y-4">
+                    {/* Duo Streak Card in Settings */}
+                    <div className="flex items-center justify-between p-4 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded-2xl border border-orange-500/20">
                       <div className="flex items-center gap-3">
-                        <Bell className="w-5 h-5 text-primary" />
-                        <span className="text-sm font-semibold">Push Notifications</span>
+                        <Flame className="w-5 h-5 fill-orange-500 text-orange-500 animate-pulse" />
+                        <div className="text-left">
+                          <p className="text-xs font-bold font-headline uppercase tracking-wide">Duo Streak</p>
+                          <p className="text-[9px] text-muted-foreground">Keep the connection active daily!</p>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        {notificationsEnabled && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 rounded-full text-primary hover:bg-primary/10"
-                            onClick={sendTestNotification}
-                          >
-                            <Send className="w-4 h-4" />
-                          </Button>
-                        )}
+                      <span className="font-headline text-xl font-black pr-1">
+                        {isStreakLoaded ? streak : <span className="inline-block w-6 h-5 bg-orange-500/30 animate-pulse rounded" />}
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="text-[10px] uppercase tracking-widest font-headline text-primary/60 ml-1 font-bold">
+                        Display Name
+                      </Label>
+                      <Input
+                        value={newName}
+                        onChange={(e) => setNewName(e.target.value)}
+                        className="bg-card border-primary/5 rounded-2xl h-12 px-5 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between p-4 bg-muted/30 rounded-[1.8rem] border border-primary/5">
+                        <div className="flex items-center gap-3">
+                          <Bell className="w-5 h-5 text-primary" />
+                          <span className="text-sm font-semibold">Push Notifications</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          {notificationsEnabled && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 rounded-full text-primary hover:bg-primary/10"
+                              onClick={sendTestNotification}
+                            >
+                              <Send className="w-4 h-4" />
+                            </Button>
+                          )}
+                          <Switch
+                            checked={notificationsEnabled}
+                            onCheckedChange={toggleNotifications}
+                            className="data-[state=checked]:bg-primary"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between p-4 bg-muted/30 rounded-[1.8rem] border border-primary/5">
+                        <div className="flex items-center gap-3">
+                          {isDarkMode ? (
+                            <Moon className="w-5 h-5 text-primary" />
+                          ) : (
+                            <Sun className="w-5 h-5 text-orange-500" />
+                          )}
+                          <span className="text-sm font-semibold">Dark Mode</span>
+                        </div>
                         <Switch
-                          checked={notificationsEnabled}
-                          onCheckedChange={toggleNotifications}
+                          checked={isDarkMode}
+                          onCheckedChange={toggleTheme}
                           className="data-[state=checked]:bg-primary"
                         />
                       </div>
-                    </div>
-                    <div className="flex items-center justify-between p-4 bg-muted/30 rounded-[1.8rem] border border-primary/5">
-                      <div className="flex items-center gap-3">
-                        {isDarkMode ? (
-                          <Moon className="w-5 h-5 text-primary" />
-                        ) : (
-                          <Sun className="w-5 h-5 text-orange-500" />
-                        )}
-                        <span className="text-sm font-semibold">Dark Mode</span>
-                      </div>
-                      <Switch
-                        checked={isDarkMode}
-                        onCheckedChange={toggleTheme}
-                        className="data-[state=checked]:bg-primary"
-                      />
-                    </div>
 
-                    {/* Chat Wallpaper */}
-                    <div className="flex items-center justify-between p-4 bg-muted/30 rounded-[1.8rem] border border-primary/5">
-                      <div className="flex items-center gap-3">
-                        <ImageIcon className="w-5 h-5 text-primary" />
-                        <div className="text-left">
-                          <p className="text-sm font-semibold">Chat Wallpaper</p>
-                          <p className="text-[9px] text-muted-foreground">Syncs to both devices</p>
+                      {/* Chat Wallpaper */}
+                      <div className="flex items-center justify-between p-4 bg-muted/30 rounded-[1.8rem] border border-primary/5">
+                        <div className="flex items-center gap-3">
+                          <ImageIcon className="w-5 h-5 text-primary" />
+                          <div className="text-left">
+                            <p className="text-sm font-semibold">Chat Wallpaper</p>
+                            <p className="text-[9px] text-muted-foreground">Syncs to both devices</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => bgInputRef.current?.click()}
+                            disabled={isUploadingBg}
+                            className="h-8 px-3 rounded-xl text-[10px] font-headline uppercase tracking-widest bg-primary/10 text-primary hover:bg-primary/20 active:scale-95 transition-transform flex items-center gap-1.5 disabled:opacity-50"
+                          >
+                            {isUploadingBg ? <Loader2 className="w-3 h-3 animate-spin" /> : <Camera className="w-3 h-3" />}
+                            {isUploadingBg ? "Saving…" : "Upload"}
+                          </button>
+                          <button
+                            onClick={handleBgReset}
+                            className="h-8 w-8 rounded-xl bg-muted/60 hover:bg-destructive/10 hover:text-destructive active:scale-95 transition-transform flex items-center justify-center"
+                            title="Remove custom wallpaper"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => bgInputRef.current?.click()}
-                          disabled={isUploadingBg}
-                          className="h-8 px-3 rounded-xl text-[10px] font-headline uppercase tracking-widest bg-primary/10 text-primary hover:bg-primary/20 active:scale-95 transition-transform flex items-center gap-1.5 disabled:opacity-50"
-                        >
-                          {isUploadingBg ? <Loader2 className="w-3 h-3 animate-spin" /> : <Camera className="w-3 h-3" />}
-                          {isUploadingBg ? "Saving…" : "Upload"}
-                        </button>
-                        <button
-                          onClick={handleBgReset}
-                          className="h-8 w-8 rounded-xl bg-muted/60 hover:bg-destructive/10 hover:text-destructive active:scale-95 transition-transform flex items-center justify-center"
-                          title="Remove custom wallpaper"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      <input
+                        ref={bgInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleBgUpload}
+                      />
                     </div>
-                    <input
-                      ref={bgInputRef}
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={handleBgUpload}
-                    />
                   </div>
                 </div>
-              </div>
               </div>{/* end scrollable body */}
 
               {/* Sticky footer — always visible above keyboard/viewport edge */}

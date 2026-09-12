@@ -25,6 +25,7 @@ interface DesktopNavRailProps {
   isGeneratingSpark: boolean;
   myAvatar: string;
   myName: string;
+  myId?: string | null;
   unreadCount?: number;
   isDark?: boolean;
   onToggleTheme?: () => void;
@@ -39,6 +40,7 @@ export function DesktopNavRail({
   isGeneratingSpark,
   myAvatar,
   myName,
+  myId,
   unreadCount = 0,
   isDark: externalIsDark,
   onToggleTheme,
@@ -71,6 +73,8 @@ export function DesktopNavRail({
     }
   };
 
+  const isKaru = myId === "karu" || (typeof window !== "undefined" && localStorage.getItem("duonexus_role") === "karu");
+
   const navItems = [
     {
       id: "home",
@@ -85,6 +89,17 @@ export function DesktopNavRail({
       badge: unreadCount > 0 ? (unreadCount > 9 ? "9+" : unreadCount) : null,
       onClick: () => onSelectTab("chat"),
     },
+    ...(isKaru
+      ? [
+          {
+            id: "love",
+            label: "For You, Karu ❤️",
+            icon: Heart,
+            isLoveTab: true,
+            onClick: () => onSelectTab("love"),
+          },
+        ]
+      : []),
     {
       id: "memories",
       label: "Memories & Milestones",
@@ -127,6 +142,7 @@ export function DesktopNavRail({
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
+              const isLove = (item as any).isLoveTab;
 
               return (
                 <Tooltip key={item.id}>
@@ -136,17 +152,32 @@ export function DesktopNavRail({
                       className={cn(
                         "relative w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-200 group",
                         isActive
-                          ? "bg-primary text-primary-foreground shadow-md shadow-primary/25 scale-100"
+                          ? isLove
+                            ? "bg-gradient-to-tr from-rose-500 to-pink-500 text-white shadow-md shadow-rose-500/35 scale-100"
+                            : "bg-primary text-primary-foreground shadow-md shadow-primary/25 scale-100"
+                          : isLove
+                          ? "text-rose-400 hover:text-rose-300 hover:bg-rose-500/15 hover:scale-105"
                           : "text-muted-foreground hover:text-foreground hover:bg-primary/10 hover:scale-105"
                       )}
                       aria-label={item.label}
                     >
                       {/* Active indicator bar */}
                       {isActive && (
-                        <div className="absolute -left-2 w-1 h-6 bg-primary rounded-r-full" />
+                        <div
+                          className={cn(
+                            "absolute -left-2 w-1 h-6 rounded-r-full",
+                            isLove ? "bg-rose-500 shadow-sm shadow-rose-500" : "bg-primary"
+                          )}
+                        />
                       )}
 
-                      <Icon className={cn("w-5 h-5", item.loading && "animate-spin")} />
+                      <Icon
+                        className={cn(
+                          "w-5 h-5",
+                          item.loading && "animate-spin",
+                          isLove && "fill-current"
+                        )}
+                      />
 
                       {/* Badge */}
                       {item.badge && (

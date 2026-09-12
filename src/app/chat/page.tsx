@@ -42,6 +42,7 @@ import { MoodCheckin, MoodBadges } from "@/components/chat/mood-checkin";
 import { useViewport } from "@/hooks/use-viewport";
 import { DesktopNavRail } from "@/components/chat/desktop-nav-rail";
 import { HomeDashboard } from "@/components/dashboard/home-dashboard";
+import { KaruLoveView } from "@/components/love/karu-love-view";
 import { ToolsHub } from "@/components/tools/tools-hub";
 import { NudgeOverlay } from "@/components/nudges/nudge-overlay";
 import { LoveSparksRitual } from "@/components/sparks/love-sparks-ritual";
@@ -676,7 +677,7 @@ export default function ChatPage() {
         userPresenceRef,
         { online, inChat, lastSeen: serverTimestamp() },
         { merge: true }
-      ).catch(() => {});
+      ).catch(() => { });
     };
 
     const isChatView = () =>
@@ -714,7 +715,7 @@ export default function ChatPage() {
       window.removeEventListener("beforeunload", handleBeforeUnload);
       writePresence(false, false);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [firestore, myId, user]);
 
   // READ RECEIPTS — write when chat screen is open
@@ -1706,7 +1707,7 @@ export default function ChatPage() {
       }
 
       await addDoc(collection(firestore, "messages"), newMsgData);
-      
+
       // Clean up optimistic message on successful persistence
       setOptimisticMessages((prev) => prev.filter((m) => m.id !== tempOptId));
 
@@ -1736,7 +1737,7 @@ export default function ChatPage() {
         }).catch((pushErr) => {
           console.warn("[Chat] Push notification dispatch warning:", pushErr);
         });
-      }).catch(() => {});
+      }).catch(() => { });
 
       // Auto-update real streak in Firestore (TikTok-style daily tracking)
       try {
@@ -2671,11 +2672,14 @@ export default function ChatPage() {
     }
   };
 
-  // Navigation tabs
+  // Navigation tabs (Karu gets a dedicated Love tab, hidden strictly from Nabin)
+  const isKaruUser = myId === "karu" || (typeof window !== "undefined" && localStorage.getItem("duonexus_role") === "karu");
+
   const tabs = [
     { id: "home", label: "Home", icon: HomeIcon },
     { id: "tools", label: "Tools", icon: LayoutGrid },
     { id: "chat", label: "Chat", icon: MessageCircle },
+    ...(isKaruUser ? [{ id: "love", label: "For You", icon: Heart }] : []),
     { id: "memories", label: "Memories", icon: Archive },
     { id: "settings", label: "Settings", icon: SettingsIcon },
   ];
@@ -2759,6 +2763,10 @@ export default function ChatPage() {
               messages={messages || []}
               darkMode={darkMode}
             />
+          </div>
+        ) : activeTab === "love" && isKaruUser ? (
+          <div className="w-full min-h-full">
+            <KaruLoveView myId={myId} darkMode={darkMode} />
           </div>
         ) : activeTab === "chat" ? (
           <div className="px-3.5 py-3 pb-32 w-full space-y-4">
@@ -4365,8 +4373,8 @@ export default function ChatPage() {
                         >
                           <div
                             className={`w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-colors ${swipingMsgState.triggered
-                                ? "bg-[#0084ff] text-white ring-2 ring-[#0084ff]/30"
-                                : c("bg-gray-200 text-gray-700", "bg-zinc-700 text-gray-200")
+                              ? "bg-[#0084ff] text-white ring-2 ring-[#0084ff]/30"
+                              : c("bg-gray-200 text-gray-700", "bg-zinc-700 text-gray-200")
                               }`}
                           >
                             <CornerUpLeft className="w-4 h-4 stroke-[2.5]" />
@@ -4406,8 +4414,8 @@ export default function ChatPage() {
                         >
                           <div
                             className={`w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-colors ${swipingMsgState.triggered
-                                ? "bg-[#0084ff] text-white ring-2 ring-[#0084ff]/30"
-                                : c("bg-gray-200 text-gray-700", "bg-zinc-700 text-gray-200")
+                              ? "bg-[#0084ff] text-white ring-2 ring-[#0084ff]/30"
+                              : c("bg-gray-200 text-gray-700", "bg-zinc-700 text-gray-200")
                               }`}
                           >
                             <CornerUpLeft className="w-4 h-4 stroke-[2.5]" />
@@ -4704,20 +4712,20 @@ export default function ChatPage() {
                                   rel="noopener noreferrer"
                                   onClick={(e) => e.stopPropagation()}
                                   className={`my-1 p-3 rounded-xl border flex items-center gap-3 transition-all hover:opacity-95 active:scale-[0.98] select-none ${isMe
-                                      ? "bg-black/10 border-black/15 text-[#1C1C1C]"
-                                      : c("bg-gray-50 border-gray-200 text-gray-900", "bg-zinc-800/90 border-zinc-700 text-gray-100")
+                                    ? "bg-black/10 border-black/15 text-[#1C1C1C]"
+                                    : c("bg-gray-50 border-gray-200 text-gray-900", "bg-zinc-800/90 border-zinc-700 text-gray-100")
                                     }`}
                                   title={`Download ${fileName}`}
                                 >
                                   <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 shadow-xs ${isPdf
-                                      ? "bg-red-500/20 text-red-600 dark:text-red-400"
-                                      : isZip
-                                        ? "bg-amber-500/20 text-amber-600 dark:text-amber-400"
-                                        : isDoc
-                                          ? "bg-blue-500/20 text-blue-600 dark:text-blue-400"
-                                          : isMe
-                                            ? "bg-black/15 text-[#1C1C1C]"
-                                            : "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+                                    ? "bg-red-500/20 text-red-600 dark:text-red-400"
+                                    : isZip
+                                      ? "bg-amber-500/20 text-amber-600 dark:text-amber-400"
+                                      : isDoc
+                                        ? "bg-blue-500/20 text-blue-600 dark:text-blue-400"
+                                        : isMe
+                                          ? "bg-black/15 text-[#1C1C1C]"
+                                          : "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
                                     }`}>
                                     {isPdf ? (
                                       <FileText className="w-5 h-5 stroke-[2.2]" />
@@ -5364,14 +5372,14 @@ export default function ChatPage() {
                             setShowInputEmojiPicker(false);
                           }}
                           className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer shadow-xs active:scale-95 ${activeDesktopPopup === "stickers"
-                              ? c(
-                                "bg-[#523cc0] text-white shadow-md ring-2 ring-[#523cc0]/30 scale-105",
-                                "bg-[#9f8dff] text-zinc-950 shadow-md ring-2 ring-[#9f8dff]/40 scale-105"
-                              )
-                              : c(
-                                "bg-white/95 hover:bg-white text-[#523cc0] border border-gray-200/90 shadow-[0_1px_3px_rgba(0,0,0,0.08)] backdrop-blur-md hover:scale-105",
-                                "bg-[#242424]/90 hover:bg-[#2c2c2c] text-[#b5a7ff] border border-zinc-800 shadow-xs backdrop-blur-md hover:scale-105"
-                              )
+                            ? c(
+                              "bg-[#523cc0] text-white shadow-md ring-2 ring-[#523cc0]/30 scale-105",
+                              "bg-[#9f8dff] text-zinc-950 shadow-md ring-2 ring-[#9f8dff]/40 scale-105"
+                            )
+                            : c(
+                              "bg-white/95 hover:bg-white text-[#523cc0] border border-gray-200/90 shadow-[0_1px_3px_rgba(0,0,0,0.08)] backdrop-blur-md hover:scale-105",
+                              "bg-[#242424]/90 hover:bg-[#2c2c2c] text-[#b5a7ff] border border-zinc-800 shadow-xs backdrop-blur-md hover:scale-105"
+                            )
                             }`}
                           title="Choose a sticker"
                         >
@@ -5411,14 +5419,14 @@ export default function ChatPage() {
                             setShowInputEmojiPicker(false);
                           }}
                           className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer shadow-xs active:scale-95 ${activeDesktopPopup === "gifs"
-                              ? c(
-                                "bg-[#523cc0] text-white shadow-md ring-2 ring-[#523cc0]/30 scale-105",
-                                "bg-[#9f8dff] text-zinc-950 shadow-md ring-2 ring-[#9f8dff]/40 scale-105"
-                              )
-                              : c(
-                                "bg-white/95 hover:bg-white text-[#523cc0] border border-gray-200/90 shadow-[0_1px_3px_rgba(0,0,0,0.08)] backdrop-blur-md hover:scale-105",
-                                "bg-[#242424]/90 hover:bg-[#2c2c2c] text-[#b5a7ff] border border-zinc-800 shadow-xs backdrop-blur-md hover:scale-105"
-                              )
+                            ? c(
+                              "bg-[#523cc0] text-white shadow-md ring-2 ring-[#523cc0]/30 scale-105",
+                              "bg-[#9f8dff] text-zinc-950 shadow-md ring-2 ring-[#9f8dff]/40 scale-105"
+                            )
+                            : c(
+                              "bg-white/95 hover:bg-white text-[#523cc0] border border-gray-200/90 shadow-[0_1px_3px_rgba(0,0,0,0.08)] backdrop-blur-md hover:scale-105",
+                              "bg-[#242424]/90 hover:bg-[#2c2c2c] text-[#b5a7ff] border border-zinc-800 shadow-xs backdrop-blur-md hover:scale-105"
+                            )
                             }`}
                           title="Choose a GIF"
                         >
@@ -5779,6 +5787,7 @@ export default function ChatPage() {
           {/* Left Nav Rail (72px fixed) */}
           <DesktopNavRail
             activeTab={activeTab}
+            myId={myId}
             onSelectTab={(tab) => {
               setActiveTab(tab);
               if (tab === "chat") {
@@ -5830,6 +5839,10 @@ export default function ChatPage() {
               renderDesktopHome()
             ) : activeTab === "tools" ? (
               renderDesktopTools()
+            ) : activeTab === "love" && isKaruUser ? (
+              <div className="flex-1 h-full overflow-hidden flex flex-col">
+                <KaruLoveView myId={myId} darkMode={darkMode} />
+              </div>
             ) : selectedConversation === "karu" ? (
               renderConversation()
             ) : (

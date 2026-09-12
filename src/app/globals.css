@@ -241,3 +241,93 @@ textarea,
   -webkit-tap-highlight-color: transparent;
 }
 
+/* ─── Streak Modal Additions ─────────────────────────────────────────────── */
+
+/* Very subtle flame breathing — not distracting */
+@keyframes breath {
+  0%, 100% { transform: scale(1) rotate(-1deg); }
+  50%       { transform: scale(1.045) rotate(1deg); }
+}
+.animate-breath {
+  animation: breath 3.2s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* Countdown clock pulse */
+@keyframes countdown-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.7; transform: scale(0.92); }
+}
+.animate-countdown-pulse {
+  animation: countdown-pulse 2s ease-in-out infinite;
+}
+
+/* Streak number pop-in */
+@keyframes number-pop {
+  0%   { transform: scale(0.7); opacity: 0; }
+  70%  { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.animate-number-pop {
+  animation: number-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Progress track fill — triggered once on open */
+@keyframes progress-fill {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+.progress-animate {
+  transform-origin: left center;
+  animation: progress-fill 0.65s cubic-bezier(0.34, 1.2, 0.64, 1) 0.35s both;
+}
+
+/* Staggered reward row entrance */
+@keyframes row-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.reward-row-in {
+  animation: row-in 0.24s ease-out both;
+}
+
+/* Body scroll lock while streak modal is open */
+.streak-modal-open {
+  overflow: hidden !important;
+  touch-action: none;
+}
+
+/* Sheet drag handle pill */
+.sheet-handle {
+  width: 36px;
+  height: 4px;
+  border-radius: 9999px;
+  background: hsl(var(--muted-foreground) / 0.3);
+  margin: 0 auto;
+  flex-shrink: 0;
+}
+
+/* Thinner scrollbar inside streak modal */
+.streak-scroll::-webkit-scrollbar {
+  width: 3px;
+}
+.streak-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.streak-scroll::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.18);
+  border-radius: 9999px;
+}
+
+/* Reduced motion — disable all decorative animations */
+@media (prefers-reduced-motion: reduce) {
+  .animate-breath,
+  .animate-countdown-pulse,
+  .animate-number-pop,
+  .progress-animate,
+  .reward-row-in {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
