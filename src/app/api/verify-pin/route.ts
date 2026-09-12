@@ -35,13 +35,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ valid: false, error: "Invalid PIN format" }, { status: 400 });
     }
 
-    const nabinHash = process.env.NABIN_PIN_HASH;
-    const karuHash = process.env.KARU_PIN_HASH;
+    const nabinHash = process.env.NABIN_PIN_HASH || process.env.NABIN_PIN;
+    const karuHash = process.env.KARU_PIN_HASH || process.env.KARU_PIN;
 
     if (!nabinHash && !karuHash) {
-      console.error("[verify-pin] Neither NABIN_PIN_HASH nor KARU_PIN_HASH configured in environment.");
+      console.error("[verify-pin] No PIN environment variables configured (NABIN_PIN_HASH/NABIN_PIN or KARU_PIN_HASH/KARU_PIN).");
       return NextResponse.json(
-        { valid: false, error: "Authentication service unavailable" },
+        { valid: false, error: "Authentication service unavailable. Please configure PIN variables." },
         { status: 503 }
       );
     }

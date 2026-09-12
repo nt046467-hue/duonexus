@@ -126,10 +126,16 @@ export function safeCompare(a: string, b: string): boolean {
 export function verifyPinHash(candidatePin: string, storedHash?: string): boolean {
   if (!storedHash || typeof storedHash !== "string") return false;
   const pin = candidatePin.trim();
+  const cleanStored = storedHash.trim();
 
-  // scrypt format: scrypt$<salt>$<hash>
-  if (storedHash.startsWith("scrypt$")) {
-    const parts = storedHash.split("$");
+  // 1. Direct plaintext comparison (e.g. if NABIN_PIN=1432 or NABIN_PIN_HASH=1432 is set in Vercel)
+  if (safeCompare(pin, cleanStored)) {
+    return true;
+  }
+
+  // 2. scrypt format: scrypt$<salt>$<hash>
+  if (cleanStored.startsWith("scrypt$")) {
+    const parts = cleanStored.split("$");
     if (parts.length === 3) {
       const salt = parts[1];
       const target = parts[2];
@@ -142,7 +148,7 @@ export function verifyPinHash(candidatePin: string, storedHash?: string): boolea
     }
   }
 
-  // SHA-256 format: 64-char hex string
+  // 3. SHA-256 format: 64-char hex string
   const sha256Candidate = createHash("sha256").update(pin).digest("hex");
-  return safeCompare(sha256Candidate, storedHash.trim().toLowerCase());
+  return safeCompare(sha256Candidate, cleanStored.toLowerCase());
 }
