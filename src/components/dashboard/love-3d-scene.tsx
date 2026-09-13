@@ -4,6 +4,9 @@ import React, { Suspense, useRef, useEffect, useState, useCallback, Component, E
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useGLTF, useTexture, OrbitControls, Center, ContactShadows, useProgress } from "@react-three/drei";
 import * as THREE from "three";
+import { RomanticBokehBackground } from "./romantic-bokeh-background";
+
+export { RomanticBokehBackground };
 
 // ─── Detect mobile once ────────────────────────────────────────────────────────
 function getIsMobile() {
@@ -18,8 +21,10 @@ interface Love3DSceneProps {
   cameraPreset?: CameraPreset;
   isZoomed?: boolean;
   autoRotate?: boolean;
+  showBokeh?: boolean;
   onLoaded?: () => void;
   className?: string;
+  resetKey?: number;
 }
 
 // Romantic Progress Indicator
@@ -55,7 +60,9 @@ export function SceneLoadingIndicator() {
 // ─── 3D Proposal Model ────────────────────────────────────────────────────────
 function ProposalModel({ onLoaded, isMobile }: { onLoaded?: () => void; isMobile: boolean }) {
   const { scene } = useGLTF("/models/proposal.glb");
-  const baseColorTexture = useTexture("/textures/proposal_base_color.jpg");
+  const baseColorTexture = useTexture(
+    isMobile ? "/textures/proposal_base_color_2k.jpg" : "/textures/proposal_base_color.jpg"
+  );
 
   useEffect(() => {
     if (!baseColorTexture) return;
@@ -144,6 +151,9 @@ function SmoothOrbitViewer({
   reducedMotion = false,
   darkMode = true,
   isMobile = false,
+  resetKey = 0,
+  isInView = true,
+  showBokeh = true,
   onLoaded,
 }: {
   preset: CameraPreset;
@@ -151,6 +161,9 @@ function SmoothOrbitViewer({
   reducedMotion?: boolean;
   darkMode?: boolean;
   isMobile?: boolean;
+  resetKey?: number;
+  isInView?: boolean;
+  showBokeh?: boolean;
   onLoaded?: () => void;
 }) {
   const controlsRef = useRef<any>(null);
@@ -161,15 +174,17 @@ function SmoothOrbitViewer({
   const userInteractingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const prevPreset = useRef(preset);
+  const prevResetKey = useRef(resetKey);
   useEffect(() => {
-    if (prevPreset.current !== preset) {
+    if (prevPreset.current !== preset || prevResetKey.current !== resetKey) {
       prevPreset.current = preset;
+      prevResetKey.current = resetKey;
       const config = CAMERA_PRESETS[preset] || CAMERA_PRESETS.overview;
       targetCamPos.current.set(...config.pos);
       targetLookAt.current.set(...config.lookAt);
       isAnimatingPreset.current = true;
     }
-  }, [preset]);
+  }, [preset, resetKey]);
 
   // Lerp camera to preset — runs only while animating
   useFrame((_, delta) => {
@@ -201,10 +216,20 @@ function SmoothOrbitViewer({
     userInteractingTimer.current = setTimeout(() => setUserInteracting(false), 2500);
   }, []);
 
-  const shouldDrive = (autoRotate && !userInteracting && !reducedMotion) || userInteracting || isAnimatingPreset.current;
+  const shouldDrive = isInView && ((showBokeh && !reducedMotion) || (autoRotate && !userInteracting && !reducedMotion) || userInteracting || isAnimatingPreset.current);
 
   return (
     <>
+      {/* Romantic Bokeh Lights background layer around and behind couple */}
+      {showBokeh && (
+        <RomanticBokehBackground
+          count={isMobile ? 26 : 36}
+          reducedMotion={reducedMotion}
+          darkMode={darkMode}
+          enabled={showBokeh}
+        />
+      )}
+
       <ProposalModel onLoaded={onLoaded} isMobile={isMobile} />
 
       {/* Lighter shadow on mobile, skip expensive blur */}
@@ -299,11 +324,15 @@ export default function Love3DScene({
   cameraPreset = "overview",
   isZoomed = false,
   autoRotate = true,
+  showBokeh = true,
   onLoaded,
   className = "",
+  resetKey = 0,
 }: Love3DSceneProps) {
   const [reducedMotion, setReducedMotion] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [isInView, setIsInView] = useState(true);
+  const containerRef = useRef<HTMLDivElement>(null);
   const effectivePreset: CameraPreset = cameraPreset || (isZoomed ? "ring" : "overview");
 
   useEffect(() => {
@@ -315,6 +344,19 @@ export default function Love3DScene({
       mq.addEventListener("change", listener);
       return () => mq.removeEventListener("change", listener);
     }
+  }, []);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsInView(entry.isIntersecting);
+      },
+      { threshold: 0.05 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
   }, []);
 
   // Mobile GL: no antialias, no stencil, demand-driven frames
@@ -338,7 +380,7 @@ export default function Love3DScene({
 
   return (
     <WebGLSceneErrorBoundary>
-      <div className={`relative w-full h-full select-none ${className}`}>
+      <div ref={containerRef} className={`relative w-full h-full select-none ${className}`}>
         <Suspense fallback={<SceneLoadingIndicator />}>
           <Canvas
             camera={{ position: [0, 0.05, 2.1], fov: 38 }}
@@ -399,6 +441,9 @@ export default function Love3DScene({
               reducedMotion={reducedMotion}
               darkMode={darkMode}
               isMobile={isMobile}
+              resetKey={resetKey}
+              isInView={isInView}
+              showBokeh={showBokeh}
               onLoaded={onLoaded}
             />
           </Canvas>

@@ -23,5 +23,5 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules", "zip (1)", "duonexus-chat-interface-fixed"]
+  "exclude": ["node_modules", "zip (1)", "duonexus-chat-interface-fixed", "our-story"]
 }

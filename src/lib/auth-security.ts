@@ -12,9 +12,23 @@ interface RateLimitRecord {
 
 const rateLimitStore = new Map<string, RateLimitRecord>();
 
-const MAX_FAILED_ATTEMPTS = 5;
-const LOCKOUT_DURATION_MS = 5 * 60 * 1000; // 5 minutes lockout
-const ATTEMPT_WINDOW_MS = 5 * 60 * 1000; // 5 minute window
+const INITIAL_LOCKOUT_ATTEMPTS = 5;
+const ATTEMPT_WINDOW_MS = 15 * 60 * 1000; // 15 minute window
+
+/**
+ * Calculates progressive lockout duration based on consecutive failed attempts.
+ * 5 attempts: 30s
+ * 6 attempts: 60s
+ * 7 attempts: 120s
+ * 8+ attempts: 300s (5 min max)
+ */
+function calculateLockoutDurationMs(failedAttempts: number): number {
+  const excess = failedAttempts - INITIAL_LOCKOUT_ATTEMPTS;
+  if (excess <= 0) return 30 * 1000; // 30s
+  if (excess === 1) return 60 * 1000; // 60s
+  if (excess === 2) return 120 * 1000; // 2 min
+  return 300 * 1000; // 5 min
+}
 
 // Clean up stale rate limit entries every 10 minutes to prevent memory leaks
 if (typeof setInterval !== "undefined") {
@@ -30,37 +44,49 @@ if (typeof setInterval !== "undefined") {
 
 /**
  * Checks if an IP is currently rate-limited.
- * Returns { allowed: boolean, remainingMs: number }
+ * Returns { allowed: boolean, remainingMs: number, lockedUntil: number }
  */
-export function checkRateLimit(clientIp: string): { allowed: boolean; remainingMs: number } {
+export function checkRateLimit(clientIp: string): {
+  allowed: boolean;
+  remainingMs: number;
+  lockedUntil: number;
+} {
   const now = Date.now();
   const record = rateLimitStore.get(clientIp);
 
   if (!record) {
-    return { allowed: true, remainingMs: 0 };
+    return { allowed: true, remainingMs: 0, lockedUntil: 0 };
   }
 
   if (record.lockedUntil > now) {
-    return { allowed: false, remainingMs: record.lockedUntil - now };
+    return {
+      allowed: false,
+      remainingMs: Math.max(0, record.lockedUntil - now),
+      lockedUntil: record.lockedUntil,
+    };
   }
 
-  // If window expired, reset record
+  // If window expired and lockout expired, reset record
   if (now - record.firstAttemptAt > ATTEMPT_WINDOW_MS) {
     rateLimitStore.delete(clientIp);
-    return { allowed: true, remainingMs: 0 };
+    return { allowed: true, remainingMs: 0, lockedUntil: 0 };
   }
 
-  return { allowed: true, remainingMs: 0 };
+  return { allowed: true, remainingMs: 0, lockedUntil: 0 };
 }
 
 /**
- * Record a failed authentication attempt.
+ * Record a failed authentication attempt with progressive backoff.
  */
-export function recordFailedAttempt(clientIp: string): { locked: boolean; remainingMs: number } {
+export function recordFailedAttempt(clientIp: string): {
+  locked: boolean;
+  remainingMs: number;
+  lockedUntil: number;
+} {
   const now = Date.now();
   let record = rateLimitStore.get(clientIp);
 
-  if (!record || now - record.firstAttemptAt > ATTEMPT_WINDOW_MS) {
+  if (!record || (now > record.lockedUntil && now - record.firstAttemptAt > ATTEMPT_WINDOW_MS)) {
     record = {
       failedAttempts: 1,
       lockedUntil: 0,
@@ -70,14 +96,19 @@ export function recordFailedAttempt(clientIp: string): { locked: boolean; remain
     record.failedAttempts += 1;
   }
 
-  if (record.failedAttempts >= MAX_FAILED_ATTEMPTS) {
-    record.lockedUntil = now + LOCKOUT_DURATION_MS;
+  if (record.failedAttempts >= INITIAL_LOCKOUT_ATTEMPTS) {
+    const lockoutDuration = calculateLockoutDurationMs(record.failedAttempts);
+    record.lockedUntil = now + lockoutDuration;
     rateLimitStore.set(clientIp, record);
-    return { locked: true, remainingMs: LOCKOUT_DURATION_MS };
+    return {
+      locked: true,
+      remainingMs: lockoutDuration,
+      lockedUntil: record.lockedUntil,
+    };
   }
 
   rateLimitStore.set(clientIp, record);
-  return { locked: false, remainingMs: 0 };
+  return { locked: false, remainingMs: 0, lockedUntil: 0 };
 }
 
 /**

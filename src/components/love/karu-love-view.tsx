@@ -18,9 +18,11 @@ import {
   Quote,
   CheckCircle2,
   ArrowRight,
+  BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { CameraPreset } from "@/components/dashboard/love-3d-scene";
+import { OurStoryModal } from "./our-story-modal";
 
 // Romantic Loading Skeleton for Karu's 3D Scene
 function SceneSkeleton() {
@@ -52,14 +54,46 @@ interface KaruLoveViewProps {
   darkMode?: boolean;
 }
 
-export function KaruLoveView({ myId, darkMode = true }: KaruLoveViewProps) {
+export function KaruLoveViewComponent({ myId, darkMode = true }: KaruLoveViewProps) {
   const [isClient, setIsClient] = useState(false);
   const [effectiveRole, setEffectiveRole] = useState<string | null>(null);
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>("overview");
+  const [resetKey, setResetKey] = useState(0);
+  const [proposalPulse, setProposalPulse] = useState(false);
+  const [proposalToast, setProposalToast] = useState(false);
   const [autoRotate, setAutoRotate] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [revealedSecret, setRevealedSecret] = useState(false);
+  const [isStoryOpen, setIsStoryOpen] = useState(false);
   const [activeNoteTab, setActiveNoteTab] = useState<"letter" | "whyYou" | "promise">("letter");
+
+  // Sync with global theme (prop and documentElement dark class)
+  const [isDark, setIsDark] = useState<boolean>(darkMode);
+
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      const checkDark = () => {
+        setIsDark(document.documentElement.classList.contains("dark"));
+      };
+      checkDark();
+      const observer = new MutationObserver(checkDark);
+      observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+      return () => observer.disconnect();
+    }
+  }, []);
+
+  useEffect(() => {
+    setIsDark(darkMode);
+  }, [darkMode]);
+
+  const handleProposalClick = () => {
+    setCameraPreset("overview");
+    setResetKey((prev) => prev + 1);
+    setProposalPulse(true);
+    setProposalToast(true);
+    setTimeout(() => setProposalPulse(false), 1200);
+    setTimeout(() => setProposalToast(false), 2400);
+  };
 
   useEffect(() => {
     setIsClient(true);
@@ -77,24 +111,31 @@ export function KaruLoveView({ myId, darkMode = true }: KaruLoveViewProps) {
 
   return (
     <div
-      className={`relative w-full max-w-full flex flex-col font-sans transition-colors duration-300 overflow-x-hidden ${darkMode ? "bg-[#0c080d] text-rose-50" : "bg-[#fdfafb] text-zinc-900"
-        }`}
+      className={`relative w-full max-w-full flex flex-col font-sans transition-colors duration-300 overflow-x-hidden ${
+        isDark ? "bg-[#0c080d] text-rose-50" : "bg-[#fdfafb] text-zinc-900"
+      }`}
     >
-      {/* ════ AMBIENT ROMANTIC GLOWS (STRICTLY CONTAINED TO PREVENT HORIZONTAL SCROLL) ════ */}
+      {/* ════ AMBIENT ROMANTIC GLOWS (STRICTLY CONTAINED & OPTIMIZED FOR MOBILE GPU) ════ */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
         <div
-          className="absolute top-0 left-1/2 -translate-x-1/2 w-[340px] sm:w-[500px] h-[340px] sm:h-[500px] rounded-full bg-rose-600/10 blur-[100px] sm:blur-[130px]"
+          className="absolute top-0 left-1/2 -translate-x-1/2 w-[300px] sm:w-[500px] h-[300px] sm:h-[500px] rounded-full bg-rose-600/10 blur-[30px] sm:blur-[100px] opacity-40 sm:opacity-100"
         />
         <div
-          className="absolute bottom-0 right-0 w-[340px] sm:w-[600px] h-[340px] sm:h-[600px] rounded-full bg-pink-700/10 blur-[120px] sm:blur-[150px]"
+          className="absolute bottom-0 right-0 w-[300px] sm:w-[600px] h-[300px] sm:h-[600px] rounded-full bg-pink-700/10 blur-[35px] sm:blur-[120px] opacity-40 sm:opacity-100"
         />
       </div>
 
       {/* ════ HERO HEADER BAR ════ */}
-      <header className="relative z-10 w-full px-3.5 sm:px-8 pt-4 sm:pt-6 pb-3 sm:pb-4 border-b border-rose-500/15 bg-background/50 backdrop-blur-md flex items-center justify-between gap-3">
+      <header
+        className={`relative z-10 w-full px-3.5 sm:px-8 pt-4 sm:pt-6 pb-3 sm:pb-4 border-b flex items-center justify-between gap-3 ${
+          isDark
+            ? "border-rose-500/15 bg-background/50 backdrop-blur-none sm:backdrop-blur-md"
+            : "border-rose-200 bg-white/70 backdrop-blur-none sm:backdrop-blur-md shadow-xs"
+        }`}
+      >
         <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-rose-500 via-pink-500 to-amber-400 p-0.5 shadow-md shadow-rose-500/20 shrink-0">
-            <div className="w-full h-full rounded-[14px] bg-black/60 flex items-center justify-center">
+            <div className={`w-full h-full rounded-[14px] flex items-center justify-center ${isDark ? "bg-black/60" : "bg-white/90"}`}>
               <Heart className="w-4 h-4 sm:w-5 sm:h-5 text-rose-400 fill-rose-400 heart-gentle-pulse" />
             </div>
           </div>
@@ -103,8 +144,14 @@ export function KaruLoveView({ myId, darkMode = true }: KaruLoveViewProps) {
               <h1 className="text-base sm:text-xl font-black tracking-tight text-foreground truncate">
                 Just For You, Karu <span className="text-rose-500">❤️</span>
               </h1>
-              <span className="hidden sm:inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30 shrink-0">
-                Private & Eternal
+              <span
+                className={`hidden sm:inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${
+                  isDark
+                    ? "bg-rose-500/20 text-rose-300 border-rose-500/30"
+                    : "bg-rose-100 text-rose-700 border-rose-200"
+                }`}
+              >
+                Private &amp; Eternal
               </span>
             </div>
             <p className="text-[11px] sm:text-xs text-muted-foreground font-medium truncate">
@@ -119,7 +166,11 @@ export function KaruLoveView({ myId, darkMode = true }: KaruLoveViewProps) {
             variant="outline"
             size="sm"
             onClick={() => setAutoRotate((prev) => !prev)}
-            className="rounded-full h-8 px-2.5 sm:px-3 text-xs gap-1 border-rose-500/30 hover:bg-rose-500/15 bg-card/60 backdrop-blur-sm"
+            className={`rounded-full h-9 sm:h-8 px-3 text-xs gap-1 min-h-[44px] sm:min-h-[32px] cursor-pointer ${
+              isDark
+                ? "border-rose-500/30 hover:bg-rose-500/15 bg-card/60"
+                : "border-rose-200 hover:bg-rose-100 bg-white/80 text-zinc-800"
+            }`}
           >
             {autoRotate ? (
               <>
@@ -138,7 +189,11 @@ export function KaruLoveView({ myId, darkMode = true }: KaruLoveViewProps) {
             variant="outline"
             size="sm"
             onClick={() => setIsFullscreen((prev) => !prev)}
-            className="rounded-full h-8 px-2.5 sm:px-3 text-xs gap-1 border-rose-500/30 hover:bg-rose-500/15 bg-card/60 backdrop-blur-sm"
+            className={`rounded-full h-9 sm:h-8 px-3 text-xs gap-1 min-h-[44px] sm:min-h-[32px] cursor-pointer ${
+              isDark
+                ? "border-rose-500/30 hover:bg-rose-500/15 bg-card/60"
+                : "border-rose-200 hover:bg-rose-100 bg-white/80 text-zinc-800"
+            }`}
           >
             {isFullscreen ? (
               <>
@@ -159,32 +214,66 @@ export function KaruLoveView({ myId, darkMode = true }: KaruLoveViewProps) {
       <main className="relative z-10 flex-1 w-full max-w-7xl mx-auto p-3 sm:p-6 md:p-8 flex flex-col gap-6 sm:gap-8 pb-5 sm:pb-8">
         {/* TOP/SPLIT SECTION: 3D MODEL & LOVE HIGHLIGHT */}
         <div
-          className={`grid gap-6 items-stretch ${isFullscreen ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-12"
-            }`}
+          className={`grid gap-6 items-stretch ${
+            isFullscreen ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-12"
+          }`}
         >
           {/* ═══ 3D INTERACTIVE STAGE (lg:col-span-7) ═══ */}
           <div
-            className={`relative flex flex-col rounded-3xl overflow-hidden border border-rose-500/25 bg-gradient-to-b from-card/90 via-card/70 to-card/95 shadow-2xl backdrop-blur-xl ${isFullscreen
-              ? "lg:col-span-12 h-[85vh]"
-              : "lg:col-span-7 h-[390px] sm:h-[500px] lg:h-[640px]"
-              }`}
+            className={`relative flex flex-col rounded-3xl overflow-hidden border shadow-2xl backdrop-blur-none sm:backdrop-blur-xl ${
+              isDark
+                ? "border-rose-500/25 bg-[#140d13]/95 sm:bg-card/90"
+                : "border-rose-200 bg-white/95 sm:bg-card/90"
+            } ${
+              isFullscreen
+                ? "lg:col-span-12 h-[85vh]"
+                : "lg:col-span-7 h-[390px] sm:h-[500px] lg:h-[640px]"
+            }`}
           >
             {/* Top Stage Bar */}
-            <div className={`px-3 sm:px-4 py-2 sm:py-2.5 border-b border-rose-500/15 flex items-center justify-between gap-2 z-20 shrink-0 ${darkMode ? "bg-black/40" : "bg-rose-50/80 backdrop-blur-sm"}`}>
-              <span className={`px-2.5 py-1 rounded-full bg-rose-500/20 border border-rose-500/30 text-[11px] sm:text-xs font-bold flex items-center gap-1.5 shadow-xs shrink-0 ${darkMode ? "text-rose-200" : "text-rose-700"}`}>
-                <Stars className="w-3 h-3 text-amber-500" />
-                The Proposal
-              </span>
+            <div
+              className={`px-3 sm:px-4 py-2.5 border-b flex items-center justify-between gap-2 z-20 shrink-0 ${
+                isDark ? "border-rose-500/15 bg-black/40" : "border-rose-200 bg-rose-50/80"
+              }`}
+            >
+              <button
+                type="button"
+                onClick={handleProposalClick}
+                className={`px-2.5 sm:px-3 py-1 rounded-full border text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer select-none shrink-0 h-7 sm:h-7.5 ${
+                  cameraPreset === "overview" || proposalPulse
+                    ? "bg-rose-500 text-white border-rose-400 shadow-sm shadow-rose-500/25 ring-1.5 ring-rose-400/30"
+                    : isDark
+                    ? "bg-rose-500/20 border-rose-500/30 text-rose-200 hover:bg-rose-500/30"
+                    : "bg-rose-100 border-rose-300 text-rose-800 hover:bg-rose-200"
+                }`}
+                aria-label="The Proposal View"
+              >
+                <Stars
+                  className={`w-3 h-3 transition-transform duration-300 ${
+                    proposalPulse ? "text-amber-300 rotate-45 scale-110" : "text-amber-400"
+                  }`}
+                />
+                <span>The Proposal</span>
+                {proposalPulse && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping ml-0.5" />
+                )}
+              </button>
 
               {/* Camera Presets Selector (Overview & The Bouquet) */}
-              <div className={`flex items-center gap-1 p-0.5 sm:p-1 rounded-full shadow-inner border ${darkMode ? "bg-black/60 border-white/10" : "bg-white/70 border-rose-200"}`}>
+              <div
+                className={`flex items-center gap-0.5 sm:gap-1 p-0.5 rounded-full shadow-inner border h-7 sm:h-7.5 ${
+                  isDark ? "bg-black/60 border-white/10" : "bg-white border-rose-200 shadow-xs"
+                }`}
+              >
                 <button
                   type="button"
                   onClick={() => setCameraPreset("overview")}
-                  className={`px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-full text-[11px] sm:text-xs font-semibold transition-all ${
+                  className={`px-2.5 sm:px-3 rounded-full text-[11px] sm:text-xs font-semibold transition-all h-full flex items-center cursor-pointer ${
                     cameraPreset === "overview"
-                      ? "bg-rose-500 text-white shadow-sm"
-                      : darkMode ? "text-white/70 hover:text-white" : "text-zinc-500 hover:text-zinc-900"
+                      ? "bg-rose-500 text-white shadow-xs"
+                      : isDark
+                      ? "text-white/70 hover:text-white"
+                      : "text-zinc-600 hover:text-zinc-900"
                   }`}
                 >
                   Overview
@@ -192,10 +281,12 @@ export function KaruLoveView({ myId, darkMode = true }: KaruLoveViewProps) {
                 <button
                   type="button"
                   onClick={() => setCameraPreset("bouquet")}
-                  className={`px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-full text-[11px] sm:text-xs font-semibold transition-all ${
+                  className={`px-2.5 sm:px-3 rounded-full text-[11px] sm:text-xs font-semibold transition-all h-full flex items-center cursor-pointer ${
                     cameraPreset === "bouquet"
-                      ? "bg-rose-500 text-white shadow-sm"
-                      : darkMode ? "text-white/70 hover:text-white" : "text-zinc-500 hover:text-zinc-900"
+                      ? "bg-rose-500 text-white shadow-xs"
+                      : isDark
+                      ? "text-white/70 hover:text-white"
+                      : "text-zinc-600 hover:text-zinc-900"
                   }`}
                 >
                   Bouquet 🌹
@@ -206,15 +297,41 @@ export function KaruLoveView({ myId, darkMode = true }: KaruLoveViewProps) {
             {/* 3D Canvas Mount — Perfectly Centered */}
             <div className="relative flex-1 w-full h-full min-h-0">
               <DynamicLove3DScene
-                darkMode={darkMode}
+                darkMode={isDark}
                 cameraPreset={cameraPreset}
                 autoRotate={autoRotate}
+                resetKey={resetKey}
               />
+
+              {/* Instant Visual Toast on Click */}
+              <AnimatePresence>
+                {proposalToast && (
+                  <div className="absolute top-3 inset-x-0 z-30 flex justify-center pointer-events-none px-3">
+                    <motion.div
+                      initial={{ opacity: 0, y: -8, scale: 0.9 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -8, scale: 0.9 }}
+                      className="px-3.5 py-1.5 rounded-full bg-black/85 backdrop-blur-md border border-rose-400/40 text-rose-200 text-xs font-semibold shadow-xl flex items-center gap-1.5"
+                    >
+                      <Heart className="w-3.5 h-3.5 text-rose-400 fill-rose-400 animate-pulse" />
+                      <span>Proposal Moment Re-centered ✨</span>
+                    </motion.div>
+                  </div>
+                )}
+              </AnimatePresence>
             </div>
 
             {/* Bottom Interaction Hint Bar */}
-            <div className={`px-3 py-2 border-t flex items-center justify-center shrink-0 z-20 ${darkMode ? "bg-black/30 border-white/5" : "bg-rose-50/60 border-rose-200/60"}`}>
-              <span className={`text-[10px] sm:text-[11px] font-medium flex items-center gap-1.5 text-center ${darkMode ? "text-muted-foreground/80" : "text-zinc-500"}`}>
+            <div
+              className={`px-3 py-2 border-t flex items-center justify-center shrink-0 z-20 ${
+                isDark ? "bg-black/30 border-white/5" : "bg-rose-50/80 border-rose-200/80"
+              }`}
+            >
+              <span
+                className={`text-[10px] sm:text-[11px] font-medium flex items-center gap-1.5 text-center ${
+                  isDark ? "text-muted-foreground/80" : "text-zinc-600"
+                }`}
+              >
                 <Compass className="w-3 h-3 text-rose-500 shrink-0" />
                 Drag to rotate 360° around us • Pinch to zoom
               </span>
@@ -225,14 +342,21 @@ export function KaruLoveView({ myId, darkMode = true }: KaruLoveViewProps) {
           {!isFullscreen && (
             <div className="lg:col-span-5 flex flex-col gap-4">
               {/* Tabs to explore the story */}
-              <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-card/80 border border-rose-500/20 backdrop-blur-md">
+              <div
+                className={`flex items-center gap-1.5 p-1 rounded-2xl border backdrop-blur-none sm:backdrop-blur-md ${
+                  isDark ? "bg-card/80 border-rose-500/20" : "bg-white border-rose-200 shadow-xs"
+                }`}
+              >
                 <button
                   type="button"
                   onClick={() => setActiveNoteTab("letter")}
-                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${activeNoteTab === "letter"
+                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-[34px] cursor-pointer ${
+                    activeNoteTab === "letter"
                       ? "bg-rose-500 text-white shadow-md shadow-rose-500/25"
-                      : "text-muted-foreground hover:text-foreground"
-                    }`}
+                      : isDark
+                      ? "text-muted-foreground hover:text-foreground"
+                      : "text-zinc-600 hover:text-zinc-900"
+                  }`}
                 >
                   <Quote className="w-3.5 h-3.5" />
                   My Letter
@@ -240,10 +364,13 @@ export function KaruLoveView({ myId, darkMode = true }: KaruLoveViewProps) {
                 <button
                   type="button"
                   onClick={() => setActiveNoteTab("whyYou")}
-                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${activeNoteTab === "whyYou"
+                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-[34px] cursor-pointer ${
+                    activeNoteTab === "whyYou"
                       ? "bg-rose-500 text-white shadow-md shadow-rose-500/25"
-                      : "text-muted-foreground hover:text-foreground"
-                    }`}
+                      : isDark
+                      ? "text-muted-foreground hover:text-foreground"
+                      : "text-zinc-600 hover:text-zinc-900"
+                  }`}
                 >
                   <Heart className="w-3.5 h-3.5 fill-current" />
                   Why You
@@ -251,10 +378,13 @@ export function KaruLoveView({ myId, darkMode = true }: KaruLoveViewProps) {
                 <button
                   type="button"
                   onClick={() => setActiveNoteTab("promise")}
-                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${activeNoteTab === "promise"
+                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 min-h-[44px] sm:min-h-[34px] cursor-pointer ${
+                    activeNoteTab === "promise"
                       ? "bg-rose-500 text-white shadow-md shadow-rose-500/25"
-                      : "text-muted-foreground hover:text-foreground"
-                    }`}
+                      : isDark
+                      ? "text-muted-foreground hover:text-foreground"
+                      : "text-zinc-600 hover:text-zinc-900"
+                  }`}
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
                   My Vow
@@ -262,7 +392,11 @@ export function KaruLoveView({ myId, darkMode = true }: KaruLoveViewProps) {
               </div>
 
               {/* Dynamic Note Content Card */}
-              <div className="flex-1 rounded-3xl border border-rose-500/20 bg-card/80 backdrop-blur-xl p-5 sm:p-6 flex flex-col justify-between shadow-xl relative overflow-hidden">
+              <div
+                className={`flex-1 rounded-3xl border backdrop-blur-none sm:backdrop-blur-xl p-5 sm:p-6 flex flex-col justify-between shadow-xl relative overflow-hidden ${
+                  isDark ? "border-rose-500/20 bg-card/80" : "border-rose-200 bg-white"
+                }`}
+              >
                 <div
                   className="absolute -top-16 -right-16 w-36 h-36 rounded-full bg-rose-500/10 blur-2xl pointer-events-none"
                   aria-hidden="true"
@@ -334,7 +468,13 @@ export function KaruLoveView({ myId, darkMode = true }: KaruLoveViewProps) {
                           With you, I never have to pretend. You make loving you the most natural, effortless thing in the world.
                           Out of eight billion souls, my heart found its anchor in you, and I would choose you in every single lifetime.
                         </p>
-                        <p className={`p-3 rounded-2xl border text-xs sm:text-sm font-medium italic ${darkMode ? "bg-rose-950/25 border-rose-500/25 text-rose-300" : "bg-rose-100/80 border-rose-300/60 text-rose-700"}`}>
+                        <p
+                          className={`p-3 rounded-2xl border text-xs sm:text-sm font-medium italic ${
+                            isDark
+                              ? "bg-rose-950/25 border-rose-500/25 text-rose-300"
+                              : "bg-rose-100/80 border-rose-300/60 text-rose-800"
+                          }`}
+                        >
                           &ldquo;Holding this bouquet of red roses, on one knee looking up at you, my only thought was: thank you for existing, and thank you for choosing me.&rdquo; 🌹
                         </p>
                       </div>
@@ -389,15 +529,15 @@ export function KaruLoveView({ myId, darkMode = true }: KaruLoveViewProps) {
                   )}
                 </AnimatePresence>
 
-                {/* Bottom Secret Message Reveal Button */}
-                <div className="pt-5 border-t border-rose-500/20 mt-4">
+                {/* Bottom Action Area with Secret Whisper & New Our Story CTA */}
+                <div className="pt-5 border-t border-rose-500/20 mt-4 flex flex-col gap-2.5">
                   {revealedSecret ? (
                     <motion.div
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
                       className="p-3.5 rounded-2xl bg-gradient-to-r from-rose-500/20 via-pink-500/20 to-amber-500/15 border border-rose-500/35 text-center"
                     >
-                      <p className={`text-xs sm:text-sm font-semibold ${darkMode ? "text-rose-300" : "text-rose-700"}`}>
+                      <p className={`text-xs sm:text-sm font-semibold ${isDark ? "text-rose-300" : "text-rose-700"}`}>
                         &ldquo;Whenever you open DuoNexus, remember: there is someone out here whose entire world is brighter just because you exist in it.&rdquo; 💕
                       </p>
                     </motion.div>
@@ -405,12 +545,32 @@ export function KaruLoveView({ myId, darkMode = true }: KaruLoveViewProps) {
                     <button
                       type="button"
                       onClick={() => setRevealedSecret(true)}
-                      className={`w-full py-2.5 px-4 rounded-2xl border text-xs font-bold transition-all flex items-center justify-center gap-2 active:scale-98 shadow-xs ${darkMode ? "bg-rose-500/10 hover:bg-rose-500/20 border-rose-500/30 text-rose-400" : "bg-rose-100 hover:bg-rose-200 border-rose-300 text-rose-600"}`}
+                      className={`w-full py-2.5 px-4 rounded-2xl border text-xs font-bold transition-all flex items-center justify-center gap-2 active:scale-98 shadow-xs min-h-[44px] cursor-pointer ${
+                        isDark
+                          ? "bg-rose-500/10 hover:bg-rose-500/20 border-rose-500/30 text-rose-300"
+                          : "bg-rose-100 hover:bg-rose-200 border-rose-300 text-rose-700"
+                      }`}
+                      aria-label="Open Nabin's secret whisper"
                     >
                       <Gift className="w-4 h-4 animate-bounce" />
                       <span>Tap to open Nabin&apos;s secret whisper</span>
                     </button>
                   )}
+
+                  {/* New CTA: Experience Our Story (Issue 2) */}
+                  <button
+                    type="button"
+                    onClick={() => setIsStoryOpen(true)}
+                    className={`w-full py-2.5 px-4 rounded-2xl border text-xs font-bold transition-all flex items-center justify-center gap-2 active:scale-98 shadow-sm min-h-[44px] cursor-pointer ${
+                      isDark
+                        ? "bg-gradient-to-r from-rose-600/30 via-pink-600/25 to-amber-500/20 hover:from-rose-600/40 hover:to-pink-600/35 border-rose-500/40 text-rose-100"
+                        : "bg-gradient-to-r from-rose-500/15 via-pink-500/15 to-amber-500/15 hover:from-rose-500/25 hover:to-pink-500/25 border-rose-300 text-rose-900"
+                    }`}
+                    aria-label="Experience Our Story narrative"
+                  >
+                    <BookOpen className="w-4 h-4 text-rose-400" />
+                    <span>Experience Our Story 📖</span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -419,45 +579,71 @@ export function KaruLoveView({ myId, darkMode = true }: KaruLoveViewProps) {
 
         {/* ════ BOTTOM ROMANTIC MEMORY CARDS (RESPONSIVE GRID) ════ */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="p-5 rounded-3xl bg-card/75 border border-rose-500/15 backdrop-blur-md flex flex-col justify-between shadow-lg">
+          <div
+            className={`p-5 rounded-3xl border flex flex-col justify-between shadow-lg ${
+              isDark
+                ? "bg-card/75 border-rose-500/15 backdrop-blur-none sm:backdrop-blur-md"
+                : "bg-white border-rose-200 shadow-md"
+            }`}
+          >
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-rose-400 uppercase tracking-wider">
+              <span className={`text-xs font-bold uppercase tracking-wider ${isDark ? "text-rose-400" : "text-rose-700"}`}>
                 The Rose Bouquet
               </span>
               <span className="text-xl">🌹</span>
             </div>
-            <p className="text-xs sm:text-sm text-foreground/80 leading-relaxed">
+            <p className={`text-xs sm:text-sm leading-relaxed ${isDark ? "text-foreground/80" : "text-zinc-700"}`}>
               Every single red rose in that bouquet represents a memory of you that I keep locked in my heart.
             </p>
           </div>
 
-          <div className="p-5 rounded-3xl bg-card/75 border border-rose-500/15 backdrop-blur-md flex flex-col justify-between shadow-lg">
+          <div
+            className={`p-5 rounded-3xl border flex flex-col justify-between shadow-lg ${
+              isDark
+                ? "bg-card/75 border-rose-500/15 backdrop-blur-none sm:backdrop-blur-md"
+                : "bg-white border-rose-200 shadow-md"
+            }`}
+          >
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-rose-400 uppercase tracking-wider">
+              <span className={`text-xs font-bold uppercase tracking-wider ${isDark ? "text-rose-400" : "text-rose-700"}`}>
                 The Diamond Ring
               </span>
               <span className="text-xl">💍</span>
             </div>
-            <p className="text-xs sm:text-sm text-foreground/80 leading-relaxed">
+            <p className={`text-xs sm:text-sm leading-relaxed ${isDark ? "text-foreground/80" : "text-zinc-700"}`}>
               A little circle with no beginning and no end — just like the love I have for you.
             </p>
           </div>
 
-          <div className="p-5 rounded-3xl bg-card/75 border border-rose-500/15 backdrop-blur-md flex flex-col justify-between shadow-lg">
+          <div
+            className={`p-5 rounded-3xl border flex flex-col justify-between shadow-lg ${
+              isDark
+                ? "bg-card/75 border-rose-500/15 backdrop-blur-none sm:backdrop-blur-md"
+                : "bg-white border-rose-200 shadow-md"
+            }`}
+          >
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-rose-400 uppercase tracking-wider">
+              <span className={`text-xs font-bold uppercase tracking-wider ${isDark ? "text-rose-400" : "text-rose-700"}`}>
                 Our DuoNexus
               </span>
               <span className="text-xl">✨</span>
             </div>
-            <p className="text-xs sm:text-sm text-foreground/80 leading-relaxed">
+            <p className={`text-xs sm:text-sm leading-relaxed ${isDark ? "text-foreground/80" : "text-zinc-700"}`}>
               Our shared universe, where distance fades and every day feels like coming home to you.
             </p>
           </div>
         </div>
       </main>
+
+      {/* ════ FULL-PAGE OUR STORY MODAL (ISSUE 2, 3, 4) ════ */}
+      <OurStoryModal
+        isOpen={isStoryOpen}
+        onClose={() => setIsStoryOpen(false)}
+        darkMode={isDark}
+      />
     </div>
   );
 }
 
+export const KaruLoveView = React.memo(KaruLoveViewComponent);
 export default KaruLoveView;
