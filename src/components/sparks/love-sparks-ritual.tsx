@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Heart,
   Lock,
@@ -9,33 +9,25 @@ import {
   Calendar,
   CheckCircle2,
   Clock,
-  Archive,
   ChevronRight,
   Flame,
-  Share2,
 } from "lucide-react";
 import {
   doc,
-  getDoc,
   setDoc,
   updateDoc,
   onSnapshot,
   serverTimestamp,
-  collection,
-  addDoc,
-  query,
-  orderBy,
-  limit,
-  getDocs,
   Firestore,
 } from "firebase/firestore";
 import { format } from "date-fns";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { dailyAiConversationPrompt } from "@/ai/flows/daily-ai-conversation-prompt";
 import { toast } from "@/hooks/use-toast";
+import { SparklesSvg, SingleSparkSvg } from "@/components/ui/sparkles-svg";
 
 export interface SparkAnswer {
   text: string;
@@ -87,9 +79,9 @@ export function LoveSparksRitual({
   const [isGenerating, setIsGenerating] = useState(false);
   const [myAnswerText, setMyAnswerText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showCelebration, setShowCelebration] = useState(false);
 
-  const isArchivingRef = React.useRef(false);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const isArchivingRef = useRef(false);
 
   // Realtime subscription to today's spark document
   useEffect(() => {
@@ -111,10 +103,8 @@ export function LoveSparksRitual({
           const bothAnswered = Boolean(myAns && partnerAns);
 
           if (bothAnswered && !data.revealed) {
-            // Update to revealed
             try {
               await updateDoc(sparkRef, { revealed: true });
-              setShowCelebration(true);
             } catch (err) {
               console.warn("Failed to set revealed state:", err);
             }
@@ -166,13 +156,19 @@ export function LoveSparksRitual({
     return () => unsub();
   }, [firestore, todayDateStr, myId, partnerId, myName, partnerName]);
 
+  // Ensure card never scrolls internally (permanently cures clipped header)
+  useEffect(() => {
+    if (cardRef.current && cardRef.current.scrollTop !== 0) {
+      cardRef.current.scrollTop = 0;
+    }
+  }, [sparkData]);
+
   // Generate today's spark with rich couple context
   const handleGenerateTodaySpark = async () => {
     if (!firestore || isGenerating) return;
     setIsGenerating(true);
 
     try {
-      // Gather rich context from recent messages, memories, and key dates
       const recentChatExcerpts = messages
         .filter((m) => m.content && m.type === "text")
         .slice(-8)
@@ -227,7 +223,7 @@ export function LoveSparksRitual({
       });
     } catch (err) {
       console.error("Failed to generate spark:", err);
-      // Fallback
+      // Fallback prompt
       const sparkRef = doc(firestore, "sparks", todayDateStr);
       await setDoc(
         sparkRef,
@@ -262,6 +258,10 @@ export function LoveSparksRitual({
       });
 
       setMyAnswerText("");
+      if (cardRef.current) {
+        cardRef.current.scrollTop = 0;
+      }
+
       toast({
         title: "Answer Sealed with Love 🔒",
         description: "Your answer is locked until both of you answer!",
@@ -285,19 +285,56 @@ export function LoveSparksRitual({
   const isRevealed = sparkData?.revealed || (hasMyAnswer && hasPartnerAnswer);
 
   return (
-    <div className="w-full relative overflow-hidden rounded-3xl border border-pink-500/25 bg-gradient-to-br from-pink-500/10 via-purple-500/5 to-indigo-500/10 p-4 sm:p-6 backdrop-blur-xl shadow-xl">
-      {/* Background ambient glow */}
-      <div className="absolute -top-12 -right-12 w-44 h-44 rounded-full bg-pink-500/20 blur-3xl pointer-events-none" />
-      <div className="absolute -bottom-12 -left-12 w-44 h-44 rounded-full bg-purple-500/20 blur-3xl pointer-events-none" />
+    <div
+      ref={cardRef}
+      onScroll={(e) => {
+        // Prevent accidental internal scroll trapping that clips top header
+        if (e.currentTarget.scrollTop !== 0) {
+          e.currentTarget.scrollTop = 0;
+        }
+      }}
+      className="w-full relative overflow-hidden rounded-3xl border border-pink-500/25 bg-gradient-to-br from-pink-500/10 via-purple-500/5 to-indigo-500/10 p-4 sm:p-6 backdrop-blur-xl shadow-xl scroll-mt-20 scroll-mb-28"
+    >
+      {/* ─── Romantic Love Sparkles Decorative Layer (Non-Intrusive & Contained) ─── */}
+      <div
+        className="absolute inset-0 pointer-events-none overflow-hidden z-0 select-none"
+        aria-hidden="true"
+      >
+        <div className="absolute top-3 right-16 text-pink-400/40 animate-pulse">
+          <SingleSparkSvg size={15} />
+        </div>
+        <div
+          className="absolute top-1/3 left-3 text-purple-400/35 animate-pulse"
+          style={{ animationDelay: "1.2s" }}
+        >
+          <SingleSparkSvg size={18} />
+        </div>
+        <div
+          className="absolute bottom-5 right-6 text-pink-300/40 animate-pulse"
+          style={{ animationDelay: "1.8s" }}
+        >
+          <SparklesSvg className="w-5 h-5" />
+        </div>
+        <div
+          className="absolute bottom-1/4 left-1/4 text-rose-400/25 animate-pulse"
+          style={{ animationDelay: "2.4s" }}
+        >
+          <SingleSparkSvg size={12} />
+        </div>
 
-      {/* Top Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        {/* Ambient Glow Orbs */}
+        <div className="absolute -top-12 -right-12 w-48 h-48 rounded-full bg-pink-500/15 blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-12 -left-12 w-48 h-48 rounded-full bg-purple-500/15 blur-3xl pointer-events-none" />
+      </div>
+
+      {/* ─── Top Header: Icon, Title, Date, and Status Badge ─── */}
+      <div className="relative z-10 flex items-center justify-between gap-2.5 mb-4">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-500 to-rose-600 flex items-center justify-center text-white shadow-md shadow-pink-500/25 shrink-0">
             <Flame className="w-5 h-5 fill-white text-white" />
           </div>
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap sm:flex-nowrap">
               <h3 className="font-headline font-bold text-base sm:text-lg text-foreground truncate">
                 Daily Love Spark
               </h3>
@@ -307,32 +344,34 @@ export function LoveSparksRitual({
             </div>
             <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5 truncate">
               <Calendar className="w-3.5 h-3.5 shrink-0" />
-              {format(new Date(), "EEEE, MMMM d")}
+              <span>{format(new Date(), "EEEE, MMMM d")}</span>
             </p>
           </div>
         </div>
 
         {/* Status Pill */}
         {sparkData && (
-          <div className="text-xs font-semibold px-2.5 py-1 rounded-full flex items-center gap-1.5 shrink-0 bg-background/80 border border-border shadow-xs">
+          <div className="text-xs font-semibold px-2.5 py-1 rounded-full flex items-center gap-1.5 shrink-0 bg-background/85 border border-border shadow-xs backdrop-blur-sm">
             {isRevealed ? (
               <>
-                <Unlock className="w-3.5 h-3.5 text-emerald-400" />
+                <Unlock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                 <span className="text-emerald-400 font-medium">Revealed</span>
               </>
             ) : hasMyAnswer ? (
               <>
-                <Lock className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-                <span className="text-amber-400 font-medium">Waiting for {partnerName}</span>
+                <Lock className="w-3.5 h-3.5 text-amber-400 animate-pulse shrink-0" />
+                <span className="text-amber-400 font-medium truncate max-w-[120px] sm:max-w-none">
+                  Waiting for {partnerName}
+                </span>
               </>
             ) : hasPartnerAnswer ? (
               <>
-                <Clock className="w-3.5 h-3.5 text-blue-400 animate-bounce" />
+                <Clock className="w-3.5 h-3.5 text-blue-400 animate-bounce shrink-0" />
                 <span className="text-blue-400 font-medium">{partnerName} answered!</span>
               </>
             ) : (
               <>
-                <Clock className="w-3.5 h-3.5 text-pink-400" />
+                <Clock className="w-3.5 h-3.5 text-pink-400 shrink-0" />
                 <span className="text-pink-400 font-medium">Unanswered</span>
               </>
             )}
@@ -340,9 +379,9 @@ export function LoveSparksRitual({
         )}
       </div>
 
-      {/* STATE 1: No Spark generated yet today */}
+      {/* ─── STATE 1: No Spark Generated Today ─── */}
       {!sparkData && (
-        <div className="text-center py-6 px-4 sm:px-6 bg-background/50 rounded-2xl border border-pink-500/15 shadow-sm space-y-4">
+        <div className="relative z-10 text-center py-6 px-4 sm:px-6 bg-background/50 rounded-2xl border border-pink-500/15 shadow-sm space-y-4">
           <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-tr from-pink-500/20 via-rose-500/15 to-purple-500/20 border border-pink-500/30 flex items-center justify-center text-pink-400 shadow-inner">
             <Heart className="w-7 h-7 fill-pink-400/40 animate-pulse" />
           </div>
@@ -359,7 +398,7 @@ export function LoveSparksRitual({
             <Button
               onClick={handleGenerateTodaySpark}
               disabled={isGenerating}
-              className="w-full sm:w-auto min-h-[50px] h-auto py-3 px-6 rounded-2xl bg-gradient-to-r from-rose-500 via-pink-500 to-purple-600 hover:from-rose-600 hover:to-purple-700 text-white font-bold text-sm sm:text-base shadow-lg shadow-pink-500/30 hover:shadow-pink-500/40 active:scale-[0.98] transition-all flex items-center justify-center gap-2.5"
+              className="w-full sm:w-auto min-h-[50px] h-auto py-3 px-6 rounded-2xl bg-gradient-to-r from-rose-500 via-pink-500 to-purple-600 hover:from-rose-600 hover:to-purple-700 text-white font-bold text-sm sm:text-base shadow-lg shadow-pink-500/30 hover:shadow-pink-500/40 active:scale-[0.98] transition-all flex items-center justify-center gap-2.5 cursor-pointer"
             >
               {isGenerating ? (
                 <>
@@ -381,25 +420,28 @@ export function LoveSparksRitual({
         </div>
       )}
 
-      {/* STATE 2: Spark exists */}
+      {/* ─── STATE 2: Spark Exists ─── */}
       {sparkData && (
-        <div className="space-y-4">
-          {/* Question Card */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-background/80 border border-pink-500/25 shadow-sm relative overflow-hidden">
+        <div className="relative z-10 space-y-3.5">
+          {/* Question Card: Always anchored and fully visible in normal document flow */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-background/85 border border-pink-500/25 shadow-sm relative overflow-hidden backdrop-blur-md">
             <div className="flex items-start gap-3">
-              <span className="text-2xl select-none leading-none mt-0.5 shrink-0">💬</span>
-              <p className="text-base sm:text-lg font-medium text-foreground leading-relaxed">
+              <span className="text-2xl select-none leading-none mt-0.5 shrink-0" aria-hidden="true">
+                💬
+              </span>
+              <p className="text-sm sm:text-base md:text-lg font-medium text-foreground leading-relaxed break-words">
                 {sparkData.question}
               </p>
             </div>
           </div>
 
-          {/* SIMULTANEOUS REVEAL AREA */}
+          {/* SIMULTANEOUS REVEAL / SEALED ANSWER / INPUT AREA */}
           {isRevealed ? (
-            /* BOTH REVEALED */
+            /* BOTH REVEALED STATE */
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              initial={{ opacity: 0, scale: 0.96 }}
               animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.3 }}
               className="space-y-3"
             >
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3.5 py-2.5 rounded-xl">
@@ -409,7 +451,7 @@ export function LoveSparksRitual({
                 {onOpenMemories && (
                   <button
                     onClick={onOpenMemories}
-                    className="hover:underline flex items-center gap-1 text-primary active:scale-95 transition-transform"
+                    className="hover:underline flex items-center gap-1 text-primary active:scale-95 transition-transform cursor-pointer"
                   >
                     View in Memories <ChevronRight className="w-3.5 h-3.5" />
                   </button>
@@ -426,7 +468,7 @@ export function LoveSparksRitual({
                     </Avatar>
                     <span className="text-xs font-bold text-foreground">{myName} (You)</span>
                   </div>
-                  <p className="text-sm text-foreground/90 leading-relaxed font-sans italic pl-2 border-l-2 border-primary/40">
+                  <p className="text-sm text-foreground/90 leading-relaxed font-sans italic pl-2 border-l-2 border-primary/40 break-words">
                     "{myAnswer?.text}"
                   </p>
                 </div>
@@ -440,7 +482,7 @@ export function LoveSparksRitual({
                     </Avatar>
                     <span className="text-xs font-bold text-foreground">{partnerName}</span>
                   </div>
-                  <p className="text-sm text-foreground/90 leading-relaxed font-sans italic pl-2 border-l-2 border-pink-500/40">
+                  <p className="text-sm text-foreground/90 leading-relaxed font-sans italic pl-2 border-l-2 border-pink-500/40 break-words">
                     "{partnerAnswer?.text}"
                   </p>
                 </div>
@@ -451,13 +493,13 @@ export function LoveSparksRitual({
               </p>
             </motion.div>
           ) : hasMyAnswer ? (
-            /* YOU ANSWERED, WAITING FOR PARTNER */
-            <div className="p-5 rounded-2xl bg-background/70 border border-amber-500/25 text-center space-y-3.5">
-              <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+            /* CURRENT USER ANSWERED, WAITING FOR PARTNER (SEALED STATE) */
+            <div className="p-5 rounded-2xl bg-background/75 border border-amber-500/30 text-center space-y-3.5 shadow-sm backdrop-blur-md">
+              <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-center text-amber-400">
                 <Lock className="w-6 h-6 animate-bounce" />
               </div>
               <div>
-                <h4 className="text-sm font-bold text-foreground">
+                <h4 className="text-sm sm:text-base font-bold text-foreground">
                   Your Answer is Sealed 🔒
                 </h4>
                 <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto leading-relaxed">
@@ -468,11 +510,13 @@ export function LoveSparksRitual({
               </div>
 
               {/* Show preview of my own sealed answer */}
-              <div className="p-3 bg-muted/40 rounded-xl max-w-md mx-auto text-left border border-border/70">
+              <div className="p-3.5 bg-muted/50 rounded-xl max-w-md mx-auto text-left border border-border/70">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-1">
                   Your submitted answer:
                 </span>
-                <p className="text-xs text-foreground/80 italic">"{myAnswer?.text}"</p>
+                <p className="text-xs sm:text-sm text-foreground/90 italic break-words">
+                  "{myAnswer?.text}"
+                </p>
               </div>
             </div>
           ) : (
@@ -491,23 +535,27 @@ export function LoveSparksRitual({
                   value={myAnswerText}
                   onChange={(e) => setMyAnswerText(e.target.value)}
                   onFocus={(e) => {
-                    // Smoothly scroll text area into view when mobile keyboard pops up
-                    setTimeout(() => {
-                      e.target.scrollIntoView({ behavior: "smooth", block: "center" });
-                    }, 250);
+                    const scroller = e.currentTarget.closest(".overflow-y-auto");
+                    if (scroller) {
+                      setTimeout(() => {
+                        const targetTop = e.currentTarget.getBoundingClientRect().top;
+                        const scrollerTop = scroller.getBoundingClientRect().top;
+                        scroller.scrollBy({ top: targetTop - scrollerTop - 120, behavior: "smooth" });
+                      }, 280);
+                    }
                   }}
-                  placeholder={`Write your secret answer here... (Neither sees the other's answer until both submit)`}
+                  placeholder="Write your secret answer here... (Neither sees the other's answer until both submit)"
                   className="min-h-[96px] bg-background/90 rounded-2xl border-pink-500/25 focus-visible:ring-pink-500/30 text-base sm:text-sm resize-none p-3.5 leading-relaxed text-left text-foreground dir-ltr"
                 />
 
                 <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 pt-0.5">
                   <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                    <Lock className="w-3 h-3 text-pink-400" /> Sealed until simultaneous reveal
+                    <Lock className="w-3 h-3 text-pink-400 shrink-0" /> Sealed until simultaneous reveal
                   </span>
                   <Button
                     onClick={handleSubmitAnswer}
                     disabled={!myAnswerText.trim() || isSubmitting}
-                    className="w-full sm:w-auto rounded-xl px-5 h-11 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white text-xs sm:text-sm font-bold shadow-md shadow-pink-500/20 gap-1.5 active:scale-95 transition-all"
+                    className="w-full sm:w-auto rounded-xl px-5 h-11 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white text-xs sm:text-sm font-bold shadow-md shadow-pink-500/20 gap-1.5 active:scale-95 transition-all cursor-pointer"
                   >
                     <Send className="w-3.5 h-3.5" />
                     {isSubmitting ? "Sealing..." : "Submit Answer"}

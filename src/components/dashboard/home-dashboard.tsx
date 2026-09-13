@@ -207,7 +207,10 @@ export function HomeDashboard({
   const isPartnerOnline = partnerPresence?.online;
 
   return (
-    <div className="w-full pb-32 sm:pb-24">
+    <div
+      className="w-full"
+      style={{ paddingBottom: "calc(7rem + env(safe-area-inset-bottom, 0px))" }}
+    >
       <div className="px-3.5 sm:px-5 space-y-3 sm:space-y-4 pt-1">
 
         {/* ═══ HERO BANNER — standalone couple card (never overlaps) ═══ */}

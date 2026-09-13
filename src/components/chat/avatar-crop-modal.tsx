@@ -3,8 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Slider } from "@/components/ui/slider";
-import { RotateCw, ZoomIn, Check, X, Undo } from "lucide-react";
+import { Check, X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface AvatarCropModalProps {
@@ -15,6 +14,11 @@ interface AvatarCropModalProps {
   isDark?: boolean;
 }
 
+interface Point {
+  x: number;
+  y: number;
+}
+
 export function AvatarCropModal({
   open,
   imageSrc,
@@ -23,155 +27,310 @@ export function AvatarCropModal({
   isDark = true,
 }: AvatarCropModalProps) {
   const [zoom, setZoom] = useState(1);
-  const [rotation, setRotation] = useState(0); // 0, 90, 180, 270
-  const [angle, setAngle] = useState(0); // -45 to +45 subtle angle tilt
-  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const panStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
+  const [imgSize, setImgSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+  const [viewportSize, setViewportSize] = useState<number>(260);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
 
-  // Reset controls when a new image is loaded
+  // Active pointers tracker for multi-touch (pinch-zoom + pan)
+  const pointersRef = useRef<Map<number, Point>>(new Map());
+  // Track previous positions for reliable delta computation on mobile
+  const prevPositionsRef = useRef<Map<number, Point>>(new Map());
+  const pinchStartDistRef = useRef<number | null>(null);
+  const pinchStartZoomRef = useRef<number>(1);
+  const lastPanRef = useRef<Point>({ x: 0, y: 0 });
+  const lastMidpointRef = useRef<Point | null>(null);
+
+  // Measure crop viewport diameter dynamically
+  useEffect(() => {
+    if (!open || !viewportRef.current) return;
+    const updateSize = () => {
+      if (viewportRef.current) {
+        const rect = viewportRef.current.getBoundingClientRect();
+        if (rect.width > 0) {
+          setViewportSize(rect.width);
+        }
+      }
+    };
+    updateSize();
+    const ro = new ResizeObserver(updateSize);
+    ro.observe(viewportRef.current);
+    return () => ro.disconnect();
+  }, [open]);
+
+  // Load natural image dimensions when imageSrc changes
+  useEffect(() => {
+    if (!imageSrc) return;
+    const img = new Image();
+    img.onload = () => {
+      setImgSize({ width: img.naturalWidth, height: img.naturalHeight });
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
+    };
+    img.src = imageSrc;
+  }, [imageSrc]);
+
+  // Reset state when opening
   useEffect(() => {
     if (open) {
       setZoom(1);
-      setRotation(0);
-      setAngle(0);
       setPan({ x: 0, y: 0 });
+      pointersRef.current.clear();
+      prevPositionsRef.current.clear();
+      pinchStartDistRef.current = null;
+      lastMidpointRef.current = null;
     }
-  }, [open, imageSrc]);
+  }, [open]);
 
-  const handleRotate90 = () => {
-    setRotation((r) => (r + 90) % 360);
+  // Helper to clamp pan boundaries so image NEVER reveals gaps or edges
+  const clampPan = useCallback(
+    (p: Point, currentZoom: number, d = viewportSize, size = imgSize): Point => {
+      if (!size.width || !size.height || d <= 0) return { x: 0, y: 0 };
+      const cover = Math.max(d / size.width, d / size.height);
+      const renderedW = size.width * cover * currentZoom;
+      const renderedH = size.height * cover * currentZoom;
+      const maxX = Math.max(0, (renderedW - d) / 2);
+      const maxY = Math.max(0, (renderedH - d) / 2);
+      return {
+        x: Math.max(-maxX, Math.min(maxX, p.x)),
+        y: Math.max(-maxY, Math.min(maxY, p.y)),
+      };
+    },
+    [viewportSize, imgSize]
+  );
+
+  // Wheel zoom listener (Desktop / Trackpad)
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el || !open) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const zoomDelta = -e.deltaY * 0.002;
+      setZoom((prevZoom) => {
+        const nextZoom = Math.max(1.0, Math.min(3.5, prevZoom + zoomDelta));
+        setPan((prevPan) => clampPan(prevPan, nextZoom));
+        return nextZoom;
+      });
+    };
+
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, [open, clampPan]);
+
+  // Calculate distance between two touch points
+  const getPointersDistance = (p1: Point, p2: Point) => {
+    return Math.hypot(p1.x - p2.x, p1.y - p2.y);
   };
 
-  const handleReset = () => {
-    setZoom(1);
-    setRotation(0);
-    setAngle(0);
-    setPan({ x: 0, y: 0 });
+  // Calculate midpoint between two touch points
+  const getPointersMidpoint = (p1: Point, p2: Point): Point => {
+    return {
+      x: (p1.x + p2.x) / 2,
+      y: (p1.y + p2.y) / 2,
+    };
   };
 
-  // Mouse & Touch Pan handlers
+  // Pointer Down (Mouse or 1/2 Fingers Touch)
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
-    setIsDragging(true);
-    dragStartRef.current = { x: e.clientX, y: e.clientY };
-    panStartRef.current = { ...pan };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  };
-
-  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!isDragging) return;
-    const dx = e.clientX - dragStartRef.current.x;
-    const dy = e.clientY - dragStartRef.current.y;
-    setPan({
-      x: panStartRef.current.x + dx,
-      y: panStartRef.current.y + dy,
-    });
-  };
-
-  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    setIsDragging(false);
+    const target = e.currentTarget;
     try {
-      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      target.setPointerCapture(e.pointerId);
     } catch {}
+
+    const pt = { x: e.clientX, y: e.clientY };
+    pointersRef.current.set(e.pointerId, pt);
+    prevPositionsRef.current.set(e.pointerId, pt);
+
+    const pts = Array.from(pointersRef.current.values());
+    if (pts.length === 1) {
+      lastPanRef.current = { ...pan };
+    } else if (pts.length === 2) {
+      pinchStartDistRef.current = getPointersDistance(pts[0], pts[1]);
+      pinchStartZoomRef.current = zoom;
+      lastMidpointRef.current = getPointersMidpoint(pts[0], pts[1]);
+      lastPanRef.current = { ...pan };
+    }
+  };
+
+  // Pointer Move (Drag or Pinch)
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!pointersRef.current.has(e.pointerId)) return;
+
+    const currentPt = { x: e.clientX, y: e.clientY };
+    const prevPt = prevPositionsRef.current.get(e.pointerId) ?? currentPt;
+
+    pointersRef.current.set(e.pointerId, currentPt);
+    prevPositionsRef.current.set(e.pointerId, currentPt);
+
+    const pts = Array.from(pointersRef.current.values());
+
+    if (pts.length === 1) {
+      // 1-finger / Mouse drag to pan — delta from last known position (works on touch too)
+      const dx = currentPt.x - prevPt.x;
+      const dy = currentPt.y - prevPt.y;
+
+      setPan((prevPan) => {
+        const nextPan = { x: prevPan.x + dx, y: prevPan.y + dy };
+        return clampPan(nextPan, zoom);
+      });
+    } else if (pts.length >= 2 && pinchStartDistRef.current !== null) {
+      // 2-finger Pinch to Zoom & Pan simultaneously
+      const newDist = getPointersDistance(pts[0], pts[1]);
+      const currentMid = getPointersMidpoint(pts[0], pts[1]);
+
+      const scaleRatio = newDist / (pinchStartDistRef.current || 1);
+      const nextZoom = Math.max(1.0, Math.min(3.5, pinchStartZoomRef.current * scaleRatio));
+
+      let nextPan = { ...pan };
+      if (lastMidpointRef.current) {
+        const dx = currentMid.x - lastMidpointRef.current.x;
+        const dy = currentMid.y - lastMidpointRef.current.y;
+        nextPan = { x: pan.x + dx, y: pan.y + dy };
+      }
+      lastMidpointRef.current = currentMid;
+
+      setZoom(nextZoom);
+      setPan(clampPan(nextPan, nextZoom));
+    }
+  };
+
+  // Pointer Up / Cancel
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    pointersRef.current.delete(e.pointerId);
+    prevPositionsRef.current.delete(e.pointerId);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
+
+    const remaining = Array.from(pointersRef.current.values());
+    if (remaining.length === 1) {
+      // Transitioning from 2-touch to 1-touch: reinitialize single drag tracking
+      pinchStartDistRef.current = null;
+      lastMidpointRef.current = null;
+      lastPanRef.current = { ...pan };
+      // Re-register prev positions for remaining pointer so next move has a valid prev
+      pointersRef.current.forEach((pt, id) => {
+        prevPositionsRef.current.set(id, pt);
+      });
+    } else if (remaining.length === 0) {
+      pinchStartDistRef.current = null;
+      lastMidpointRef.current = null;
+    }
+  };
+
+  // Double tap / double click to toggle zoom
+  const handleDoubleClick = () => {
+    if (zoom > 1.15) {
+      setZoom(1.0);
+      setPan({ x: 0, y: 0 });
+    } else {
+      const targetZoom = 1.6;
+      setZoom(targetZoom);
+      setPan((prev) => clampPan(prev, targetZoom));
+    }
   };
 
   // Render cropped circular image to canvas and export base64
   const handleSaveCrop = useCallback(() => {
-    if (!imageRef.current) return;
-    const img = imageRef.current;
+    if (!imageRef.current || !imgSize.width || !imgSize.height) return;
+    setIsSubmitting(true);
 
-    const CROP_SIZE = 400; // High resolution 400x400 output
-    const canvas = document.createElement("canvas");
-    canvas.width = CROP_SIZE;
-    canvas.height = CROP_SIZE;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    try {
+      const CROP_SIZE = 512; // Crisp, high resolution 512x512 square
+      const canvas = document.createElement("canvas");
+      canvas.width = CROP_SIZE;
+      canvas.height = CROP_SIZE;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
 
-    // Viewport preview circle is 220px on screen
-    const PREVIEW_SIZE = 220;
-    const scaleFactor = CROP_SIZE / PREVIEW_SIZE;
+      const d = viewportSize > 0 ? viewportSize : 260;
+      const scaleFactor = CROP_SIZE / d;
 
-    // Background fill
-    ctx.fillStyle = "#000000";
-    ctx.fillRect(0, 0, CROP_SIZE, CROP_SIZE);
+      // Fill background
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, CROP_SIZE, CROP_SIZE);
 
-    // Save context state
-    ctx.save();
+      ctx.save();
+      // Center canvas for transforms
+      ctx.translate(CROP_SIZE / 2, CROP_SIZE / 2);
 
-    // Center canvas for transforms
-    ctx.translate(CROP_SIZE / 2, CROP_SIZE / 2);
+      // Apply pan scaled up to output resolution
+      ctx.translate(pan.x * scaleFactor, pan.y * scaleFactor);
 
-    // Apply pan scaled up to output resolution
-    ctx.translate(pan.x * scaleFactor, pan.y * scaleFactor);
+      // Apply zoom
+      ctx.scale(zoom, zoom);
 
-    // Total rotation angle = 90deg steps + angle tilt
-    const totalRad = ((rotation + angle) * Math.PI) / 180;
-    ctx.rotate(totalRad);
+      // Calculate base cover dimensions
+      const cover = Math.max(d / imgSize.width, d / imgSize.height);
+      const drawW = imgSize.width * cover * scaleFactor;
+      const drawH = imgSize.height * cover * scaleFactor;
 
-    // Apply zoom
-    ctx.scale(zoom, zoom);
+      ctx.drawImage(imageRef.current, -drawW / 2, -drawH / 2, drawW, drawH);
+      ctx.restore();
 
-    // Draw the source image centered
-    // Calculate aspect ratio fit into preview area
-    const imgAspect = img.naturalWidth / img.naturalHeight;
-    let drawW: number;
-    let drawH: number;
-    if (imgAspect >= 1) {
-      drawH = PREVIEW_SIZE * scaleFactor;
-      drawW = drawH * imgAspect;
-    } else {
-      drawW = PREVIEW_SIZE * scaleFactor;
-      drawH = drawW / imgAspect;
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+      onCropComplete(dataUrl);
+      onClose();
+    } catch (err) {
+      console.error("Failed to crop image:", err);
+    } finally {
+      setIsSubmitting(false);
     }
-
-    ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
-
-    ctx.restore();
-
-    // Compress as clean JPEG at 0.88 quality (compact yet sharp)
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.88);
-    onCropComplete(dataUrl);
-    onClose();
-  }, [pan, rotation, angle, zoom, onCropComplete, onClose]);
+  }, [pan, zoom, imgSize, viewportSize, onCropComplete, onClose]);
 
   if (!open || !imageSrc) return null;
 
-  const totalAngle = rotation + angle;
+  // Calculate base display dimensions covering the circular viewport
+  const coverRatio =
+    imgSize.width && imgSize.height && viewportSize > 0
+      ? Math.max(viewportSize / imgSize.width, viewportSize / imgSize.height)
+      : 1;
+  const baseWidth = imgSize.width ? imgSize.width * coverRatio : viewportSize;
+  const baseHeight = imgSize.height ? imgSize.height * coverRatio : viewportSize;
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent
+        hideCloseButton={true}
         className={cn(
-          "max-w-md w-[92vw] sm:w-full rounded-3xl p-5 sm:p-6 border shadow-2xl select-none z-[130]",
+          "max-w-md w-[92vw] sm:w-full rounded-3xl p-5 sm:p-6 border shadow-2xl select-none z-[130] focus:outline-none",
           isDark
-            ? "bg-[#16181B] text-white border-zinc-800"
+            ? "bg-[#141416] text-white border-zinc-800"
             : "bg-white text-gray-900 border-gray-200"
         )}
       >
-        <DialogHeader className="flex flex-row items-center justify-between pb-2 border-b border-white/5">
-          <DialogTitle className="text-lg sm:text-xl font-bold">
+        {/* Header: Title + SINGLE clean accessible close button */}
+        <DialogHeader className="flex flex-row items-center justify-between pb-3 border-b border-white/10 dark:border-zinc-800/80">
+          <DialogTitle className="text-lg sm:text-xl font-bold tracking-tight">
             Adjust Profile Picture
           </DialogTitle>
           <button
             type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-white transition-colors"
+            aria-label="Close"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95"
           >
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5" />
           </button>
         </DialogHeader>
 
-        {/* Viewport Mask Zone */}
-        <div className="flex flex-col items-center justify-center my-2">
+        {/* Viewport Mask Zone (Modern Gesture Cropper) */}
+        <div className="flex flex-col items-center justify-center my-3 sm:my-4">
           <div
-            className="relative w-[240px] h-[240px] rounded-full overflow-hidden shadow-2xl border-4 border-emerald-500/80 cursor-grab active:cursor-grabbing touch-none bg-black flex items-center justify-center"
+            ref={viewportRef}
+            className="relative w-[min(72vw,280px)] h-[min(72vw,280px)] rounded-full overflow-hidden shadow-2xl border-4 border-emerald-500/80 cursor-grab active:cursor-grabbing touch-none select-none bg-black flex items-center justify-center"
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
+            onDoubleClick={handleDoubleClick}
+            role="region"
+            aria-label="Profile photo crop area. Drag to reposition, pinch or scroll to zoom."
           >
             {/* Image being manipulated */}
             <img
@@ -179,101 +338,41 @@ export function AvatarCropModal({
               src={imageSrc}
               alt="Crop target"
               draggable={false}
-              className="max-w-none pointer-events-none transition-transform duration-75 origin-center will-change-transform"
+              className="absolute pointer-events-none max-w-none will-change-transform select-none"
               style={{
-                width: "220px",
-                height: "220px",
-                objectFit: "contain",
-                transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom}) rotate(${totalAngle}deg)`,
+                width: `${baseWidth}px`,
+                height: `${baseHeight}px`,
+                left: "50%",
+                top: "50%",
+                marginLeft: `-${baseWidth / 2}px`,
+                marginTop: `-${baseHeight / 2}px`,
+                transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
+                transformOrigin: "center center",
               }}
             />
 
             {/* Subtle alignment crosshair overlay */}
             <div className="absolute inset-0 pointer-events-none border border-white/20 rounded-full" />
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-30">
+            <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-25">
               <div className="w-full h-px bg-white/40" />
               <div className="absolute h-full w-px bg-white/40" />
             </div>
           </div>
-          <p className="text-[11px] text-gray-400 mt-2">
-            Drag to reposition · Face will appear in this circle
+
+          <p className="text-xs text-muted-foreground mt-3 text-center">
+            Drag to reposition · Pinch or scroll to zoom
           </p>
         </div>
 
-        {/* Interactive Controls */}
-        <div className="space-y-3.5 px-2 pt-1">
-          {/* Zoom Slider */}
-          <div className="space-y-1">
-            <div className="flex items-center justify-between text-xs font-semibold">
-              <span className="flex items-center gap-1.5 text-gray-400">
-                <ZoomIn className="w-3.5 h-3.5" />
-                Zoom
-              </span>
-              <span className="text-emerald-400 font-mono">{zoom.toFixed(1)}x</span>
-            </div>
-            <Slider
-              value={[zoom]}
-              min={1}
-              max={3}
-              step={0.05}
-              onValueChange={([val]) => setZoom(val)}
-              className="cursor-pointer"
-            />
-          </div>
-
-          {/* Angle Tilt Slider (-45° to +45°) */}
-          <div className="space-y-1">
-            <div className="flex items-center justify-between text-xs font-semibold">
-              <span className="flex items-center gap-1.5 text-gray-400">
-                Angle Adjustment
-              </span>
-              <span className="text-emerald-400 font-mono">{angle > 0 ? `+${angle}°` : `${angle}°`}</span>
-            </div>
-            <Slider
-              value={[angle]}
-              min={-45}
-              max={45}
-              step={1}
-              onValueChange={([val]) => setAngle(val)}
-              className="cursor-pointer"
-            />
-          </div>
-
-          {/* Quick Buttons: Rotate 90° & Reset */}
-          <div className="flex items-center justify-between pt-1">
-            <button
-              type="button"
-              onClick={handleRotate90}
-              className={cn(
-                "px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 border transition-all active:scale-95 cursor-pointer",
-                isDark
-                  ? "bg-zinc-800/80 border-zinc-700 text-gray-200 hover:bg-zinc-700"
-                  : "bg-gray-100 border-gray-200 text-gray-800 hover:bg-gray-200"
-              )}
-            >
-              <RotateCw className="w-3.5 h-3.5" />
-              Rotate 90°
-            </button>
-
-            <button
-              type="button"
-              onClick={handleReset}
-              className="text-xs text-gray-400 hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
-            >
-              <Undo className="w-3 h-3" />
-              Reset
-            </button>
-          </div>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="flex items-center gap-2.5 pt-4 mt-2 border-t border-white/5">
+        {/* Action Buttons: Cancel and Set Photo */}
+        <div className="flex items-center gap-3 pt-3 border-t border-white/10 dark:border-zinc-800/80">
           <Button
             type="button"
             variant="outline"
             onClick={onClose}
+            disabled={isSubmitting}
             className={cn(
-              "flex-1 rounded-xl h-11 text-sm font-semibold",
+              "flex-1 rounded-2xl h-11 text-sm font-semibold transition-all",
               isDark
                 ? "border-zinc-700 text-gray-300 hover:bg-zinc-800"
                 : "border-gray-200 text-gray-700 hover:bg-gray-100"
@@ -284,10 +383,20 @@ export function AvatarCropModal({
           <Button
             type="button"
             onClick={handleSaveCrop}
-            className="flex-1 rounded-xl h-11 text-sm font-bold bg-emerald-500 hover:bg-emerald-600 text-white shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-1.5 active:scale-98 transition-all cursor-pointer"
+            disabled={isSubmitting}
+            className="flex-1 rounded-2xl h-11 text-sm font-bold bg-emerald-500 hover:bg-emerald-600 text-white shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 active:scale-98 transition-all cursor-pointer"
           >
-            <Check className="w-4 h-4 stroke-[3]" />
-            Set Photo
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Saving...</span>
+              </>
+            ) : (
+              <>
+                <Check className="w-4 h-4 stroke-[3]" />
+                <span>Set Photo</span>
+              </>
+            )}
           </Button>
         </div>
       </DialogContent>
