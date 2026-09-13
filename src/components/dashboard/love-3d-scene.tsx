@@ -24,8 +24,7 @@ export function SceneLoadingIndicator() {
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10 p-6 text-center bg-background/60 backdrop-blur-sm">
       <div className="relative mb-4">
-        <div className="w-14 h-14 rounded-full bg-rose-500/15 animate-ping absolute inset-0 opacity-70" />
-        <div className="w-14 h-14 rounded-full bg-gradient-to-tr from-rose-500/20 via-pink-500/20 to-amber-500/20 backdrop-blur-md border border-rose-500/30 flex items-center justify-center text-xl shadow-inner">
+        <div className="w-14 h-14 rounded-full bg-gradient-to-tr from-rose-500/20 via-pink-500/20 to-amber-500/20 backdrop-blur-md border border-rose-500/30 flex items-center justify-center text-xl shadow-inner heart-gentle-pulse">
           💖
         </div>
       </div>
@@ -49,8 +48,8 @@ export function SceneLoadingIndicator() {
 
 // 3D Proposal Model with Real Texture Preservation & Correct PBR Materials
 function ProposalModel({ onLoaded }: { onLoaded?: () => void }) {
-  // Load the exact GLB model
-  const { scene } = useGLTF("/b36171aa7181067d1a2dd85d645122bd.glb");
+  // Load the GLB model from the correct public/models path
+  const { scene } = useGLTF("/models/proposal.glb");
   
   // Explicitly load the authentic base color texture to guarantee 100% color accuracy
   const baseColorTexture = useTexture("/textures/proposal_base_color.jpg");
@@ -212,12 +211,11 @@ function SmoothOrbitViewer({
         color="#0f070b"
       />
 
-      {/* Real Full 360° Orbit Controls — NO polar restrictions, full top-to-bottom freedom */}
+      {/* Real Full 360° Orbit Controls — Locked to Center (NO panning off screen), full top-to-bottom freedom */}
       <OrbitControls
         ref={controlsRef}
         target={[0, 0, 0]}
-        enablePan={true}
-        panSpeed={0.8}
+        enablePan={false}
         enableZoom={true}
         zoomSpeed={0.95}
         enableRotate={true}
@@ -298,7 +296,7 @@ export default function Love3DScene({
 
   return (
     <WebGLSceneErrorBoundary>
-      <div className={`relative w-full h-full select-none touch-none ${className}`}>
+      <div className={`relative w-full h-full select-none ${className}`}>
         <Suspense fallback={<SceneLoadingIndicator />}>
           <Canvas
             camera={{ position: [0, 0.05, 2.1], fov: 38 }}
@@ -311,7 +309,7 @@ export default function Love3DScene({
               outputColorSpace: THREE.SRGBColorSpace,
             }}
             aria-label="3D Proposal Scene: Nabin & Karu"
-            className="w-full h-full cursor-grab active:cursor-grabbing focus:outline-none"
+            className="w-full h-full cursor-grab active:cursor-grabbing focus:outline-none touch-none"
           >
             {/* ════ NATURAL REALISTIC STUDIO LIGHTING ════ */}
             {/* 1. Neutral balanced ambient light — reveals authentic fabric, hair and skin colors */}
@@ -380,5 +378,5 @@ export default function Love3DScene({
 }
 
 // Preload the GLB model and texture
-useGLTF.preload("/b36171aa7181067d1a2dd85d645122bd.glb");
+useGLTF.preload("/models/proposal.glb");
 useTexture.preload("/textures/proposal_base_color.jpg");

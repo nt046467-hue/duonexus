@@ -714,7 +714,7 @@ export function StreakModal({
             ref={modalRef}
             role="dialog"
             aria-modal="true"
-            aria-label={`Streak & Rewards — ${streak} Days Strong`}
+            aria-label={streak > 0 ? `Streak & Rewards — ${streak} Days Strong` : "Streak & Rewards — Streak Reset"}
             variants={sheetVariants}
             initial="hidden"
             animate="visible"
@@ -820,10 +820,10 @@ export function StreakModal({
                   )}
                   <div className="text-left">
                     <div className="text-base font-bold text-foreground/90 leading-tight">
-                      Days
+                      {streak === 0 ? "Days" : streak === 1 ? "Day" : "Days"}
                     </div>
                     <div className="text-sm font-semibold text-orange-400 leading-tight">
-                      Strong 🔥
+                      {streak === 0 ? "Reignite 🔥" : "Strong 🔥"}
                     </div>
                   </div>
                 </div>
@@ -833,19 +833,27 @@ export function StreakModal({
                   <span
                     className={cn(
                       "text-[11px] font-extrabold uppercase tracking-wider px-3 py-1 rounded-full border",
-                      currentTier.badgeClass
+                      streak === 0
+                        ? "bg-rose-500/20 text-rose-300 border-rose-500/30"
+                        : currentTier.badgeClass
                     )}
                   >
-                    {currentTier.name}
+                    {streak === 0 ? "Streak Paused" : currentTier.name}
                   </span>
                 </div>
 
                 {/* Subtitle */}
                 <p className="text-xs text-muted-foreground mt-1.5">
-                  {currentTier.level} ·{" "}
-                  <span className="font-semibold text-foreground/70">
-                    {partnerName}
-                  </span>
+                  {streak === 0 ? (
+                    <span>Chat with <strong className="text-foreground">{partnerName}</strong> to start a new streak! 💕</span>
+                  ) : (
+                    <>
+                      {currentTier.level} ·{" "}
+                      <span className="font-semibold text-foreground/70">
+                        {partnerName}
+                      </span>
+                    </>
+                  )}
                 </p>
               </motion.div>
             </div>
@@ -858,7 +866,9 @@ export function StreakModal({
                 <div
                   className={cn(
                     "rounded-2xl border p-3.5 transition-colors",
-                    chattedToday
+                    streak === 0
+                      ? "bg-rose-500/10 border-rose-500/25"
+                      : chattedToday
                       ? "bg-emerald-500/10 border-emerald-500/25"
                       : isCritical
                       ? "bg-red-500/10 border-red-500/30"
@@ -872,14 +882,21 @@ export function StreakModal({
                     <div
                       className={cn(
                         "w-9 h-9 rounded-xl flex items-center justify-center shrink-0",
-                        chattedToday
+                        streak === 0
+                          ? "bg-rose-500/20"
+                          : chattedToday
                           ? "bg-emerald-500/20"
                           : isCritical
                           ? "bg-red-500/20"
                           : "bg-amber-500/20"
                       )}
                     >
-                      {chattedToday ? (
+                      {streak === 0 ? (
+                        <Flame
+                          className="w-5 h-5 text-rose-400"
+                          strokeWidth={2.5}
+                        />
+                      ) : chattedToday ? (
                         <Shield
                           className="w-5 h-5 text-emerald-400"
                           strokeWidth={2.5}
@@ -904,19 +921,23 @@ export function StreakModal({
                         <span
                           className={cn(
                             "text-[12px] font-bold leading-tight",
-                            chattedToday
+                            streak === 0
+                              ? "text-rose-400"
+                              : chattedToday
                               ? "text-emerald-400"
                               : isCritical
                               ? "text-red-400"
                               : "text-amber-400"
                           )}
                         >
-                          {chattedToday
+                          {streak === 0
+                            ? "Streak Reset"
+                            : chattedToday
                             ? "Streak Secured Today"
                             : "Streak In Danger"}
                         </span>
                         {/* Live countdown — from existing timeLeft state */}
-                        {!chattedToday && (
+                        {!chattedToday && streak > 0 && (
                           <span
                             className={cn(
                               "text-[11px] font-black font-mono px-2 py-0.5 rounded-full shrink-0",
@@ -932,12 +953,16 @@ export function StreakModal({
                       <p
                         className={cn(
                           "text-[11px] mt-1 leading-snug",
-                          chattedToday
+                          streak === 0
+                            ? "text-rose-300/85"
+                            : chattedToday
                             ? "text-emerald-300/80"
                             : "text-amber-300/80"
                         )}
                       >
-                        {chattedToday
+                        {streak === 0
+                          ? `You didn't chat yesterday, so the streak reset. Send a message to ${partnerName} to ignite your new flame today! 🔥`
+                          : chattedToday
                           ? `You both connected today! Your flame is safe. Keep it going tomorrow.`
                           : `Send a message to ${partnerName} before midnight to keep your streak alive.`}
                       </p>

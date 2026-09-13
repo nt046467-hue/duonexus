@@ -601,6 +601,49 @@ export default function ChatPage() {
   const [selectedConversation, setSelectedConversation] = useState<string | null>("karu");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
+  // Tab navigation helper with URL and localStorage sync
+  const navigateToTab = (tabId: string) => {
+    setActiveTab(tabId);
+    if (tabId === "chat") {
+      setCurrentScreen("chat");
+    } else {
+      setCurrentScreen("main");
+    }
+    try {
+      localStorage.setItem("duonexus_active_tab", tabId);
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", tabId);
+      window.history.replaceState(null, "", url.toString());
+    } catch {}
+  };
+
+  // Restore active tab upon page load / refresh
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlTab = params.get("tab");
+      const savedTab = urlTab || localStorage.getItem("duonexus_active_tab");
+      const role = localStorage.getItem("duonexus_role");
+
+      if (savedTab && ["home", "tools", "chat", "love", "memories", "settings"].includes(savedTab)) {
+        if (savedTab === "love" && role !== "karu") {
+          // Non-karu cannot restore love tab
+          return;
+        }
+        setActiveTab(savedTab);
+        if (savedTab === "chat") {
+          setCurrentScreen("chat");
+        } else {
+          setCurrentScreen("main");
+        }
+        const url = new URL(window.location.href);
+        url.searchParams.set("tab", savedTab);
+        window.history.replaceState(null, "", url.toString());
+      }
+    } catch {}
+  }, []);
+
   // Theme state
   const [darkMode, setDarkMode] = useState<boolean>(true);
 
@@ -938,26 +981,66 @@ export default function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rawMessages, olderMessages, optimisticMessages, myId, user?.uid, finalMyName, myProfile?.hiddenMessages, hiddenMsgVersion]);
 
-  // Real Streak Calculation from messages & Firestore (no fake fallback 12)
+  // Real Streak Calculation from messages & Firestore (TikTok/Snapchat style with 1-day miss reset)
   const { realStreak, longestStreak, chattedToday, isStreakLoaded } = useMemo(() => {
     const isLoaded = !globalStatsLoading;
-    const savedStreak = typeof globalStats?.streak === "number" ? globalStats.streak : (isLoaded ? 1 : null);
-    const savedLongest = typeof globalStats?.longestStreak === "number" ? globalStats.longestStreak : (savedStreak ?? 1);
     const todayStr = format(new Date(), "yyyy-MM-dd");
+    const yesterdayStr = format(new Date(Date.now() - 86400000), "yyyy-MM-dd");
+    const lastChatDate = globalStats?.lastChatDate;
+    const rawSavedStreak = typeof globalStats?.streak === "number" ? globalStats.streak : null;
 
-    // Check if there are messages today
+    // Check if there are messages sent today
     const hasMessageToday = messages.some((m) => {
       const ms = m.timestamp?.seconds ? m.timestamp.seconds * 1000 : m.timestamp?.toMillis ? m.timestamp.toMillis() : 0;
       return ms > 0 && format(new Date(ms), "yyyy-MM-dd") === todayStr;
     });
 
+    let currentStreak = 0;
+
+    if (rawSavedStreak !== null) {
+      if (lastChatDate === todayStr || hasMessageToday) {
+        // Chatted today: streak is active
+        currentStreak = rawSavedStreak;
+      } else if (lastChatDate === yesterdayStr) {
+        // Chatted yesterday, not yet today: streak is still active in grace period today
+        currentStreak = rawSavedStreak;
+      } else {
+        // Missed 1 or more full days without chatting! Streak is broken and resets to 0!
+        currentStreak = 0;
+      }
+    } else if (isLoaded) {
+      currentStreak = hasMessageToday ? 1 : 0;
+    }
+
+    const savedLongest = typeof globalStats?.longestStreak === "number" ? globalStats.longestStreak : currentStreak;
+
     return {
-      realStreak: savedStreak !== null ? Math.max(1, savedStreak) : 1,
-      longestStreak: Math.max(savedLongest, savedStreak ?? 1),
-      chattedToday: hasMessageToday,
+      realStreak: currentStreak,
+      longestStreak: Math.max(savedLongest, currentStreak),
+      chattedToday: hasMessageToday || lastChatDate === todayStr,
       isStreakLoaded: isLoaded,
     };
   }, [messages, globalStats, globalStatsLoading]);
+
+  // Auto-sync broken streak to Firestore if 1 or more full days were missed
+  useEffect(() => {
+    if (!firestore || !globalStats || globalStatsLoading) return;
+    const todayStr = format(new Date(), "yyyy-MM-dd");
+    const yesterdayStr = format(new Date(Date.now() - 86400000), "yyyy-MM-dd");
+    const lastChatDate = globalStats.lastChatDate;
+
+    // If last chat was before yesterday, and stored streak is > 0, reset streak in Firestore to 0
+    if (lastChatDate && lastChatDate !== todayStr && lastChatDate !== yesterdayStr && globalStats.streak > 0) {
+      setDoc(
+        doc(firestore, "global_stats", "relationship"),
+        {
+          streak: 0,
+          lastUpdated: serverTimestamp(),
+        },
+        { merge: true }
+      ).catch((e) => console.warn("Streak reset sync error:", e));
+    }
+  }, [firestore, globalStats, globalStatsLoading]);
 
   const streak = realStreak;
 
@@ -2699,7 +2782,7 @@ export default function ChatPage() {
       >
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-pink-500 via-rose-500 to-purple-600 flex items-center justify-center shadow-md shadow-pink-500/20">
-            <Heart className="w-4 h-4 text-white fill-white" />
+            <Heart className="w-4 h-4 text-white fill-white heart-gentle-pulse" />
           </div>
           <div>
             <h1 className="text-base font-black text-white tracking-tight leading-none">DuoNexus</h1>
@@ -2728,7 +2811,7 @@ export default function ChatPage() {
       </div>
 
       <div
-        className="flex-1 min-h-0 overflow-y-auto w-full"
+        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden w-full max-w-full"
         style={{
           WebkitOverflowScrolling: "touch",
           overscrollBehavior: "contain",
@@ -2751,21 +2834,20 @@ export default function ChatPage() {
               isStreakLoaded={isStreakLoaded}
               onOpenStreakModal={() => setIsStreakModalOpen(true)}
               onNavigateToChat={() => {
-                setActiveTab("chat");
-                setCurrentScreen("chat");
+                navigateToTab("chat");
               }}
               onNavigateToTools={(subTab) => {
-                setActiveTab("tools");
+                navigateToTab("tools");
                 setToolsInitialTab(subTab || "calling");
               }}
-              onOpenMemories={() => setActiveTab("memories")}
+              onOpenMemories={() => navigateToTab("memories")}
               memories={memories || []}
               messages={messages || []}
               darkMode={darkMode}
             />
           </div>
         ) : activeTab === "love" && isKaruUser ? (
-          <div className="w-full min-h-full">
+          <div className="w-full">
             <KaruLoveView myId={myId} darkMode={darkMode} />
           </div>
         ) : activeTab === "chat" ? (
@@ -2831,7 +2913,11 @@ export default function ChatPage() {
                     <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.2 rounded-full bg-orange-500/20 text-orange-300">TikTok Flame</span>
                   </div>
                   <span className="text-sm font-semibold">
-                    {isStreakLoaded ? `${streak} Days Strong 🔥` : <span className="inline-block w-20 h-4 bg-white/20 animate-pulse rounded" />}
+                    {isStreakLoaded ? (
+                      streak > 0 ? `${streak} Day${streak > 1 ? "s" : ""} Strong 🔥` : "Streak Reset • Chat to Reignite 💕"
+                    ) : (
+                      <span className="inline-block w-20 h-4 bg-white/20 animate-pulse rounded" />
+                    )}
                   </span>
                 </div>
               </div>
@@ -3183,10 +3269,10 @@ export default function ChatPage() {
         )}
       </div>
 
-      {/* Bottom Curved 5-Tab Bar */}
-      <div className="w-full px-4 pt-3 relative shrink-0 z-20" style={{ paddingBottom: "max(1.8rem, env(safe-area-inset-bottom))" }}>
+      {/* Bottom Curved Tab Bar with Signature Elevated Notch Bounce Animation */}
+      <div className="w-full px-2.5 sm:px-4 pt-3 relative shrink-0 z-20" style={{ paddingBottom: "max(1.2rem, env(safe-area-inset-bottom))" }}>
         <div
-          className={`w-full h-[82px] rounded-[32px] relative flex justify-between items-center px-2 shadow-[0_20px_50px_-10px_rgba(0,0,0,0.3)] ${c(
+          className={`w-full max-w-lg mx-auto h-[74px] rounded-[28px] sm:rounded-[32px] relative flex justify-between items-center px-1.5 shadow-[0_20px_50px_-10px_rgba(0,0,0,0.35)] border border-white/10 ${c(
             "bg-white",
             "bg-[#18181A]"
           )}`}
@@ -3194,46 +3280,62 @@ export default function ChatPage() {
           {tabs.map((tab) => {
             const isActive = activeTab === tab.id;
             const Icon = tab.icon;
+            const isLove = tab.id === "love";
 
             return (
               <button
                 key={tab.id}
+                type="button"
                 onClick={() => {
-                  if (tab.id === "chat") {
-                    // Go directly into the conversation
-                    setActiveTab("chat");
-                    setCurrentScreen("chat");
-                  } else {
-                    setActiveTab(tab.id);
-                  }
+                  navigateToTab(tab.id);
                 }}
-                className="relative flex-1 flex flex-col items-center justify-center h-full group touch-manipulation cursor-pointer"
+                className="relative flex-1 min-w-0 flex flex-col items-center justify-center h-full group touch-manipulation cursor-pointer select-none"
               >
-                {/* Elevated Circle Notch Indicator */}
+                {/* Elevated Circle Notch Indicator with Iconic Elastic Spring */}
                 <div
-                  className={`absolute flex items-center justify-center transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] z-10 rounded-full ${isActive
-                    ? "-top-[30px] w-[64px] h-[64px] border-[6px]"
-                    : "top-3 w-8 h-8 border-[0px]"
-                    } ${isActive
-                      ? c("bg-white border-[#4834d4] shadow-md", "bg-[#18181A] border-[#0D0B1C] shadow-md")
+                  className={`absolute flex items-center justify-center transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] z-10 rounded-full ${
+                    isActive
+                      ? "-top-[24px] sm:-top-[28px] w-[50px] h-[50px] sm:w-[58px] sm:h-[58px] border-[5px] sm:border-[6px] shadow-lg"
+                      : "top-3 w-8 h-8 border-[0px] bg-transparent border-transparent"
+                  } ${
+                    isActive
+                      ? isLove
+                        ? "bg-[#18181A] border-[#0D0B1C] shadow-rose-500/25"
+                        : c("bg-white border-[#4834d4] shadow-md", "bg-[#18181A] border-[#0D0B1C] shadow-md")
                       : "bg-transparent border-transparent"
-                    }`}
+                  }`}
                 >
-                  <Icon
-                    className={`transition-colors duration-200 ${isActive ? "w-7 h-7" : "w-6 h-6"
-                      } ${isActive
-                        ? c("text-[#4834d4]", "text-indigo-400")
-                        : c("text-gray-400 group-hover:text-gray-600", "text-gray-500 group-hover:text-gray-300")
+                  {isLove ? (
+                    <Heart
+                      className={`transition-all duration-200 ${
+                        isActive
+                          ? "w-6 h-6 text-rose-500 fill-rose-500 heart-gentle-pulse"
+                          : "w-5 h-5 text-rose-400/80 fill-rose-400/20 group-hover:text-rose-400"
                       }`}
-                    strokeWidth={isActive ? 2.2 : 1.5}
-                  />
+                    />
+                  ) : (
+                    <Icon
+                      className={`transition-colors duration-200 ${
+                        isActive ? "w-6 h-6" : "w-5 h-5"
+                      } ${
+                        isActive
+                          ? c("text-[#4834d4]", "text-indigo-400")
+                          : c("text-gray-400 group-hover:text-gray-600", "text-gray-400 group-hover:text-gray-200")
+                      }`}
+                      strokeWidth={isActive ? 2.2 : 1.6}
+                    />
+                  )}
                 </div>
 
+                {/* Tab Label (Strictly bounded with truncate so words never overlap) */}
                 <span
-                  className={`absolute bottom-3 text-[12px] transition-all duration-200 ${isActive
-                    ? "font-bold " + c("text-gray-900", "text-white")
-                    : "font-medium " + c("text-gray-400", "text-gray-500")
-                    }`}
+                  className={`absolute bottom-2.5 sm:bottom-3 w-full px-1 text-center text-[10px] sm:text-[11px] leading-tight truncate transition-all duration-200 ${
+                    isActive
+                      ? isLove
+                        ? "font-bold text-rose-400"
+                        : "font-bold " + c("text-gray-900", "text-white")
+                      : "font-medium " + c("text-gray-400", "text-gray-400")
+                  }`}
                 >
                   {tab.label}
                 </span>
@@ -3306,7 +3408,11 @@ export default function ChatPage() {
             <div>
               <span className="text-xs font-bold uppercase tracking-wider text-orange-500 block">Love Streak</span>
               <span className={`text-lg font-bold font-headline ${c("text-gray-900", "text-white")}`}>
-                {isStreakLoaded ? `${streak} Days Strong` : <span className="inline-block w-24 h-5 bg-black/10 dark:bg-white/10 animate-pulse rounded" />}
+                {isStreakLoaded ? (
+                  streak > 0 ? `${streak} Day${streak > 1 ? "s" : ""} Strong` : "Streak Reset • Chat to Start 🔥"
+                ) : (
+                  <span className="inline-block w-24 h-5 bg-black/10 dark:bg-white/10 animate-pulse rounded" />
+                )}
               </span>
             </div>
           </div>
@@ -7158,3 +7264,4 @@ export default function ChatPage() {
     </>
   );
 }
+

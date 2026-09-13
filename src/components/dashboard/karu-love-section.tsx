@@ -11,7 +11,7 @@ function RomanticLoadingPlaceholder() {
     <div className="w-full h-[320px] sm:h-[380px] md:h-[440px] rounded-2xl bg-gradient-to-b from-pink-500/5 via-purple-500/5 to-transparent border border-pink-500/15 flex flex-col items-center justify-center p-6 text-center animate-pulse">
       <div className="relative mb-3">
         <div className="w-12 h-12 rounded-full bg-pink-500/20 flex items-center justify-center shadow-md">
-          <Heart className="w-5 h-5 text-pink-400 fill-pink-400 animate-bounce" />
+          <Heart className="w-5 h-5 text-pink-400 fill-pink-400 heart-gentle-pulse" />
         </div>
       </div>
       <p className="text-sm font-medium text-foreground/80 tracking-wide">
