@@ -115,7 +115,7 @@ self.addEventListener('notificationclick', function(event) {
   event.notification.close();
   const data = event.notification.data || {};
   const origin = self.location.origin;
-  const callId = data.callId;
+  const callId = data.callId; 
 
   const isCall = data.type === "incoming_call" || Boolean(callId);
   const isAccept = event.action === "accept";

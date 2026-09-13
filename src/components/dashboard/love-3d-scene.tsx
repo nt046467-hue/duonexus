@@ -1,9 +1,15 @@
 "use client";
 
-import React, { Suspense, useRef, useEffect, useState, Component, ErrorInfo, ReactNode } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import React, { Suspense, useRef, useEffect, useState, useCallback, Component, ErrorInfo, ReactNode } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useGLTF, useTexture, OrbitControls, Center, ContactShadows, useProgress } from "@react-three/drei";
 import * as THREE from "three";
+
+// ─── Detect mobile once ────────────────────────────────────────────────────────
+function getIsMobile() {
+  if (typeof window === "undefined") return false;
+  return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768;
+}
 
 export type CameraPreset = "overview" | "bouquet" | "ring" | "karu" | "full";
 
@@ -46,70 +52,80 @@ export function SceneLoadingIndicator() {
   );
 }
 
-// 3D Proposal Model with Real Texture Preservation & Correct PBR Materials
-function ProposalModel({ onLoaded }: { onLoaded?: () => void }) {
-  // Load the GLB model from the correct public/models path
+// ─── 3D Proposal Model ────────────────────────────────────────────────────────
+function ProposalModel({ onLoaded, isMobile }: { onLoaded?: () => void; isMobile: boolean }) {
   const { scene } = useGLTF("/models/proposal.glb");
-  
-  // Explicitly load the authentic base color texture to guarantee 100% color accuracy
   const baseColorTexture = useTexture("/textures/proposal_base_color.jpg");
 
   useEffect(() => {
-    if (baseColorTexture) {
-      baseColorTexture.colorSpace = THREE.SRGBColorSpace;
-      baseColorTexture.flipY = false;
-      baseColorTexture.wrapS = THREE.RepeatWrapping;
-      baseColorTexture.wrapT = THREE.RepeatWrapping;
+    if (!baseColorTexture) return;
+    baseColorTexture.colorSpace = THREE.SRGBColorSpace;
+    baseColorTexture.flipY = false;
+    baseColorTexture.wrapS = THREE.RepeatWrapping;
+    baseColorTexture.wrapT = THREE.RepeatWrapping;
+    // Mobile: skip mipmaps — faster GPU texture upload
+    if (isMobile) {
+      baseColorTexture.minFilter = THREE.LinearFilter;
+      baseColorTexture.generateMipmaps = false;
+    } else {
       baseColorTexture.minFilter = THREE.LinearMipmapLinearFilter;
-      baseColorTexture.magFilter = THREE.LinearFilter;
       baseColorTexture.generateMipmaps = true;
-      baseColorTexture.needsUpdate = true;
     }
-  }, [baseColorTexture]);
+    baseColorTexture.magFilter = THREE.LinearFilter;
+    baseColorTexture.needsUpdate = true;
+  }, [baseColorTexture, isMobile]);
 
   useEffect(() => {
-    if (scene && baseColorTexture) {
-      scene.traverse((child) => {
-        if ((child as THREE.Mesh).isMesh) {
-          const mesh = child as THREE.Mesh;
-          mesh.castShadow = true;
-          mesh.receiveShadow = true;
+    if (!scene || !baseColorTexture) return;
+    scene.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mesh = child as THREE.Mesh;
+        // Shadows only on desktop — shadow maps are very expensive on mobile
+        mesh.castShadow = !isMobile;
+        mesh.receiveShadow = !isMobile;
 
-          const mat = (mesh.material as THREE.MeshStandardMaterial) || new THREE.MeshStandardMaterial();
-          
-          // Pure white diffuse multiplier so the authentic texture colors show cleanly
-          mat.color.setRGB(1, 1, 1);
-          
-          // Bind the high-resolution texture map
-          mat.map = baseColorTexture;
-
-          // Natural fabric roughness and low metalness (real clothes & skin)
-          mat.roughness = 0.68;
-          mat.metalness = 0.04;
-
-          // Gentle dielectric specular reflection
-          if ((mat as any).specularColor) {
-            (mat as any).specularColor.setRGB(0.18, 0.18, 0.18);
-          }
-          if (typeof (mat as any).specularIntensity !== "undefined") {
-            (mat as any).specularIntensity = 0.25;
-          }
-
-          mat.needsUpdate = true;
-        }
-      });
-
-      if (onLoaded) {
-        onLoaded();
+        const mat = (mesh.material as THREE.MeshStandardMaterial) || new THREE.MeshStandardMaterial();
+        mat.color.setRGB(1, 1, 1);
+        mat.map = baseColorTexture;
+        mat.roughness = 0.68;
+        mat.metalness = 0.04;
+        // Disable envMap on mobile to save shader instructions
+        if (isMobile) mat.envMapIntensity = 0;
+        mat.needsUpdate = true;
       }
-    }
-  }, [scene, baseColorTexture, onLoaded]);
+    });
+    onLoaded?.();
+  }, [scene, baseColorTexture, onLoaded, isMobile]);
 
   return (
     <Center>
       <primitive object={scene} />
     </Center>
   );
+}
+
+// ─── Demand Renderer: pause frames when scene is idle ─────────────────────────
+// Biggest single mobile perf win: stops burning GPU at 60fps when nothing moves.
+function DemandRenderer({ shouldDrive }: { shouldDrive: boolean }) {
+  const { invalidate } = useThree();
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!shouldDrive) return;
+    let running = true;
+    const loop = () => {
+      if (!running) return;
+      invalidate();
+      rafRef.current = requestAnimationFrame(loop);
+    };
+    rafRef.current = requestAnimationFrame(loop);
+    return () => {
+      running = false;
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [shouldDrive, invalidate]);
+
+  return null;
 }
 
 // Target camera positions for each preset (centered at origin)
@@ -121,18 +137,20 @@ const CAMERA_PRESETS: Record<CameraPreset, { pos: [number, number, number]; look
   full: { pos: [0, 0.05, 2.65], lookAt: [0, 0, 0] },
 };
 
-// Smooth Orbit Viewer with Real Touch/Mouse Controls that never fight the user
+// ─── Smooth Orbit Viewer ──────────────────────────────────────────────────────
 function SmoothOrbitViewer({
   preset = "overview",
   autoRotate = true,
   reducedMotion = false,
   darkMode = true,
+  isMobile = false,
   onLoaded,
 }: {
   preset: CameraPreset;
   autoRotate?: boolean;
   reducedMotion?: boolean;
   darkMode?: boolean;
+  isMobile?: boolean;
   onLoaded?: () => void;
 }) {
   const controlsRef = useRef<any>(null);
@@ -140,9 +158,8 @@ function SmoothOrbitViewer({
   const targetCamPos = useRef(new THREE.Vector3(0, 0.05, 2.1));
   const targetLookAt = useRef(new THREE.Vector3(0, 0, 0));
   const [userInteracting, setUserInteracting] = useState(false);
-  const userInteractingTimer = useRef<NodeJS.Timeout | null>(null);
+  const userInteractingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // When preset prop changes, trigger smooth camera animation to target
   const prevPreset = useRef(preset);
   useEffect(() => {
     if (prevPreset.current !== preset) {
@@ -154,82 +171,86 @@ function SmoothOrbitViewer({
     }
   }, [preset]);
 
-  // Frame loop: smooth preset animation ONLY when triggered, instantly stops when user touches
+  // Lerp camera to preset — runs only while animating
   useFrame((_, delta) => {
     const controls = controlsRef.current;
-    if (!controls) return;
-
-    if (isAnimatingPreset.current && !userInteracting) {
-      const cam = controls.object as THREE.PerspectiveCamera;
-      const factor = Math.min(1, delta * 4.5);
-      cam.position.lerp(targetCamPos.current, factor);
-      controls.target.lerp(targetLookAt.current, factor);
-      controls.update();
-
-      if (
-        cam.position.distanceTo(targetCamPos.current) < 0.01 &&
-        controls.target.distanceTo(targetLookAt.current) < 0.01
-      ) {
-        cam.position.copy(targetCamPos.current);
-        controls.target.copy(targetLookAt.current);
-        isAnimatingPreset.current = false;
-      }
+    if (!controls || !isAnimatingPreset.current || userInteracting) return;
+    const cam = controls.object as THREE.PerspectiveCamera;
+    const factor = Math.min(1, delta * (isMobile ? 3.5 : 4.5));
+    cam.position.lerp(targetCamPos.current, factor);
+    controls.target.lerp(targetLookAt.current, factor);
+    controls.update();
+    if (
+      cam.position.distanceTo(targetCamPos.current) < 0.01 &&
+      controls.target.distanceTo(targetLookAt.current) < 0.01
+    ) {
+      cam.position.copy(targetCamPos.current);
+      controls.target.copy(targetLookAt.current);
+      isAnimatingPreset.current = false;
     }
   });
 
-  // User begins dragging / touching: cancel preset animation immediately
-  const handleStart = () => {
+  const handleStart = useCallback(() => {
     isAnimatingPreset.current = false;
     setUserInteracting(true);
-    if (userInteractingTimer.current) {
-      clearTimeout(userInteractingTimer.current);
-    }
-  };
+    if (userInteractingTimer.current) clearTimeout(userInteractingTimer.current);
+  }, []);
 
-  // User releases touch / mouse: resume gentle auto-rotate after 2.5s
-  const handleEnd = () => {
-    if (userInteractingTimer.current) {
-      clearTimeout(userInteractingTimer.current);
-    }
-    userInteractingTimer.current = setTimeout(() => {
-      setUserInteracting(false);
-    }, 2500);
-  };
+  const handleEnd = useCallback(() => {
+    if (userInteractingTimer.current) clearTimeout(userInteractingTimer.current);
+    userInteractingTimer.current = setTimeout(() => setUserInteracting(false), 2500);
+  }, []);
+
+  const shouldDrive = (autoRotate && !userInteracting && !reducedMotion) || userInteracting || isAnimatingPreset.current;
 
   return (
     <>
-      {/* 3D Model Centered at Origin */}
-      <ProposalModel onLoaded={onLoaded} />
+      <ProposalModel onLoaded={onLoaded} isMobile={isMobile} />
 
-      {/* Floor Contact Shadow under feet */}
-      <ContactShadows
-        position={[0, -0.48, 0]}
-        opacity={darkMode ? 0.45 : 0.25}
-        scale={3.6}
-        blur={2.4}
-        far={1.6}
-        color="#0f070b"
-      />
+      {/* Lighter shadow on mobile, skip expensive blur */}
+      {isMobile ? (
+        <ContactShadows
+          position={[0, -0.48, 0]}
+          opacity={0.18}
+          scale={2.5}
+          blur={1.2}
+          far={1.0}
+          frames={1}
+          color="#0f070b"
+        />
+      ) : (
+        <ContactShadows
+          position={[0, -0.48, 0]}
+          opacity={darkMode ? 0.45 : 0.25}
+          scale={3.6}
+          blur={2.4}
+          far={1.6}
+          color="#0f070b"
+        />
+      )}
 
-      {/* Real Full 360° Orbit Controls — Locked to Center (NO panning off screen), full top-to-bottom freedom */}
+      {/* Demand renderer — stops burning GPU when idle */}
+      <DemandRenderer shouldDrive={shouldDrive} />
+
       <OrbitControls
         ref={controlsRef}
         target={[0, 0, 0]}
         enablePan={false}
         enableZoom={true}
-        zoomSpeed={0.95}
+        zoomSpeed={isMobile ? 0.7 : 0.95}
         enableRotate={true}
-        rotateSpeed={0.85}
+        rotateSpeed={isMobile ? 0.6 : 0.85}
         enableDamping={true}
-        dampingFactor={0.075}
+        dampingFactor={isMobile ? 0.14 : 0.075}
         minDistance={0.6}
         maxDistance={4.2}
         minPolarAngle={0.08}
         maxPolarAngle={Math.PI - 0.08}
-        autoRotate={autoRotate && !userInteracting && !reducedMotion && !isAnimatingPreset.current}
-        autoRotateSpeed={0.65}
+        autoRotate={autoRotate && !userInteracting && !reducedMotion}
+        autoRotateSpeed={isMobile ? 0.45 : 0.65}
         onStart={handleStart}
         onEnd={handleEnd}
+        touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_ROTATE }}
       />
     </>
   );
@@ -272,7 +293,7 @@ export class WebGLSceneErrorBoundary extends Component<{ children: ReactNode; fa
   }
 }
 
-// Main 3D Canvas Scene with Natural Realistic Romantic Studio Lighting & Real Touch Controls
+// ─── Main Canvas ──────────────────────────────────────────────────────────────
 export default function Love3DScene({
   darkMode = true,
   cameraPreset = "overview",
@@ -282,17 +303,38 @@ export default function Love3DScene({
   className = "",
 }: Love3DSceneProps) {
   const [reducedMotion, setReducedMotion] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const effectivePreset: CameraPreset = cameraPreset || (isZoomed ? "ring" : "overview");
 
   useEffect(() => {
+    setIsMobile(getIsMobile());
     if (typeof window !== "undefined" && window.matchMedia) {
-      const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-      setReducedMotion(mediaQuery.matches);
+      const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+      setReducedMotion(mq.matches);
       const listener = (e: MediaQueryListEvent) => setReducedMotion(e.matches);
-      mediaQuery.addEventListener("change", listener);
-      return () => mediaQuery.removeEventListener("change", listener);
+      mq.addEventListener("change", listener);
+      return () => mq.removeEventListener("change", listener);
     }
   }, []);
+
+  // Mobile GL: no antialias, no stencil, demand-driven frames
+  const glConfig = isMobile
+    ? {
+        antialias: false,
+        powerPreference: "high-performance" as const,
+        toneMapping: THREE.ACESFilmicToneMapping,
+        toneMappingExposure: 1.05,
+        outputColorSpace: THREE.SRGBColorSpace,
+        stencil: false,
+        alpha: false,
+      }
+    : {
+        antialias: true,
+        powerPreference: "high-performance" as const,
+        toneMapping: THREE.ACESFilmicToneMapping,
+        toneMappingExposure: 1.05,
+        outputColorSpace: THREE.SRGBColorSpace,
+      };
 
   return (
     <WebGLSceneErrorBoundary>
@@ -300,74 +342,63 @@ export default function Love3DScene({
         <Suspense fallback={<SceneLoadingIndicator />}>
           <Canvas
             camera={{ position: [0, 0.05, 2.1], fov: 38 }}
-            dpr={[1, 2]}
-            gl={{
-              antialias: true,
-              powerPreference: "high-performance",
-              toneMapping: THREE.ACESFilmicToneMapping,
-              toneMappingExposure: 1.05,
-              outputColorSpace: THREE.SRGBColorSpace,
-            }}
+            dpr={isMobile ? [1, 1.5] : [1, 2]}
+            gl={glConfig}
+            frameloop="demand"
             aria-label="3D Proposal Scene: Nabin & Karu"
             className="w-full h-full cursor-grab active:cursor-grabbing focus:outline-none touch-none"
+            style={{ touchAction: "none" }}
           >
-            {/* ════ NATURAL REALISTIC STUDIO LIGHTING ════ */}
-            {/* 1. Neutral balanced ambient light — reveals authentic fabric, hair and skin colors */}
-            <ambientLight intensity={0.85} color="#ffffff" />
+            {/* ════ LIGHTING — streamlined for mobile ════ */}
+            {/* Ambient — brighter on mobile to compensate for fewer fill lights */}
+            <ambientLight intensity={isMobile ? 1.1 : 0.85} color="#ffffff" />
 
-            {/* 2. Main Key Light — Soft warm daylight coming from upper right */}
+            {/* Main key light — shadows only on desktop */}
             <directionalLight
               position={[3, 4.5, 3.5]}
-              intensity={1.4}
+              intensity={isMobile ? 1.6 : 1.4}
               color="#fffcf5"
-              castShadow
-              shadow-mapSize={[1024, 1024]}
+              castShadow={!isMobile}
+              shadow-mapSize={[512, 512]}
               shadow-bias={-0.0001}
             />
 
-            {/* 3. Soft Sky Fill Light from upper left — lifts shadows without color wash */}
+            {/* Sky fill — both platforms */}
             <directionalLight
               position={[-3.5, 2.5, 2]}
-              intensity={0.8}
+              intensity={isMobile ? 0.6 : 0.8}
               color="#f4f7fc"
             />
 
-            {/* 4. Clean Backlight for silhouette depth */}
-            <directionalLight
-              position={[0, 3.5, -3]}
-              intensity={0.55}
-              color="#ffffff"
-            />
+            {/* Backlight — desktop only */}
+            {!isMobile && (
+              <directionalLight position={[0, 3.5, -3]} intensity={0.55} color="#ffffff" />
+            )}
 
-            {/* 5. Gentle Front Light — brings out the red roses and bouquet */}
+            {/* Front point — both platforms */}
             <pointLight
               position={[0, 0.5, 2]}
-              intensity={0.5}
+              intensity={isMobile ? 0.35 : 0.5}
               color="#fffcf5"
               distance={6}
             />
 
-            {/* 6. Underside fill light — illuminates model when viewed from below */}
-            <pointLight
-              position={[0, -1.2, 0]}
-              intensity={0.55}
-              color="#f8f4ef"
-              distance={5}
-            />
+            {/* Underside fill — desktop only */}
+            {!isMobile && (
+              <pointLight position={[0, -1.2, 0]} intensity={0.55} color="#f8f4ef" distance={5} />
+            )}
 
-            {/* 7. Low back fill — prevents pure black underside */}
-            <directionalLight
-              position={[0, -3, -2]}
-              intensity={0.35}
-              color="#ffffff"
-            />
+            {/* Low back fill — desktop only */}
+            {!isMobile && (
+              <directionalLight position={[0, -3, -2]} intensity={0.35} color="#ffffff" />
+            )}
 
-            {/* Real Interactive Orbit Controller */}
             <SmoothOrbitViewer
               preset={effectivePreset}
               autoRotate={autoRotate}
               reducedMotion={reducedMotion}
               darkMode={darkMode}
+              isMobile={isMobile}
               onLoaded={onLoaded}
             />
           </Canvas>
